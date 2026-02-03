@@ -1,10 +1,18 @@
+import os
 import sys
 import asyncio
+import logging
 import argparse
 
 from ..config import Config
 from ..tui import start_tui
 from ..engine import start_engine
+
+
+# Logging setup
+logging.basicConfig(format='[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logger = logging.getLogger('subconscious')
+logger.setLevel(os.getenv('LOG_LEVEL', 'DEBUG'))
 
 
 def main():
