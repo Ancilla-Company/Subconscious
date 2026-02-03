@@ -1,0 +1,29 @@
+[project]
+name = "subconscious"
+version = "0.1.0"
+description = "A distributed agentic engine"
+authors = [
+  { name = "Brian Branch", email = "you@example.com" }
+]
+dependencies = [
+  "pydantic-ai",
+  "ray",
+  "nats-py",
+  "fastapi",
+  "sqlalchemy",
+  "textual",
+  "openfga-sdk",
+  "pytest",
+  "pytest-asyncio"
+]
+requires-python = ">=3.10"
+
+[project.scripts]
+subconscious = "subconscious.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

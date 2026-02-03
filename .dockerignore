@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.venv
+venv
+
+# Build
+*.env
+dist/
+build/
+*.egg-info/
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Deployment
+deploy/
+manifests/
