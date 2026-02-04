@@ -13,6 +13,7 @@ dependencies = [
   "sqlalchemy",
   "textual",
   "openfga-sdk",
+  "pyyaml",
   "pytest",
   "pytest-asyncio"
 ]

@@ -34,7 +34,7 @@ Subconscious is an open sourced distributed agentic engine, capable of running m
   - Linux - apt-get
   - Docker - image
   - Podman - image
-  - Mobile - app (light client)
+  - Mobile - app (client)
 
 ### 3.3 Features & Libraries
 
