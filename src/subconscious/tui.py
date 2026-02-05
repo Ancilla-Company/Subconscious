@@ -1,138 +1,210 @@
-import asyncio
+import sys
+import cmd
 import logging
 import pathlib
-from typing import Optional
-from textual.app import App, ComposeResult
+import asyncio
+
+from .engine import start_engine
 from .config import Config, log_config, LOGO
-from textual.widgets import Header, Footer, RichLog, Input, Static
+
+# Platform specific non-blocking input check
+if sys.platform == 'win32':
+  try:
+    import msvcrt
+  except ImportError:
+    msvcrt = None # type: ignore
+  select = None # type: ignore
+  termios = None # type: ignore
+  tty = None # type: ignore
+else:
+  msvcrt = None # type: ignore
+  try:
+    import select
+    import termios
+    import tty
+  except ImportError:
+    select = None # type: ignore
+    termios = None # type: ignore
+    tty = None # type: ignore
+
 
 logger = logging.getLogger(__name__)
 
 
-class SelectableRichLog(RichLog):
-  """A RichLog that allows text selection and focus."""
-  ALLOW_SELECT = True
-  can_focus = True
+class SubconsciousCLI(cmd.Cmd):
+  """Command processor for Subconscious."""
+  intro = "Welcome to Subconscious! Type 'help' or '?' to list commands.\nPress any key to interrupt streaming output."
+  prompt = "\n[You] "
 
-class SubconsciousApp(App):
-  """A Textual app for Subconscious."""
-
-  TITLE = "Subconscious"
-  SUB_TITLE = "Distributed Agentic Engine"
-
-  CSS = """
-  SelectableRichLog {
-    height: 1fr;
-    border: double $accent;
-    background: $surface;
-    color: $text;
-    margin: 0 2;
-    padding: 1 2;
-    scrollbar-gutter: stable;
-  }
-
-  SelectableRichLog:focus {
-    border: double $primary;
-  }
-
-  Input {
-    margin: 1 2;
-    border: tall $accent;
-  }
-  """
-
-  def __init__(self, config: Config, **kwargs):
-    super().__init__(**kwargs)
+  def __init__(self, config: Config):
+    super().__init__()
     self.config = config
-    self.is_setup_mode = False
+    self.should_exit = False
+    self.last_chat_input = None
 
-  def compose(self) -> ComposeResult:
-    yield Header()
-    log = SelectableRichLog(id="main_log", wrap=True, highlight=True, markup=True)
-    log.can_focus = True
-    yield log
-    yield Input(placeholder="Type a message...", id="main_input")
-    yield Footer()
+  def do_quit(self, arg):
+    """Quit the application."""
+    self.should_exit = True
+    return True
 
-  def on_mount(self) -> None:
-    if not self.config.exists():
-      self.start_setup_flow()
-    else:
-      self.config.load()
-      self.initialize_ui(show_logo=True)
+  def do_exit(self, arg):
+    """Exit the application."""
+    self.should_exit = True
+    return True
 
-  def start_setup_flow(self) -> None:
-    """ Prompt the user for the data directory in the chat box. """
-    self.is_setup_mode = True
-    log = self.query_one("#main_log", SelectableRichLog)
-    log.write(LOGO)
-    log.write("Welcome to [bold magenta]Subconscious[/bold magenta]!")
-    log.write("\n[bold yellow]Setup Required:[/bold yellow]")
-    log.write(f"Please confirm or edit the data directory location.")
-    log.write(f"Default: [cyan]{self.config.data_dir}[/cyan]")
-    log.write("\nPress [bold]Enter[/bold] to use default or type a new path:")
+  def default(self, line):
+    """Handle default behavior (chat input)."""
+    if line == 'EOF':
+      self.should_exit = True
+      return True
+    # Capture the input line for async processing
+    self.last_chat_input = line
+
+  def emptyline(self):
+    """Do nothing on empty input."""
+    pass
+
+  async def stream_output(self, text: str):
+    """Stream output character by character, allowing interruption."""
+    print("\n[Subconscious]", end=" ", flush=True)
+
+    fd = sys.stdin.fileno()
+    old_settings = None
+    if termios and tty:
+      try:
+        old_settings = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+      except Exception:
+        pass # Not a TTY
+
+    try:
+      for char in text:
+        interrupted = False
+        
+        if msvcrt:
+          if msvcrt.kbhit():
+            interrupted = True
+            while msvcrt.kbhit():
+              msvcrt.getch()
+        elif old_settings and select:
+          dr, _, _ = select.select([sys.stdin], [], [], 0)
+          if dr:
+            interrupted = True
+            # Flush
+            sys.stdin.read(1)
+            while True:
+              dr, _, _ = select.select([sys.stdin], [], [], 0)
+              if not dr: break
+              sys.stdin.read(1)
+
+        if interrupted:
+          if old_settings and termios:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            old_settings = None
+          print("\n[Output interrupted]")
+          return
+
+        print(char, end="", flush=True)
+        await asyncio.sleep(0.01)
+
+    finally:
+      if old_settings and termios:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        
+    print() # Newline at end
+
+
+async def setup_flow(config: Config):
+  """Prompt the user for the data directory."""
+  print(LOGO)
+  print("Welcome to Subconscious!")
+  print("\nSetup Required:")
+  print(f"Please confirm or edit the data directory location.")
+  print(f"Default: {config.data_dir}")
+  print("\nPress Enter to use default or type a new path:")
+
+  loop = asyncio.get_running_loop()
+  # Use standard input in executor to avoid blocking async loop
+  user_input = await loop.run_in_executor(None, input)
+  
+  path_str = user_input.strip()
+  path = pathlib.Path(path_str) if path_str else config.data_dir
+  config.data_dir = path
+  config.save()
+  
+  print(f"\nConfig saved to: {path / 'config.yaml'}")
+
+
+async def main_loop(config: Config):
+  cli = SubconsciousCLI(config)
+  
+  # print("-" * 40)
+  # print("Mode: Engine + CLI")
+  # print(f"Live: {not config.dev}")
+  # print(f"Data Directory: {config.data_dir}")
+  # print("-" * 40)
+  print(cli.intro)
+  
+  loop = asyncio.get_running_loop()
+  
+  while not cli.should_exit:
+    # Display prompt
+    sys.stdout.write(cli.prompt)
+    sys.stdout.flush()
     
-    input_widget = self.query_one("#main_input", Input)
-    input_widget.placeholder = "Enter data directory path..."
-    input_widget.value = str(self.config.data_dir)
-    input_widget.focus()
+    try:
+      # Read input in a separate thread so the event loop isn't blocked
+      line = await loop.run_in_executor(None, sys.stdin.readline)
+    except asyncio.CancelledError:
+      break
 
-  def initialize_ui(self, show_logo: bool = True) -> None:
-    self.is_setup_mode = False
-    log = self.query_one("#main_log", SelectableRichLog)
-    
-    if show_logo:
-      log.write(LOGO)
-    else:
-      log.write("-" * 40)
-
-    log.write(f" [bold green]Mode:[/bold green] Engine + TUI")
-    log.write(f" [bold green]Development:[/bold green] {self.config.dev}")
-    log.write(f" [bold green]Data Directory:[/bold green] [cyan]{self.config.data_dir}[/cyan]")
-    log.write("\nWelcome to [bold magenta]Subconscious[/bold magenta]!")
-    log.write("Type a message below to interact with the engine.")
-    log.write("-" * 40)
-    
-    input_widget = self.query_one("#main_input", Input)
-    input_widget.placeholder = "Ask Subconscious anything..."
-    input_widget.value = ""
-    input_widget.focus()
-
-  async def on_input_submitted(self, event: Input.Submitted) -> None:
-    if event.input.id != "main_input":
-      return
-    
-    message = event.value.strip()
-    
-    if self.is_setup_mode:
-      # If the user just pressed enter on the default path or typed a new one
-      path = pathlib.Path(message) if message else self.config.data_dir
-      self.config.data_dir = path
-      self.config.save()
+    if not line: # EOF
+      break
       
-      log = self.query_one("#main_log", SelectableRichLog)
-      log.write(f"\n[bold green]Config saved to:[/bold green] {path / 'config.yaml'}")
-      self.initialize_ui(show_logo=False)
-      return
+    line = line.strip()
+    
+    # Process command using cmd logic
+    cli.onecmd(line)
+    
+    # If user entered chat text, process it asynchronously
+    if cli.last_chat_input:
+      message = cli.last_chat_input
+      cli.last_chat_input = None # Reset
+      
+      # Simulate initial processing/thinking time
+      # In a real app, this would be the agent thinking
+      print(f"[Processing '{message}'...]")
+      await asyncio.sleep(0.5)
+      
+      # Simulate a streaming response
+      start_msg = f"Simulated analysis of: '{message}'."
+      dummy_content = " This is a simulated response stream. " * 3
+      interruption_hint = " (Press any key to interrupt me while I'm typing!)"
+      full_response = start_msg + dummy_content + interruption_hint
+      
+      await cli.stream_output(full_response)
 
-    if not message:
-      return
-
-    log = self.query_one("#main_log", SelectableRichLog)
-    log.write(f"\n[bold cyan]You:[/bold cyan] {message}")
-
-    # Clear the input
-    self.query_one("#main_input", Input).value = ""
-
-    # Simple echo/placeholder for engine response
-    log.write(f"[bold green]Subconscious:[/bold green] Processing [italic]{message}[/italic]...")
-
-    # Simulate engine work
-    await asyncio.sleep(0.5)
-    log.write(f"[bold green]Subconscious:[/bold green] Analysis complete. Waiting for next instruction.")
+  print("\nGoodbye!")
 
 
 async def start_tui(config: Config):
-  """ TUI startup logic with Textual """
-  app = SubconsciousApp(config)
-  await app.run_async()
+  """ CLI startup logic """
+  if not config.exists():
+    await setup_flow(config)
+  else:
+    config.load(tui=True)
+    
+  # Log intro
+  log_config(config)
+    
+  # Start the engine in the background
+  engine_task = asyncio.create_task(start_engine(config))
+
+  try:
+    await main_loop(config)
+  finally:
+    engine_task.cancel()
+    try:
+      await engine_task
+    except asyncio.CancelledError:
+      pass

@@ -4,8 +4,8 @@ import asyncio
 import logging
 import argparse
 
-from ..config import Config
 from ..tui import start_tui
+from ..config import Config, LOGO
 from ..engine import start_engine
 
 
@@ -41,8 +41,8 @@ def main():
     help="Starts only the engine with no TUI"
   )
   
+  print(LOGO)
   args = parser.parse_args()
-  
   config = Config(dev=args.dev, config_path=args.config)
   
   try:

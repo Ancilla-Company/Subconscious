@@ -6,7 +6,10 @@ import pathlib
 from typing import Optional
 from dataclasses import dataclass, field
 
+
+# Logging setup
 logger = logging.getLogger(__name__)
+
 
 LOGO = """
                  ⢀⣠⣴⣶⣤⣀           ⢀⣀⣀⡀            
@@ -52,6 +55,7 @@ def get_default_data_dir() -> pathlib.Path:
 @dataclass
 class Config:
   dev: bool = False
+  tui: bool = False
   config_path: Optional[str] = None
   data_dir: pathlib.Path = field(default_factory=get_default_data_dir)
 
@@ -60,8 +64,9 @@ class Config:
     path = pathlib.Path(self.config_path) if self.config_path else self.data_dir / "config.yaml"
     return path.exists()
 
-  def load(self):
+  def load(self, tui: bool = False):
     """ Loads config from the YAML file. """
+    self.tui = tui
     path = pathlib.Path(self.config_path) if self.config_path else self.data_dir / "config.yaml"
     if path.exists():
       with open(path, 'r') as f:
@@ -79,9 +84,16 @@ class Config:
         'data_dir': str(self.data_dir)
       }, f)
 
-def log_config(config: Config, mode: str):
-  print(LOGO)
-  logger.info(f"Mode: {mode}")
-  logger.info(f"Development: {config.dev}")
-  logger.info(f"Config Path: {config.config_path or 'Default'}")
-  logger.info("----------------------------------")
+def log_config(config: Config):
+  # logger.info(f"Mode: {mode}")
+  # logger.info(f"Development: {config.dev}")
+  # logger.info(f"Config Path: {config.config_path or 'Default'}")
+  # logger.info("----------------------------------")
+  print("-" * 40)
+  if config.tui:
+    print("Mode: Engine + CLI")
+  else:
+    print("Mode: Engine Only")
+  print(f"Live: {not config.dev}")
+  print(f"Data Directory: {config.data_dir}")
+  print("-" * 40)
