@@ -138,12 +138,9 @@ async def setup_flow(config: Config):
 async def main_loop(config: Config):
   cli = SubconsciousCLI(config)
   
-  # print("-" * 40)
-  # print("Mode: Engine + CLI")
-  # print(f"Live: {not config.dev}")
-  # print(f"Data Directory: {config.data_dir}")
-  # print("-" * 40)
+  # Print CLI intro
   print(cli.intro)
+  print("-" * 40)
   
   loop = asyncio.get_running_loop()
   

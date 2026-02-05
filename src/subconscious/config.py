@@ -85,10 +85,7 @@ class Config:
       }, f)
 
 def log_config(config: Config):
-  # logger.info(f"Mode: {mode}")
-  # logger.info(f"Development: {config.dev}")
-  # logger.info(f"Config Path: {config.config_path or 'Default'}")
-  # logger.info("----------------------------------")
+  """ Logs the current configuration settings. """
   print("-" * 40)
   if config.tui:
     print("Mode: Engine + CLI")
