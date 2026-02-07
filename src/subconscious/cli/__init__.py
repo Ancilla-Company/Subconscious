@@ -5,14 +5,8 @@ import logging
 import argparse
 
 from ..tui import start_tui
+from ..engine import Engine
 from ..config import Config, LOGO
-from ..engine import start_engine
-
-
-# Logging setup
-logging.basicConfig(format='[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-logger = logging.getLogger('subconscious')
-logger.setLevel(os.getenv('LOG_LEVEL', 'DEBUG'))
 
 
 def main():
@@ -44,11 +38,20 @@ def main():
   print(LOGO)
   args = parser.parse_args()
   config = Config(dev=args.dev, config_path=args.config)
+  config.validate()
+
+  # Logging setup
+  logging.basicConfig(format='[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+  logger = logging.getLogger('subconscious')
+  if args.dev:
+    logger.setLevel(logging.DEBUG)
+  else:
+    logger.setLevel(logging.INFO)
   
   try:
     loop = asyncio.get_event_loop()
     if args.command == "engine":
-      loop.run_until_complete(start_engine(config))
+      loop.run_until_complete(Engine().start_engine(config))
     else:
       loop.run_until_complete(start_tui(config))
   except KeyboardInterrupt:

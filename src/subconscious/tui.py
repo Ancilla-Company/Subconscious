@@ -4,8 +4,8 @@ import logging
 import pathlib
 import asyncio
 
-from .engine import start_engine
-from .config import Config, log_config, LOGO
+from .engine import Engine  
+from .config import Config, log_config, LOGO, KeyManager
 
 # Platform specific non-blocking input check
 if sys.platform == 'win32':
@@ -28,7 +28,8 @@ else:
     tty = None # type: ignore
 
 
-logger = logging.getLogger(__name__)
+# Logging setup
+logger = logging.getLogger("subconscious")
 
 
 class SubconsciousCLI(cmd.Cmd):
@@ -52,6 +53,31 @@ class SubconsciousCLI(cmd.Cmd):
     self.should_exit = True
     return True
 
+  def do_add_key(self, arg):
+    """Add an API key. Usage: add_key <provider> <nickname> <key>"""
+    args = arg.split()
+    if len(args) != 3:
+      print("Usage: add_key <provider> <nickname> <key>")
+      return
+    
+    provider, nickname, key = args
+    identifier = f"{provider}:{nickname}"
+    if KeyManager.set_key(identifier, key):
+      print(f"Key saved as '{identifier}'. You can use this by setting model_provider to '{provider}:{identifier}'.")
+    else:
+      print("Failed to save key.")
+
+  def do_set_model(self, arg):
+    """Set the current model. Usage: set_model <provider> <model_name>"""
+    args = arg.split()
+    if len(args) != 2:
+      print("Usage: set_model <provider> <model_name>")
+      return
+    
+    self.config.model_provider, self.config.model_name = args
+    self.config.save()
+    print(f"Model updated to {self.config.model_provider} using {self.config.model_name}. Please restart the application (or types 'reload') to apply changes.")
+
   def default(self, line):
     """Handle default behavior (chat input)."""
     if line == 'EOF':
@@ -64,8 +90,8 @@ class SubconsciousCLI(cmd.Cmd):
     """Do nothing on empty input."""
     pass
 
-  async def stream_output(self, text: str):
-    """Stream output character by character, allowing interruption."""
+  async def stream_output(self, stream_iter):
+    """Stream output from an async iterator, allowing interruption."""
     print("\n[Subconscious]", end=" ", flush=True)
 
     fd = sys.stdin.fileno()
@@ -78,35 +104,42 @@ class SubconsciousCLI(cmd.Cmd):
         pass # Not a TTY
 
     try:
-      for char in text:
-        interrupted = False
+      async for chunk in stream_iter:
+        # Pydantic-ai stream chunks might be objects or strings 
+        # based on how it's used. For simple text, it's usually the delta.
+        text_chunk = str(chunk) 
         
-        if msvcrt:
-          if msvcrt.kbhit():
-            interrupted = True
-            while msvcrt.kbhit():
-              msvcrt.getch()
-        elif old_settings and select:
-          dr, _, _ = select.select([sys.stdin], [], [], 0)
-          if dr:
-            interrupted = True
-            # Flush
-            sys.stdin.read(1)
-            while True:
-              dr, _, _ = select.select([sys.stdin], [], [], 0)
-              if not dr: break
+        for char in text_chunk:
+          interrupted = False
+          
+          if msvcrt:
+            if msvcrt.kbhit():
+              interrupted = True
+              while msvcrt.kbhit():
+                msvcrt.getch()
+          elif old_settings and select:
+            dr, _, _ = select.select([sys.stdin], [], [], 0)
+            if dr:
+              interrupted = True
+              # Flush
               sys.stdin.read(1)
+              while True:
+                dr, _, _ = select.select([sys.stdin], [], [], 0)
+                if not dr: break
+                sys.stdin.read(1)
 
-        if interrupted:
-          if old_settings and termios:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            old_settings = None
-          print("\n[Output interrupted]")
-          return
+          if interrupted:
+            if old_settings and termios:
+              termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+              old_settings = None
+            print("\n[Output interrupted]")
+            return
 
-        print(char, end="", flush=True)
-        await asyncio.sleep(0.01)
+          print(char, end="", flush=True)
+          await asyncio.sleep(0.01)
 
+    except Exception as e:
+      print(f"\n[Error during streaming: {e}]")
     finally:
       if old_settings and termios:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -134,14 +167,18 @@ async def setup_flow(config: Config):
   
   print(f"\nConfig saved to: {path / 'config.yaml'}")
 
-
-async def main_loop(config: Config):
+async def main_loop(config: Config, engine: Engine):
   cli = SubconsciousCLI(config)
   
   # Print CLI intro
   print(cli.intro)
   print("-" * 40)
   
+  if not config.model_provider or not config.model_name:
+    print("\n[System] No AI model configured. Chat functionality will be limited.")
+    print("[System] Use 'set_model <provider> <model_name>' and 'add_key <provider> <nickname> <key>' to get started.")
+    print("[System] Example: set_model openai gpt-4o")
+
   loop = asyncio.get_running_loop()
   
   while not cli.should_exit:
@@ -168,21 +205,14 @@ async def main_loop(config: Config):
       message = cli.last_chat_input
       cli.last_chat_input = None # Reset
       
-      # Simulate initial processing/thinking time
-      # In a real app, this would be the agent thinking
-      print(f"[Processing '{message}'...]")
-      await asyncio.sleep(0.5)
-      
-      # Simulate a streaming response
-      start_msg = f"Simulated analysis of: '{message}'."
-      dummy_content = " This is a simulated response stream. " * 3
-      interruption_hint = " (Press any key to interrupt me while I'm typing!)"
-      full_response = start_msg + dummy_content + interruption_hint
-      
-      await cli.stream_output(full_response)
+      # Process via Engine's agent
+      try:
+        stream = engine.run_agent_stream(message)
+        await cli.stream_output(stream)
+      except Exception as e:
+        print(f"Error: {e}")
 
   print("\nGoodbye!")
-
 
 async def start_tui(config: Config):
   """ CLI startup logic """
@@ -195,13 +225,6 @@ async def start_tui(config: Config):
   log_config(config)
     
   # Start the engine in the background
-  engine_task = asyncio.create_task(start_engine(config))
-
-  try:
-    await main_loop(config)
-  finally:
-    engine_task.cancel()
-    try:
-      await engine_task
-    except asyncio.CancelledError:
-      pass
+  engine = Engine()
+  await engine.start_engine(config)
+  await main_loop(config, engine)
