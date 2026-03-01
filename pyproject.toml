@@ -8,6 +8,7 @@ authors = [
 dependencies = [
   "pydantic-ai",
   "ray",
+  "flet[all]",
   "nats-py",
   "fastapi",
   "sqlalchemy",
