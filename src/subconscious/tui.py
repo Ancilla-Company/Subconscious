@@ -7,6 +7,7 @@ import asyncio
 from .engine import Engine  
 from .config import Config, log_config, LOGO, KeyManager
 
+
 # Platform specific non-blocking input check
 if sys.platform == 'win32':
   try:
@@ -226,5 +227,9 @@ async def start_tui(config: Config):
     
   # Start the engine in the background
   engine = Engine()
-  await engine.start_engine(config)
-  await main_loop(config, engine)
+  try:
+    await engine.start_engine(config)
+    await main_loop(config, engine)
+  finally:
+    await engine.stop_engine()
+

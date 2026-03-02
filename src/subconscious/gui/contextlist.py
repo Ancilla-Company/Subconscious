@@ -1,7 +1,6 @@
 import flet as ft
 from datetime import datetime
 
-from .components.other import Placeholder
 from .components.buttons import SvgButton, ContextItem, IconButton, PopupMenuButton
 
 
@@ -22,99 +21,6 @@ class WorkspacePopupItem(ft.PopupMenuItem):
   #   event.data = self.data
   #   self.scm(self.name)
   #   await SettingsQueue.put((self.switch_llm, (event,), {}))
-
-
-# @ft.component
-# def ThreadItem(name, description, last_updated, on_click):
-#   is_selected, set_is_selected = ft.use_state(False)
-
-#   def handle_click(e):
-#     set_is_selected(True)
-#     if on_click:
-#         on_click(e)
-
-#   def render_time():
-#     """ Returns a human readable time string, adjusted for how long ago the message was sent. """
-#     now = datetime.now()
-#     diff = now - last_updated
-
-#     if diff.days == 0:
-#       return last_updated.strftime("%H:%M")
-#     elif diff.days == 1:
-#       return "Yesterday"
-#     elif diff.days < 7:
-#       return last_updated.strftime("%A")
-#     else:
-#       return last_updated.strftime("%d/%m/%Y")
-
-#   def render_datetime_tooltip():
-#     """ Returns a tooltip string for the message, showing the full date and time. """
-#     return last_updated.strftime("%d/%m/%Y %H:%M")
-
-#   return ft.TextButton(
-#     on_click=handle_click,
-#     style=ft.ButtonStyle(
-#       shape=ft.RoundedRectangleBorder(radius=3),
-#       bgcolor=ft.Colors.SECONDARY_CONTAINER if is_selected else ft.Colors.TRANSPARENT,
-#     ),
-#     content=ft.Container(
-#       ft.Column([
-#         ft.Row([
-#           ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
-#           ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
-#         ], spacing=10),
-#         ft.Text(description, size=14, weight=ft.FontWeight.W_100, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, tooltip=description),
-#       ], spacing=5),
-#       padding=ft.padding.all(10)
-#     )
-#   )
-
-
-# @ft.component
-# def WorkspaceItem(name, description, updated_at, on_click):
-#   is_selected, set_is_selected = ft.use_state(False)
-
-#   def handle_click(e):
-#     set_is_selected(True)
-#     if on_click:
-#       on_click(e)
-  
-#   def render_time():
-#     """ Returns a human readable time string, adjusted for how long ago the message was sent. """
-#     now = datetime.now()
-#     diff = now - updated_at
-
-#     if diff.days == 0:
-#       return updated_at.strftime("%H:%M")
-#     elif diff.days == 1:
-#       return "Yesterday"
-#     elif diff.days < 7:
-#       return updated_at.strftime("%A")
-#     else:
-#       return updated_at.strftime("%d/%m/%Y")
-
-#   def render_datetime_tooltip():
-#     """ Returns a tooltip string for the message, showing the full date and time. """
-#     return updated_at.strftime("%d/%m/%Y %H:%M")
-
-#   return ft.TextButton(
-#     on_click=handle_click,
-#     style=ft.ButtonStyle(
-#       shape=ft.RoundedRectangleBorder(radius=3),
-#       bgcolor=ft.Colors.SECONDARY_CONTAINER if is_selected else ft.Colors.TRANSPARENT,
-#     ),
-#     content=ft.Container(
-#       ft.Column([
-#         ft.Row([
-#           ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
-#           ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
-#         ], spacing=10),
-#           ft.Text(description, size=14, weight=ft.FontWeight.W_100, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, tooltip=description)
-#       ], spacing=5),
-#       padding=ft.padding.all(10)
-#     )
-#   )
-
 
 @ft.component
 def ContextList(

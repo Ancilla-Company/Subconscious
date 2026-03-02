@@ -1,5 +1,7 @@
 import flet as ft
 
+from .components.buttons import IconButton
+
 
 @ft.component
 def Sidebar(
@@ -55,7 +57,7 @@ def Sidebar(
           spacing=0,
           controls=[
             SidebarIcon(ft.Icons.MENU, "Toggle Context List", "toggle", on_context_toggle, active=False),
-            SidebarIcon(ft.Icons.FOLDER_OPEN_OUTLINED, "Workspace", "workspace", on_workspace_click),
+            SidebarIcon(ft.Icons.FOLDER_OPEN_OUTLINED, "Workspaces", "workspaces", on_workspace_click),
             SidebarIcon(ft.Icons.CHAT_OUTLINED, "Threads", "threads", on_threads_click),
           ],
         ),
@@ -84,18 +86,8 @@ def Sidebar(
               #   on_click=lambda _: on_theme_toggle(),
               #   style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
               # ),
-              ft.IconButton(
-                icon=ft.Icons.SETTINGS_OUTLINED,
-                tooltip="Settings",
-                on_click=lambda _: on_theme_toggle(), # Placeholder callback
-                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-              ),
-              ft.IconButton(
-                icon=ft.Icons.BRIGHTNESS_HIGH,
-                tooltip="Toggle dark/light mode",
-                on_click=lambda _: on_theme_toggle(),
-                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-              )
+              IconButton(icon=ft.Icons.SETTINGS_OUTLINED, tooltip="Settings", on_click=(lambda _: on_theme_toggle())),
+              IconButton(icon=ft.Icons.BRIGHTNESS_HIGH, tooltip="Toggle dark/light mode", on_click=(lambda _: on_theme_toggle()))
             ],
             spacing=4,
           ),

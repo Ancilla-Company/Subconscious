@@ -5,26 +5,30 @@ import logging
 import argparse
 
 from ..tui import start_tui
+from ..gui import start_gui
 from ..engine import Engine
 from ..config import Config, LOGO
 
 
 def main():
   """ Entry point for the Subconscious CLI"""
-  parser = argparse.ArgumentParser(
-    prog="subconscious",
-    description="Subconscious: A Distributed Agentic Engine"
-  )
-  
-  parser.add_argument(
+  # Common arguments for parent parser to be used by subparsers
+  base_parser = argparse.ArgumentParser(add_help=False)
+  base_parser.add_argument(
     "--dev",
     action="store_true",
     help="Run in development mode"
   )
-  parser.add_argument(
+  base_parser.add_argument(
     "--config",
     type=str,
     help="Path to a specific configuration file"
+  )
+
+  parser = argparse.ArgumentParser(
+    prog="subconscious",
+    description="Subconscious: A Distributed Agentic Engine",
+    parents=[base_parser]
   )
   
   subparsers = parser.add_subparsers(dest="command")
@@ -32,10 +36,24 @@ def main():
   # Subcommand: engine
   engine_parser = subparsers.add_parser(
     "engine", 
-    help="Starts only the engine with no TUI"
+    help="Starts only the engine with no TUI",
+    parents=[base_parser]
+  )
+
+  # Subcommand: gui
+  gui_parser = subparsers.add_parser(
+    "gui",
+    help="Starts the engine with the GUI interface",
+    parents=[base_parser]
+  )
+
+  # Subcommand: tui
+  tui_parser = subparsers.add_parser(
+    "tui",
+    help="Starts the engine with the TUI interface (default)",
+    parents=[base_parser]
   )
   
-  print(LOGO)
   args = parser.parse_args()
   config = Config(dev=args.dev, config_path=args.config)
   config.validate()
@@ -51,9 +69,16 @@ def main():
   try:
     loop = asyncio.get_event_loop()
     if args.command == "engine":
+      print(LOGO)
       loop.run_until_complete(Engine().start_engine(config))
-    else:
+    elif args.command == "gui":
+      loop.run_until_complete(start_gui(config))
+    elif args.command == "tui" or args.command is None:
+      print(LOGO)
       loop.run_until_complete(start_tui(config))
+    else:
+      print(LOGO)
+      parser.print_help()
   except KeyboardInterrupt:
     sys.exit(0)
 
