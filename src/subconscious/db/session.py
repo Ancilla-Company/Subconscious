@@ -1,5 +1,5 @@
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from .models import Base
 from ..config import Config
@@ -10,7 +10,7 @@ class Database:
   def __init__(self, config: Config):
     """ Initialize the database engine and session maker. """
     self.engine = create_async_engine(config.db_path, echo=False)
-    self.async_session = sessionmaker(
+    self.async_session = async_sessionmaker(
       self.engine, class_=AsyncSession, expire_on_commit=False
     )
 
@@ -22,3 +22,7 @@ class Database:
   def get_session(self) -> AsyncSession:
     """ Get a new async database session. """
     return self.async_session()
+
+  async def close(self):
+    """ Close the database engine. """
+    await self.engine.dispose()

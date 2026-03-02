@@ -2,6 +2,7 @@ import os
 import sys
 import uuid
 import yaml
+import time
 import logging
 import pathlib
 import keyring
@@ -84,6 +85,7 @@ class KeyManager:
 class Config:
   dev: bool = False
   tui: bool = False
+  gui: bool = False
   config_path: Optional[str] = None
   data_dir: pathlib.Path = field(default_factory=get_default_data_dir)
   subconscious_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -91,6 +93,10 @@ class Config:
   model_name: Optional[str] = None
   current_workspace: Optional[str] = None
   default_workspace: str = str(uuid.uuid4())
+
+  def __post_init__(self):
+    if self.dev:
+      self.data_dir = self.data_dir.with_name(f"{self.data_dir.name}-dev")
 
   def exists(self) -> bool:
     """ Checks if the config file exists at the specified or default path. """
@@ -157,6 +163,8 @@ def log_config(config: Config):
   print("-" * 40)
   if config.tui:
     print("Mode: Engine + CLI")
+  if config.gui:
+    print("Mode: Engine + GUI")
   else:
     print("Mode: Engine Only")
   print(f"Live: {not config.dev}")

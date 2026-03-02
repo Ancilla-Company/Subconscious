@@ -2,10 +2,10 @@ import asyncio
 import logging
 from sqlalchemy import select
 
+from .config import Config
 from .agent import AgentManager
 from .db.session import Database
 from .db.models import Workspace
-from .config import Config, log_config
 
 
 # Logging setup
@@ -68,3 +68,8 @@ class Engine:
     async with self.agent.run_stream(message) as result:
       async for chunk in result.stream_output():
         yield chunk
+
+  async def stop_engine(self):
+    """ Cleanup engine resources """
+    if hasattr(self, 'db'):
+      await self.db.close()
