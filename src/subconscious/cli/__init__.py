@@ -19,11 +19,6 @@ def main():
     action="store_true",
     help="Run in development mode"
   )
-  base_parser.add_argument(
-    "--config",
-    type=str,
-    help="Path to a specific configuration file"
-  )
 
   parser = argparse.ArgumentParser(
     prog="subconscious",
@@ -54,9 +49,9 @@ def main():
     parents=[base_parser]
   )
   
+  # Initiate Config here to allow for accepting config arguments in the future
   args = parser.parse_args()
-  config = Config(dev=args.dev, config_path=args.config)
-  config.validate()
+  config = Config(dev=args.dev)
 
   # Logging setup
   logging.basicConfig(format='[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')

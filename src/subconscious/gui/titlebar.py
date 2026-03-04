@@ -17,8 +17,8 @@ def TitleBar() -> ft.Control:
     set_is_maximized(e.page.window.maximized)
     e.page.update()
 
-  def close_window(e):
-    e.page.window.close()
+  async def close_window(e):
+    await e.page.window.close()
 
   return ft.Container( ft.Row(
     spacing=0,

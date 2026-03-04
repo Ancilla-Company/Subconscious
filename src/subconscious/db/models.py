@@ -11,9 +11,9 @@ class Workspace(Base):
   __tablename__ = 'workspaces'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
-  name = Column(String, unique=True, nullable=False)
+  name = Column(String, nullable=False)
   subconscious_id = Column(String, nullable=False)
-  uuid = Column(String, default=str(uuid.uuid4())) # e.g., work, school, personal
+  uuid = Column(String, default=str(uuid.uuid4()))
   created_at = Column(DateTime, default=datetime.now)
 
   threads = relationship("Thread", back_populates="workspace", cascade="all, delete-orphan")
@@ -41,3 +41,15 @@ class Message(Base):
   created_at = Column(DateTime, default=datetime.now)
 
   thread = relationship("Thread", back_populates="messages")
+
+
+class AppState(Base):
+  """ Store the state of the application, such as current workspace and thread
+      Using a key value format to store arbitrary data
+  """
+  __tablename__ = 'app_state'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  key = Column(String, nullable=False, unique=True)
+  value = Column(String, nullable=False)
+
