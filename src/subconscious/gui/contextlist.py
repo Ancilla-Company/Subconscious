@@ -22,26 +22,51 @@ class WorkspacePopupItem(ft.PopupMenuItem):
   #   self.scm(self.name)
   #   await SettingsQueue.put((self.switch_llm, (event,), {}))
 
+# def context_toggle()
+
 @ft.component
 def ContextList(
   visible: bool = True,
   width: int = 380,
-  current_view: str = "threads",
-  on_workspace_select=None
+  current_view: str = "none",
+  current_context: str = "none",
+  on_workspace_select=None,
+  workspaces_list=None,
+  on_new_workspace=None,
+  on_workspace_selected_for_edit=None,
+  selected_workspace=None,
+  threads_list=None,
+  on_thread_select=None,
+  selected_thread=None
 ) -> ft.Control:
   """ Displays a list of items for the active view (Threads, Workspaces, etc.) """
+  
+  # Ensure the selected state is reflected in the UI
+  # This use_effect might be redundant if the parent component re-renders correctly, 
+  # but user specifically asked for it to ensure updates.
+  # ft.use_effect(lambda: None, [selected_workspace, selected_thread, workspaces_list, threads_list])
+
   headers = []
 
-  if current_view == "threads":
+  if current_context == "threads":
     title_text = "Latest Threads"
-    list_items = [
-      ContextItem(
-        name="Welcome Thread",
-        description="Initial chat setup...",
-        updated_at=datetime.now(),
-        on_click=lambda _: print("Thread selected")
-      )
-    ]
+    list_items = []
+    if threads_list:
+        for thread in threads_list:
+            is_selected = selected_thread and thread.id == selected_thread.id
+            list_items.append(
+                ContextItem(
+                    key=thread.id,
+                    name=thread.title if thread.title else "Untitled Thread",
+                    description=thread.description if thread.description else "No description",
+                    updated_at=thread.created_at,
+                    on_click=lambda _, t=thread: on_thread_select(t) if on_thread_select else None,
+                    selected=is_selected
+                )
+            )
+    else:
+        list_items = [ft.Text("No threads found.", size=14, color=ft.Colors.GREY_600)]
+
     headers = [
       SvgButton(on_click=lambda _: print("New thread clicked"), svg_path="/new_thread.svg", tooltip="New Thread"),
       PopupMenuButton(
@@ -53,17 +78,26 @@ def ContextList(
       )
     ]
 
-  elif current_view == "workspaces":
+  elif current_context == "workspaces":
     title_text = "Workspaces"
-    list_items = [
-      ContextItem(
-        name="General",
-        description="Default workspace for all threads.",
-        updated_at=datetime.now(),
-        on_click=lambda _: on_workspace_select() if on_workspace_select else print("Workspace selected")
-      )
-    ]
-    headers = [IconButton(icon=ft.Icons.ADD, tooltip="New Workspace", on_click=lambda _: print("New workspace clicked"))]
+    list_items = []
+    if workspaces_list:
+      for ws in workspaces_list:
+        is_selected = selected_workspace and ws.id == selected_workspace.id
+        list_items.append(
+          ContextItem(
+            key=ws.id,
+            name=ws.name,
+            description=ws.description,
+            updated_at=ws.created_at,
+            on_click=lambda _: on_workspace_selected_for_edit(ws),
+            selected=is_selected
+          )
+        )
+    else:
+      list_items = [ft.Text("No workspaces found.", size=14, color=ft.Colors.GREY_600)]
+
+    headers = [IconButton(icon=ft.Icons.ADD, tooltip="New Workspace", on_click=on_new_workspace)]
 
   else:
     title_text = "No Activity Selected"

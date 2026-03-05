@@ -9,22 +9,12 @@ def Sidebar(
   on_workspace_click,
   on_threads_click,
   on_context_toggle,
-  selected_view="none"
+  selected_view="none",
 ) -> ft.Control:
-  
-  # Local state for button selection
-  current_selected, set_current_selected = ft.use_state(selected_view)
-  
-  # Sync local state if prop changes
-  ft.use_effect(lambda: set_current_selected(selected_view), [selected_view])
-  
-  def handle_view_click(view_name, callback, active):
-    if active:
-      set_current_selected(view_name)
-    callback()
 
   def SidebarIcon(icon, tooltip, view_name, callback, key=None, active=True):
-    is_selected = current_selected == view_name
+    is_selected = (selected_view == view_name) if active else False
+      
     return ft.Container(
       content=ft.IconButton(
         icon=icon,
@@ -32,7 +22,7 @@ def Sidebar(
         padding=0,
         tooltip=tooltip,
         selected=is_selected,
-        on_click=lambda _: handle_view_click(view_name, callback, active),
+        on_click=callback,
         style=ft.ButtonStyle(
           shape=ft.RoundedRectangleBorder(radius=3),
           bgcolor={
