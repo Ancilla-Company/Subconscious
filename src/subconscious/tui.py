@@ -217,19 +217,10 @@ async def main_loop(config: Config, engine: Engine):
 
 async def start_tui(config: Config):
   """ CLI startup logic """
-  if not config.exists():
-    await setup_flow(config)
-  else:
-    config.load(tui=True)
-    
-  # Log intro
-  log_config(config)
-    
-  # Start the engine in the background
   engine = Engine()
   try:
     await engine.start_engine(config)
+    log_config(config)
     await main_loop(config, engine)
   finally:
     await engine.stop_engine()
-

@@ -51,7 +51,6 @@ def main():
   
   # Initiate Config here to allow for accepting config arguments in the future
   args = parser.parse_args()
-  config = Config(dev=args.dev)
 
   # Logging setup
   logging.basicConfig(format='[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
@@ -65,12 +64,18 @@ def main():
     loop = asyncio.get_event_loop()
     if args.command == "engine":
       print(LOGO)
-      loop.run_until_complete(Engine().start_engine(config))
+      loop.run_until_complete(Engine().start_engine(
+        Config(dev=args.dev, gui=False, tui=False)
+      ))
     elif args.command == "gui":
-      loop.run_until_complete(start_gui(config))
+      loop.run_until_complete(start_gui(
+        Config(dev=args.dev, gui=True, tui=False)
+      ))
     elif args.command == "tui" or args.command is None:
       print(LOGO)
-      loop.run_until_complete(start_tui(config))
+      loop.run_until_complete(start_tui(
+        Config(dev=args.dev, gui=False, tui=True)
+      ))
     else:
       print(LOGO)
       parser.print_help()

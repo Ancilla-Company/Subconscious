@@ -1,11 +1,11 @@
-import asyncio
+import uuid
 import logging
 from sqlalchemy import select
 
 from .config import Config
 from .agent import AgentManager
 from .db.session import Database
-from .db.models import Workspace
+from .db.models import Workspace, AppState, Networks
 
 
 # Logging setup
@@ -19,11 +19,47 @@ class Engine:
     await self.db.init_models()
 
     async with self.db.get_session() as session:
+      # Find current network inside app_state
+      self.current_network = await session.scalar(
+        select(AppState).where(AppState.key == "current_network")
+      )
+      
+      network = None
+      if self.current_network:
+        network = await session.scalar(
+          select(Networks).where(Networks.uuid == self.current_network.value)
+        )
+      
+      if not network:
+        # Load the first network in the table
+        network = await session.scalar(select(Networks))
+        
+        # If no networks exist, create one
+        if not network:
+          default_workspace_uuid = str(uuid.uuid4())
+          network = Networks(
+            name="General Network",
+            uuid=str(uuid.uuid4()),
+            description="Default network created on first run",
+            default_workspace_uuid=default_workspace_uuid,
+          )
+          session.add(network)
+          await session.flush() # ensure network has id if needed
+          
+          # Update app state
+          if self.current_network:
+            self.current_network.value = network.uuid
+          else:
+            self.current_network = AppState(key="current_network", value=network.uuid)
+            session.add(self.current_network)
+
+          logger.debug(f"Created new default network: {network.uuid}")
+
       # Check if default workspace exists
       workspace = await session.scalar(
         select(Workspace).where(
-          Workspace.uuid == self.config.default_workspace,
-          Workspace.subconscious_id == self.config.subconscious_id
+          Workspace.uuid == network.default_workspace_uuid,
+          Workspace.network_id == network.id
         )
       )
       
@@ -31,19 +67,27 @@ class Engine:
         logger.debug("Creating default 'General' workspace.")
         workspace = Workspace(
           name="General",
-          subconscious_id=self.config.subconscious_id,
-          uuid=self.config.default_workspace
+          network_id=network.id,
+          description="Default workspace for general conversations",
+          uuid=network.default_workspace_uuid
         )
         session.add(workspace)
-        await session.commit()
-      else:
-        logger.debug("Default workspace found.")
+
+      # If we found an existing network but app_state wasn't set, update it
+      if network and not self.current_network:
+        self.current_network = AppState(key="current_network", value=network.uuid)
+        session.add(self.current_network)
+      elif network and self.current_network.value != network.uuid:
+        self.current_network.value = network.uuid
+
+      await session.commit()
 
   async def start_engine(self, config: Config):
     """ Engine startup logic """
     # Initialize Database
-    self.db = Database(config)
     self.config = config
+    self.config.load()
+    self.db = Database(config)
     await self.init_system()
 
     # Initialize Agent Manager (load keys etc)
