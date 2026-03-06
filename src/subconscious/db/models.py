@@ -10,13 +10,39 @@ from sqlalchemy.orm import declarative_base, relationship, mapped_column, Mapped
 Base = declarative_base()
 
 
+class Networks(Base):
+  """ List of Subconscious Networks """
+  __tablename__ = 'networks'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=str(uuid.uuid4()), unique=True)
+  name = Column(String, nullable=False)
+  description = Column(Text)
+  default_workspace_uuid = Column(String, nullable=True)
+  _passphrase: Mapped[bytes] = mapped_column("passphrase", nullable=True)
+  created_at = Column(DateTime, default=datetime.now)
+
+  @hybrid_property
+  def passphrase(self) -> bytes:
+    return self._passphrase
+  
+  @passphrase.setter
+  def passphrase(self, string: str) -> None:
+    if not re.match(r'^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$', string):
+      raise ValueError("U014")
+    self._passphrase = bcrypt.hashpw(string.encode('utf-8'), bcrypt.gensalt())
+  
+  @passphrase.expression
+  def passphrase(cls) -> bytes:
+    return cls._passphrase
+
 class Workspace(Base):
   __tablename__ = 'workspaces'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
-  network_id = Column(String, nullable=False)
+  network_id = Column(Integer, ForeignKey('networks.id'), nullable=False)
   uuid = Column(String, default=str(uuid.uuid4()))
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
@@ -59,30 +85,3 @@ class AppState(Base):
   id = Column(Integer, primary_key=True, autoincrement=True)
   key = Column(String, nullable=False, unique=True)
   value = Column(String, nullable=False)
-
-
-class Networks(Base):
-  """ List of Subconscious Networks """
-  __tablename__ = 'networks'
-
-  id = Column(Integer, primary_key=True, autoincrement=True)
-  uuid = Column(String, default=str(uuid.uuid4()), unique=True)
-  name = Column(String, nullable=False)
-  description = Column(Text)
-  default_workspace_uuid = Column(String, nullable=True)
-  _passphrase: Mapped[bytes] = mapped_column("passphrase", nullable=True)
-  created_at = Column(DateTime, default=datetime.now)
-
-  @hybrid_property
-  def passphrase(self) -> bytes:
-    return self._passphrase
-  
-  @passphrase.setter
-  def passphrase(self, string: str) -> None:
-    if not re.match(r'^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$', string):
-      raise ValueError("U014")
-    self._passphrase = bcrypt.hashpw(string.encode('utf-8'), bcrypt.gensalt())
-  
-  @passphrase.expression
-  def passphrase(cls) -> bytes:
-    return cls._passphrase
