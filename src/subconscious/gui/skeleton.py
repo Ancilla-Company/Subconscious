@@ -125,9 +125,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   # Add logic to switch to threads for a workspace if we want that behavior later
 
   async def handle_thread_click(thread):
-      set_selected_thread(thread)
-      set_current_view("threads")
-      await load_messages(thread.id)
+    set_selected_thread(thread)
+    set_current_view("threads")
+    await load_messages(thread.id)
 
   async def handle_save_workspace(name, description, ws_id=None):
     async with engine.db.get_session() as session:

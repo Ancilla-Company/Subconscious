@@ -103,7 +103,7 @@ def ContextItem(key, name, description, on_click, updated_at=None, selected=Fals
     )
   )
 
-ft.component
+@ft.component
 def PopupMenuButton(tooltip, menu_items, icon=None, src=None) -> ft.Control:
   """ A wrapper around PopupMenuButton to simplify usage.
       Shape paramter has no effect, so a square shape has to be forced
@@ -161,3 +161,15 @@ def PopupMenuButton(tooltip, menu_items, icon=None, src=None) -> ft.Control:
       padding=ft.padding.only(0,0,0,0),
       border_radius=ft.BorderRadius(3,3,3,3),
     )
+
+@ft.component
+def TextButton(on_click, text, tooltip=None) -> ft.Control:
+  """ Style lanugage for Text Area type button """
+  return ft.TextButton(
+    content=ft.Text(text, size=14, weight=ft.FontWeight.W_500),
+    tooltip=tooltip,
+    on_click=on_click,
+    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+    margin=ft.margin.only(0, 0, 0, 0),
+    height=40
+  )

@@ -52,18 +52,18 @@ def ContextList(
     title_text = "Latest Threads"
     list_items = []
     if threads_list:
-        for thread in threads_list:
-            is_selected = selected_thread and thread.id == selected_thread.id
-            list_items.append(
-                ContextItem(
-                    key=thread.id,
-                    name=thread.title if thread.title else "Untitled Thread",
-                    description=thread.description if thread.description else "No description",
-                    updated_at=thread.created_at,
-                    on_click=lambda _, t=thread: on_thread_select(t) if on_thread_select else None,
-                    selected=is_selected
-                )
-            )
+      for thread in threads_list:
+        is_selected = selected_thread and thread.id == selected_thread.id
+        list_items.append(
+          ContextItem(
+            key=thread.id,
+            name=thread.title if thread.title else "Untitled Thread",
+            description=thread.description if thread.description else "No description",
+            updated_at=thread.created_at,
+            on_click=lambda _, t=thread: on_thread_select(t) if on_thread_select else None,
+            selected=is_selected
+          )
+        )
     else:
         list_items = [ft.Text("No threads found.", size=14, color=ft.Colors.GREY_600)]
 
@@ -90,7 +90,7 @@ def ContextList(
             name=ws.name,
             description=ws.description,
             updated_at=ws.created_at,
-            on_click=lambda _: on_workspace_selected_for_edit(ws),
+            on_click=lambda _, w=ws: on_workspace_selected_for_edit(w),
             selected=is_selected
           )
         )
@@ -129,21 +129,19 @@ def ContextList(
     visible=visible,
     width=width,
     bgcolor=ft.Colors.SURFACE,
+    padding=ft.padding.only(15, 4, 15, 4),
     content=ft.Column([
       # Header
-      ft.Container(
-        padding=ft.padding.only(15, 4, 15, 4),
-        content=ft.Row([
-          ft.Text(
-            title_text,
-            size=20,
-            weight=ft.FontWeight.W_500,
-            color=ft.Colors.PRIMARY,
-            expand=True,
-          ),
-          *headers
-        ], spacing=4),
-      ),
+      ft.Row([
+        ft.Text(
+          title_text,
+          size=20,
+          weight=ft.FontWeight.W_500,
+          color=ft.Colors.PRIMARY,
+          expand=True,
+        ),
+        *headers
+      ], spacing=4),
       
       # List container
       ft.Container(
@@ -151,9 +149,8 @@ def ContextList(
         content=ft.ListView(
           expand=True,
           spacing=4,
-          padding=ft.padding.only(14, 0, 14, 4),
           controls=list_items,
         ),
       ),
-    ], spacing=0),
+    ], spacing=4),
   )
