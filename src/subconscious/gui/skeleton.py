@@ -85,24 +85,27 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       page.update()
 
   async def load_threads(workspace_id=None):
-      async with engine.db.get_session() as session:
-          if workspace_id:
-              stmt = select(Thread).where(Thread.workspace_id == workspace_id).order_by(Thread.created_at.desc())
-          else:
-              # Depending on requirement, we might show all threads or no threads if no workspace selected
-              # For now let's show all latest threads if no workspace selected (global view) or empty list
-              stmt = select(Thread).order_by(Thread.created_at.desc())
-          
-          result = await session.scalars(stmt)
-          set_threads(result.all())
-          page.update()
+    async with engine.db.get_session() as session:
+      if workspace_id:
+        stmt = select(Thread).where(Thread.workspace_id == workspace_id).order_by(Thread.created_at.desc())
+      else:
+        # Depending on requirement, we might show all threads or no threads if no workspace selected
+        # For now let's show all latest threads if no workspace selected (global view) or empty list
+        stmt = select(Thread).order_by(Thread.created_at.desc())
+      
+      result = await session.scalars(stmt)
+      set_threads(result.all())
 
   async def load_messages(thread_id):
-      async with engine.db.get_session() as session:
-          stmt = select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at)
-          result = await session.scalars(stmt)
-          set_messages(result.all())
-          page.update()
+    async with engine.db.get_session() as session:
+      stmt = select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at)
+      result = await session.scalars(stmt)
+      set_messages(result.all())
+
+  def on_mount():
+    asyncio.create_task(load_workspaces())
+  
+  ft.use_effect(on_mount, [])
 
   def handle_new_workspace(e):
     # Deselect threads when creating a new workspace?
