@@ -2,9 +2,10 @@ import flet as ft
 from datetime import datetime
 
 
-def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, active=True):
-  is_selected = (selected_view == view_name) if active else False
-    
+@ft.component
+def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, selectable=True):
+  is_selected = (selected_view == view_name) if selectable else False
+
   return ft.Container(
     content=ft.IconButton(
       icon=icon,
@@ -56,17 +57,17 @@ def IconButton(on_click, icon, tooltip=None) -> ft.Control:
     style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
   )
 
-@ft.component
-def ContextItem(name, description, updated_at, on_click):
-  is_selected, set_is_selected = ft.use_state(False)
-
+def ContextItem(key, name, description, on_click, updated_at=None, selected=False, set_selected=None) -> ft.Control:
+  
   def handle_click(e):
-    set_is_selected(True)
-    if on_click:
-      on_click(e)
+    if set_selected:
+      set_selected(key)
+    on_click(e)
   
   def render_time():
     """ Returns a human readable time string, adjusted for how long ago the message was sent. """
+    if updated_at is None: return ""
+    
     now = datetime.now()
     diff = now - updated_at
 
@@ -81,13 +82,14 @@ def ContextItem(name, description, updated_at, on_click):
 
   def render_datetime_tooltip():
     """ Returns a tooltip string for the message, showing the full date and time. """
+    if updated_at is None: return ""
     return updated_at.strftime("%d/%m/%Y %H:%M")
 
   return ft.TextButton(
     on_click=handle_click,
     style=ft.ButtonStyle(
       shape=ft.RoundedRectangleBorder(radius=3),
-      bgcolor=ft.Colors.SECONDARY_CONTAINER if is_selected else ft.Colors.TRANSPARENT,
+      bgcolor=ft.Colors.SECONDARY_CONTAINER if selected else ft.Colors.TRANSPARENT,
     ),
     content=ft.Container(
       ft.Column([

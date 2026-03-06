@@ -22,8 +22,6 @@ class WorkspacePopupItem(ft.PopupMenuItem):
   #   self.scm(self.name)
   #   await SettingsQueue.put((self.switch_llm, (event,), {}))
 
-# def context_toggle()
-
 @ft.component
 def ContextList(
   visible: bool = True,
@@ -37,7 +35,9 @@ def ContextList(
   selected_workspace=None,
   threads_list=None,
   on_thread_select=None,
-  selected_thread=None
+  selected_thread=None,
+  selected_setting=None,
+  set_selected_setting=None
 ) -> ft.Control:
   """ Displays a list of items for the active view (Threads, Workspaces, etc.) """
   
@@ -98,6 +98,28 @@ def ContextList(
       list_items = [ft.Text("No workspaces found.", size=14, color=ft.Colors.GREY_600)]
 
     headers = [IconButton(icon=ft.Icons.ADD, tooltip="New Workspace", on_click=on_new_workspace)]
+
+  elif current_context == "settings":
+    title_text = "Settings"
+    list_items = [
+      ContextItem(
+        key="general",
+        name="General",
+        description="App settings and preferences",
+        on_click=lambda _: print("General settings"),
+        selected=selected_setting == "general",
+        set_selected=set_selected_setting
+      ),
+      ContextItem(
+        key="models",
+        name="Language Models",
+        description="Configure LLMs and API keys",
+        on_click=lambda _: print("Model settings"),
+        selected=selected_setting == "models",
+        set_selected=set_selected_setting
+      )
+    ]
+    headers = []
 
   else:
     title_text = "No Activity Selected"
