@@ -21,7 +21,6 @@ def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, a
         }
       ),
     ),
-    padding=ft.padding.only(4, 4, 4, 0),
     clip_behavior=ft.ClipBehavior.HARD_EDGE,
   )
 
