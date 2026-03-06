@@ -75,6 +75,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   selected_thread, set_selected_thread = ft.use_state(None)
   messages, set_messages = ft.use_state(list())
 
+  # Settings Management State
+  selected_setting, set_selected_setting = ft.use_state(None)
+
   async def load_workspaces():
     async with engine.db.get_session() as session:
       result = await session.scalars(select(Workspace))
@@ -195,6 +198,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("threads")
     set_context_visible(True)
 
+  async def switch_to_settings(e=None):
+    set_current_view("settings")
+    set_current_context("settings")
+    set_context_visible(True)
+
   return [
     TitleBar(),
     Frame(
@@ -202,6 +210,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_theme_toggle=toggle_theme,
         on_workspace_click=switch_to_workspace,
         on_threads_click=switch_to_threads,
+        on_settings_click=switch_to_settings,
         on_context_toggle=toggle_context,
         selected_view=current_context # Use context to light up the sidebar icon correctly
       ),
@@ -217,7 +226,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         selected_workspace=selected_workspace,
         threads_list=threads,
         on_thread_select=handle_thread_click,
-        selected_thread=selected_thread
+        selected_thread=selected_thread,
+        selected_setting=selected_setting,
+        set_selected_setting=set_selected_setting
       ),
       mainwindow=MainWindow(
         current_view=current_view,
