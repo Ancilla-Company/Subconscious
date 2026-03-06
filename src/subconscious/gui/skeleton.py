@@ -82,7 +82,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     async with engine.db.get_session() as session:
       result = await session.scalars(select(Workspace))
       set_workspaces(result.all())
-      page.update()
 
   async def load_threads(workspace_id=None):
     async with engine.db.get_session() as session:
@@ -104,6 +103,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   def on_mount():
     asyncio.create_task(load_workspaces())
+    asyncio.create_task(load_threads())
   
   ft.use_effect(on_mount, [])
 
