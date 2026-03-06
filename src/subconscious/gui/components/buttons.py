@@ -2,6 +2,29 @@ import flet as ft
 from datetime import datetime
 
 
+def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, active=True):
+  is_selected = (selected_view == view_name) if active else False
+    
+  return ft.Container(
+    content=ft.IconButton(
+      icon=icon,
+      key=key,
+      padding=0,
+      tooltip=tooltip,
+      selected=is_selected,
+      on_click=callback,
+      style=ft.ButtonStyle(
+        shape=ft.RoundedRectangleBorder(radius=3),
+        bgcolor={
+          ft.ControlState.SELECTED: ft.Colors.SECONDARY_CONTAINER,
+          ft.ControlState.DEFAULT: ft.Colors.TRANSPARENT,
+        }
+      ),
+    ),
+    padding=ft.padding.only(4, 4, 4, 0),
+    clip_behavior=ft.ClipBehavior.HARD_EDGE,
+  )
+
 @ft.component
 def SvgButton(on_click, svg_path, tooltip=None) -> ft.Control:
   """ A button component that displays an SVG icon for when built in icons don't fit the use case. """

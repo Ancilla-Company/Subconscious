@@ -1,6 +1,6 @@
 import flet as ft
 
-from .components.buttons import IconButton
+from .components.buttons import IconButton, SidebarButton
 
 
 @ft.component
@@ -9,31 +9,9 @@ def Sidebar(
   on_workspace_click,
   on_threads_click,
   on_context_toggle,
+  on_settings_click,
   selected_view="none",
 ) -> ft.Control:
-
-  def SidebarIcon(icon, tooltip, view_name, callback, key=None, active=True):
-    is_selected = (selected_view == view_name) if active else False
-      
-    return ft.Container(
-      content=ft.IconButton(
-        icon=icon,
-        key=key,
-        padding=0,
-        tooltip=tooltip,
-        selected=is_selected,
-        on_click=callback,
-        style=ft.ButtonStyle(
-          shape=ft.RoundedRectangleBorder(radius=3),
-          bgcolor={
-            ft.ControlState.SELECTED: ft.Colors.SECONDARY_CONTAINER,
-            ft.ControlState.DEFAULT: ft.Colors.TRANSPARENT,
-          }
-        ),
-      ),
-      padding=ft.padding.only(4, 4, 4, 0),
-      clip_behavior=ft.ClipBehavior.HARD_EDGE,
-    )
 
   return ft.Column(
     width=48,
@@ -46,9 +24,9 @@ def Sidebar(
         content=ft.Column(
           spacing=0,
           controls=[
-            SidebarIcon(ft.Icons.MENU, "Toggle Context List", "toggle", on_context_toggle, active=False),
-            SidebarIcon(ft.Icons.FOLDER_OPEN_OUTLINED, "Workspaces", "workspaces", on_workspace_click),
-            SidebarIcon(ft.Icons.CHAT_OUTLINED, "Threads", "threads", on_threads_click),
+            SidebarButton(ft.Icons.MENU, "Toggle Context List", "toggle", selected_view, on_context_toggle, active=False),
+            SidebarButton(ft.Icons.FOLDER_OPEN_OUTLINED, "Workspaces", "workspaces", selected_view, on_workspace_click),
+            SidebarButton(ft.Icons.CHAT_OUTLINED, "Threads", "threads", selected_view, on_threads_click),
           ],
         ),
       ),
@@ -76,8 +54,8 @@ def Sidebar(
               #   on_click=lambda _: on_theme_toggle(),
               #   style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
               # ),
-              IconButton(icon=ft.Icons.SETTINGS_OUTLINED, tooltip="Settings", on_click=(lambda _: on_theme_toggle())),
-              IconButton(icon=ft.Icons.BRIGHTNESS_HIGH, tooltip="Toggle dark/light mode", on_click=(lambda _: on_theme_toggle()))
+              SidebarButton(ft.Icons.SETTINGS_OUTLINED, "Settings", "settings", selected_view, on_settings_click),
+              IconButton(icon=ft.Icons.BRIGHTNESS_HIGH, tooltip="Toggle dark/light mode", on_click=on_theme_toggle)
             ],
             spacing=4,
           ),
