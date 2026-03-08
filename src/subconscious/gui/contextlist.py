@@ -34,6 +34,7 @@ def ContextList(
   on_workspace_selected_for_edit=None,
   selected_workspace=None,
   threads_list=None,
+  on_new_thread=None,
   on_thread_select=None,
   selected_thread=None,
   selected_setting=None,
@@ -68,7 +69,7 @@ def ContextList(
         list_items = [ft.Text("No threads found.", size=14, color=ft.Colors.GREY_600)]
 
     headers = [
-      SvgButton(on_click=lambda _: print("New thread clicked"), svg_path="/new_thread.svg", tooltip="New Thread"),
+      SvgButton(on_click=lambda _: on_new_thread() if on_new_thread else None, svg_path="/new_thread.svg", tooltip="New Thread"),
       PopupMenuButton(
         icon=ft.Icons.FOLDER_OPEN_OUTLINED,
         tooltip="Switch Workspace",

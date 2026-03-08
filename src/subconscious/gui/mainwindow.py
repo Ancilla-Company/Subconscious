@@ -1,6 +1,7 @@
 import asyncio
 import flet as ft
 
+from .screens.chat import ChatWindow
 from .components.buttons import TextButton
 from .components.form import FormField, TextArea
 
@@ -12,7 +13,9 @@ def MainWindow(
     workspace_mode="view",
     on_save_workspace=None,
     on_delete_workspace=None,
-    messages=None
+    thread=None,
+    messages=None,
+    on_send_message=None
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -35,24 +38,11 @@ def MainWindow(
   # Choose content based on navigation state
   content = default_content
   if current_view == "threads":
-    # Threads view usually has the chat messages here
-    if messages:
-        message_list = [ft.Text(f"{m.role}: {m.content}") for m in messages]
-        content = ft.Container(
-            content=ft.ListView(
-                controls=message_list,
-                spacing=10,
-                padding=20,
-                auto_scroll=True
-            ),
-            expand=True
-        )
-    else:
-        content = ft.Container(
-          content=ft.Text("Select a thread to start chatting", size=16, color=ft.Colors.GREY_500),
-          alignment=ft.Alignment.CENTER,
-          expand=True
-        )
+    content = ChatWindow(
+      thread=thread,
+      messages=messages,
+      on_send_message=on_send_message
+    )
   elif current_view == "workspaces":
     if workspace_mode in ["create", "edit"]:
       ws_name, set_ws_name = ft.use_state(workspace.name if workspace else "")

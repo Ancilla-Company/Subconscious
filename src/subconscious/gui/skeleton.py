@@ -122,6 +122,56 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_view("workspaces")
     set_current_context("workspaces")
 
+  def handle_new_thread(e=None):
+    set_selected_thread(None)
+    set_messages([])
+    set_current_view("threads")
+    set_current_context("threads")
+
+  async def handle_send_message(content):
+    async with engine.db.get_session() as session:
+      # Get thread or create one
+      thread_to_use = selected_thread
+      if not thread_to_use:
+        # Determine workspace
+        workspace_id = selected_workspace.id if selected_workspace else None
+        if not workspace_id:
+          # Find default or first workspace
+          ws_result = await session.scalars(select(Workspace).limit(1))
+          first_ws = ws_result.first()
+          if first_ws:
+            workspace_id = first_ws.id
+          else:
+            new_ws = Workspace(name="General", description="Default workspace", network_id=engine.current_network.value, uuid=str(uuid.uuid4()))
+            session.add(new_ws)
+            await session.commit()
+            await session.refresh(new_ws)
+            workspace_id = new_ws.id
+        
+        thread_to_use = Thread(
+          title=content[:20] if len(content) > 0 else "New Thread",
+          description="A new conversation",
+          workspace_id=workspace_id
+        )
+        session.add(thread_to_use)
+        await session.commit()
+        await session.refresh(thread_to_use)
+        set_selected_thread(thread_to_use)
+      
+      # Add user message
+      user_msg = Message(thread_id=thread_to_use.id, role="user", content=content)
+      session.add(user_msg)
+      
+      # Add assistant echo
+      assistant_msg = Message(thread_id=thread_to_use.id, role="assistant", content=f"Echo: {content}")
+      session.add(assistant_msg)
+      
+      await session.commit()
+      
+    await load_threads(selected_workspace.id if selected_workspace else None)
+    if thread_to_use:
+      await load_messages(thread_to_use.id)
+
   # Add logic to switch to threads for a workspace if we want that behavior later
 
   async def handle_thread_click(thread):
@@ -234,6 +284,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_workspace_selected_for_edit=handle_workspace_click,
         selected_workspace=selected_workspace,
         threads_list=threads,
+        on_new_thread=handle_new_thread,
         on_thread_select=handle_thread_click,
         selected_thread=selected_thread,
         selected_setting=selected_setting,
@@ -245,7 +296,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         workspace_mode=workspace_mode,
         on_save_workspace=handle_save_workspace,
         on_delete_workspace=handle_delete_workspace,
-        messages=messages
+        thread=selected_thread,
+        messages=messages,
+        on_send_message=handle_send_message
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
