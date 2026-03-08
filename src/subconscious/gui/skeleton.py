@@ -129,48 +129,55 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("threads")
 
   async def handle_send_message(content):
-    async with engine.db.get_session() as session:
-      # Get thread or create one
-      thread_to_use = selected_thread
-      if not thread_to_use:
-        # Determine workspace
-        workspace_id = selected_workspace.id if selected_workspace else None
-        if not workspace_id:
-          # Find default or first workspace
-          ws_result = await session.scalars(select(Workspace).limit(1))
-          first_ws = ws_result.first()
-          if first_ws:
-            workspace_id = first_ws.id
-          else:
-            new_ws = Workspace(name="General", description="Default workspace", network_id=engine.current_network.value, uuid=str(uuid.uuid4()))
-            session.add(new_ws)
-            await session.commit()
-            await session.refresh(new_ws)
-            workspace_id = new_ws.id
+    print("Send message:", content)
+
+    # Wait a second to simulate thinking time and show the message sending flow in the UI
+    await asyncio.sleep(1)
+
+    # Update the message history for the current thread
+    
+    # async with engine.db.get_session() as session:
+    #   # Get thread or create one
+    #   thread_to_use = selected_thread
+    #   if not thread_to_use:
+    #     # Determine workspace
+    #     workspace_id = selected_workspace.id if selected_workspace else None
+    #     if not workspace_id:
+    #       # Find default or first workspace
+    #       ws_result = await session.scalars(select(Workspace).limit(1))
+    #       first_ws = ws_result.first()
+    #       if first_ws:
+    #         workspace_id = first_ws.id
+    #       else:
+    #         new_ws = Workspace(name="General", description="Default workspace", network_id=engine.current_network.value, uuid=str(uuid.uuid4()))
+    #         session.add(new_ws)
+    #         await session.commit()
+    #         await session.refresh(new_ws)
+    #         workspace_id = new_ws.id
         
-        thread_to_use = Thread(
-          title=content[:20] if len(content) > 0 else "New Thread",
-          description="A new conversation",
-          workspace_id=workspace_id
-        )
-        session.add(thread_to_use)
-        await session.commit()
-        await session.refresh(thread_to_use)
-        set_selected_thread(thread_to_use)
+    #     thread_to_use = Thread(
+    #       title=content[:20] if len(content) > 0 else "New Thread",
+    #       description="A new conversation",
+    #       workspace_id=workspace_id
+    #     )
+    #     session.add(thread_to_use)
+    #     await session.commit()
+    #     await session.refresh(thread_to_use)
+    #     set_selected_thread(thread_to_use)
       
-      # Add user message
-      user_msg = Message(thread_id=thread_to_use.id, role="user", content=content)
-      session.add(user_msg)
+    #   # Add user message
+    #   user_msg = Message(thread_id=thread_to_use.id, role="user", content=content)
+    #   session.add(user_msg)
       
-      # Add assistant echo
-      assistant_msg = Message(thread_id=thread_to_use.id, role="assistant", content=f"Echo: {content}")
-      session.add(assistant_msg)
+    #   # Add assistant echo
+    #   assistant_msg = Message(thread_id=thread_to_use.id, role="assistant", content=f"Echo: {content}")
+    #   session.add(assistant_msg)
       
-      await session.commit()
+    #   await session.commit()
       
-    await load_threads(selected_workspace.id if selected_workspace else None)
-    if thread_to_use:
-      await load_messages(thread_to_use.id)
+    # await load_threads(selected_workspace.id if selected_workspace else None)
+    # if thread_to_use:
+    #   await load_messages(thread_to_use.id)
 
   # Add logic to switch to threads for a workspace if we want that behavior later
 

@@ -3,7 +3,7 @@ import flet as ft
 
 from .screens.chat import ChatWindow
 from .components.buttons import TextButton
-from .components.form import FormField, TextArea
+from .components.forms import FormField, TextArea
 
 
 @ft.component
