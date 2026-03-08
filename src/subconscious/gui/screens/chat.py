@@ -2,6 +2,7 @@ import asyncio
 import flet as ft
 
 from ..components.buttons import IconButton
+from ..components.messages import MessageBubble, HumanMessage, AIMessage
 
 
 class ToolMenu(ft.Container):
@@ -181,8 +182,13 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
 
   async def handle_submit(e):
     if message_text.strip():
-      await on_send_message(message_text)
+      user_msg_content = message_text
       set_message_text("")
+
+      # Call parent on_send_message (for Engine/Skeleton logic)
+      # This will now handle the state updates (Human message & AI Echo)
+      if on_send_message:
+        await on_send_message(user_msg_content)
   
   # Tool buttons for attachments and images, which could be conditionally rendered
   model_in_use = ft.Text("GPT-4o", size=10, color=ft.Colors.GREY_500)
@@ -203,45 +209,12 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
   )
 
   # Message display logic
-  if messages:
-    message_list = ft.ListView(
-      controls=[ft.Text(f"{m.role}: {m.content}") for m in messages],
-      spacing=10,
-      auto_scroll=True
-    )
-  else:
-    message_list = ft.ListView(
-      controls=[ft.Text("placeholder text") for m in range(50)],
-      spacing=10,
-      auto_scroll=True
-    )
-
-  # # Determines if the chatbox is visible
-  # if self.llm_configured():
-  #   self.message_form.visible = True
-  #   self.message_controls.visible = True
-  #   if self.tools.tools_configured():
-  #     self.tools # Set the thread id
-  #     self.tools.visible = True
-  # else:
-  #   self.tools.visible = False
-  #   self.message_form.visible = False
-  #   self.message_controls.visible = False
-  
-  # # The chatwindow_header, shows the chat name and a settings button 3 button stack
-  # self.chatwindow_header = ft.Container(
-  #   ft.Row([
-  #     ft.Text(self.chats[self.active_thread].name, size=14, text_align=ft.TextAlign.LEFT, weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
-  #     ft.IconButton(
-  #         icon=ft.Icons.MORE_VERT_ROUNDED,
-  #         tooltip="More",
-  #         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-  #         on_click=self.show_chat_settings,
-  #       )
-  #   ], expand=True, height=40),
-  #   bgcolor=ft.Colors.SURFACE, expand=True, padding=ft.padding.only(10,4,4,4),
-  #   border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER))
-  # )
+  message_list = ft.ListView(
+    controls=[MessageBubble(m) for m in (messages or [])],
+    spacing=10,
+    auto_scroll=True,
+    expand=True
+  )
 
   # Returns the chat window content
   return ft.Stack([
@@ -251,7 +224,6 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
       padding=ft.padding.only(0, 48, 0, 110),
       expand=True,
       alignment=ft.Alignment.TOP_CENTER,
-      bgcolor=ft.Colors.RED
     ),
 
     # Message form / Chatbox

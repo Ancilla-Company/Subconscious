@@ -12,6 +12,7 @@ from ..gui.titlebar import TitleBar
 from ..gui.mainwindow import MainWindow
 from ..gui.contextlist import ContextList
 from ..db.models import Workspace, Thread, Message
+from ..gui.components.messages import HumanMessage, AIMessage
 
 
 @ft.observable
@@ -131,11 +132,20 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   async def handle_send_message(content):
     print("Send message:", content)
 
+    # 1. Add Human Message
+    user_msg = HumanMessage(content=content)
+    new_messages = messages + [user_msg]
+    set_messages(new_messages)
+
     # Wait a second to simulate thinking time and show the message sending flow in the UI
     await asyncio.sleep(1)
 
+    # 2. Add AI Echo
+    ai_msg = AIMessage(content=f"Echo: {content}")
+    set_messages(new_messages + [ai_msg])
+
     # Update the message history for the current thread
-    
+
     # async with engine.db.get_session() as session:
     #   # Get thread or create one
     #   thread_to_use = selected_thread

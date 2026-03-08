@@ -20,9 +20,10 @@ class ToolMessage:
   """ A class to represent a tool message in the chat.
       A tool message is a message generated from a tool response, and may contain structured data that needs to be rendered differently from plain text messages.
   """
-  def __init__(self, content):
+  def __init__(self, content, timestamp=None):
     self.content = content
     self.type = 'tool'
+    self.timestamp = timestamp if timestamp else datetime.now(timezone.utc)
 
 
 class AIMessage:
@@ -353,7 +354,7 @@ class MessageBubble(ft.Row):
       width=20,
       height=15,
       left=0,
-      alignment=ft.alignment.top_left,
+      alignment=ft.Alignment.TOP_LEFT,
       content = ft.Stack([
         ft.Container(
           bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
@@ -380,7 +381,7 @@ class MessageBubble(ft.Row):
       width=20,
       height=15,
       right=0,
-      alignment=ft.alignment.top_right,
+      alignment=ft.Alignment.TOP_RIGHT,
       content = ft.Stack([
         ft.Container(
           bgcolor=ft.Colors.PRIMARY_CONTAINER,
