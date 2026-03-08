@@ -58,6 +58,12 @@ def MainWindow(
       ws_name, set_ws_name = ft.use_state(workspace.name if workspace else "")
       ws_description, set_ws_description = ft.use_state(workspace.description if workspace else "")
       
+      def sync_workspace_state():
+        set_ws_name(workspace.name if workspace and workspace.name else "")
+        set_ws_description(workspace.description if workspace and workspace.description else "")
+        
+      ft.use_effect(sync_workspace_state, [workspace, workspace_mode])
+
       def save_ws(e):
         if on_save_workspace:
           asyncio.create_task(on_save_workspace(ws_name, ws_description, workspace.id if workspace else None))

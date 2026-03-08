@@ -135,11 +135,15 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         ws = await session.get(Workspace, ws_id)
         if ws:
           ws.name = name
+          ws.description = description
       else:
-        ws = Workspace(name=name, network_id=engine.current_network.value, uuid=str(uuid.uuid4()))
+        ws = Workspace(name=name, description=description, network_id=engine.current_network.value, uuid=str(uuid.uuid4()))
         session.add(ws)
       await session.commit()
+      await session.refresh(ws)
     await load_workspaces()
+    set_selected_workspace(ws)
+    set_workspace_mode("edit")
     set_current_view("workspaces")
 
   async def handle_delete_workspace(ws_id):
@@ -155,6 +159,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           await session.commit()
       close_dlg(e)
       await load_workspaces()
+      set_selected_workspace(None)
+      set_workspace_mode("view")
       set_current_view("workspaces")
 
     dlg = ft.AlertDialog(
