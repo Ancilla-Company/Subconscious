@@ -8,6 +8,7 @@ def Frame(
   mainwindow: ft.Control,
   context_visible: bool = True,
   on_context_width_change = None,
+  workspace_name: str = "General"
 ) -> ft.Control:
   """ Main application frame that organizes components with an adjustable divider """
   
@@ -40,16 +41,20 @@ def Frame(
             mainwindow
           ], spacing=0, expand=True),
           
-          # Footer
+          # Footer - Status Bar
           ft.Row([
             ft.Container(
               expand=True,
               height=20,
               bgcolor=ft.Colors.SURFACE,
               alignment=ft.Alignment.CENTER_RIGHT,
-              padding=ft.padding.only(0, 0, 5, 0),
+              padding=ft.padding.only(5, 0, 5, 0),
               border=ft.border.only(top=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER)),
-              content=ft.Text("Version 0.1.0  ", size=10, color=ft.Colors.GREY_600),
+              content=ft.Row([
+                ft.Text(f"Workspace: {workspace_name}", size=10, color=ft.Colors.GREY_600),
+                ft.VerticalDivider(width=1, color=ft.Colors.SECONDARY_CONTAINER),
+                ft.Text("Version 0.1.0  ", size=10, color=ft.Colors.GREY_600),
+              ], alignment=ft.MainAxisAlignment.END, spacing=10),
             ),
           ], spacing=0, height=20)
         ], spacing=0, expand=True),

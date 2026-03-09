@@ -32,11 +32,13 @@ def ContextList(
   workspaces_list=None,
   on_new_workspace=None,
   on_workspace_selected_for_edit=None,
-  selected_workspace=None,
+  editing_workspace=None,
   threads_list=None,
   on_new_thread=None,
   on_thread_select=None,
   selected_thread=None,
+  active_chat_workspace=None,
+  on_chat_workspace_change=None,
   selected_setting=None,
   set_selected_setting=None
 ) -> ft.Control:
@@ -45,7 +47,7 @@ def ContextList(
   # Ensure the selected state is reflected in the UI
   # This use_effect might be redundant if the parent component re-renders correctly, 
   # but user specifically asked for it to ensure updates.
-  # ft.use_effect(lambda: None, [selected_workspace, selected_thread, workspaces_list, threads_list])
+  # ft.use_effect(lambda: None, [editing_workspace, selected_thread, workspaces_list, threads_list])
 
   headers = []
 
@@ -79,7 +81,11 @@ def ContextList(
         icon=ft.Icons.FOLDER_OPEN_OUTLINED,
         tooltip="Switch Workspace",
         menu_items=[
-          WorkspacePopupItem(name="General", switch_workspace=lambda _: on_workspace_select() if on_workspace_select else print("Switching to General workspace"), slug="general")
+          WorkspacePopupItem(
+            name=ws.name,
+            switch_workspace=lambda _, w=ws: on_chat_workspace_change(w) if on_chat_workspace_change else None,
+            slug=ws.id
+          ) for ws in (workspaces_list or [])
         ]
       )
     ]
@@ -89,7 +95,7 @@ def ContextList(
     list_items = []
     if workspaces_list:
       for ws in workspaces_list:
-        is_selected = selected_workspace and ws.id == selected_workspace.id
+        is_selected = editing_workspace and ws.id == editing_workspace.id
         list_items.append(
           ContextItem(
             key=ws.id,

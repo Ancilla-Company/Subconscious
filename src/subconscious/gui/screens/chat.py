@@ -190,9 +190,6 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
       if on_send_message:
         await on_send_message(user_msg_content)
   
-  # Tool buttons for attachments and images, which could be conditionally rendered
-  model_in_use = ft.Text("GPT-4o", size=10, color=ft.Colors.GREY_500)
-  
   chat_name = thread.title if thread else "New Thread"
   chatwindow_header = ft.Container(
     ft.Row([
@@ -284,7 +281,6 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
                   horizontal_alignment=ft.CrossAxisAlignment.END, spacing=0,
                 ),
               ),
-              # model_in_use,
               ], alignment=ft.MainAxisAlignment.END, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0,
             ),
             width=784,

@@ -68,7 +68,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   
   # Workspace Management State
   workspaces, set_workspaces = ft.use_state(list())
-  selected_workspace, set_selected_workspace = ft.use_state(None)
+  editing_workspace, set_editing_workspace = ft.use_state(None) # For the "Workspaces" view
+  active_chat_workspace, set_active_chat_workspace = ft.use_state(None) # For the "Threads" view
   workspace_mode, set_workspace_mode = ft.use_state("view") # view, create, edit
   
   # Thread Management State
@@ -96,6 +97,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       result = await session.scalars(stmt)
       set_threads(result.all())
 
+  def on_workspace_change():
+    if active_chat_workspace:
+      asyncio.create_task(load_threads(active_chat_workspace.id))
+    else:
+      asyncio.create_task(load_threads())
+  
+  ft.use_effect(on_workspace_change, [active_chat_workspace])
+
   async def load_messages(thread_id):
     async with engine.db.get_session() as session:
       stmt = select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at)
@@ -111,14 +120,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   def handle_new_workspace(e):
     # Deselect threads when creating a new workspace?
     # set_selected_thread(None)
-    set_selected_workspace(None)
+    set_editing_workspace(None)
     set_workspace_mode("create")
     set_current_view("workspaces")
     set_current_context("workspaces")
 
   def handle_workspace_click(workspace):
     # set_selected_thread(None)
-    set_selected_workspace(workspace)
+    set_editing_workspace(workspace)
     set_workspace_mode("edit")
     set_current_view("workspaces")
     set_current_context("workspaces")
@@ -209,7 +218,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       await session.commit()
       await session.refresh(ws)
     await load_workspaces()
-    set_selected_workspace(ws)
+    set_editing_workspace(ws)
     set_workspace_mode("edit")
     set_current_view("workspaces")
 
@@ -226,7 +235,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           await session.commit()
       close_dlg(e)
       await load_workspaces()
-      set_selected_workspace(None)
+      set_editing_workspace(None)
       set_workspace_mode("view")
       set_current_view("workspaces")
 
@@ -299,17 +308,19 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         workspaces_list=workspaces,
         on_new_workspace=handle_new_workspace,
         on_workspace_selected_for_edit=handle_workspace_click,
-        selected_workspace=selected_workspace,
+        editing_workspace=editing_workspace,
         threads_list=threads,
         on_new_thread=handle_new_thread,
         on_thread_select=handle_thread_click,
         selected_thread=selected_thread,
+        active_chat_workspace=active_chat_workspace,
+        on_chat_workspace_change=set_active_chat_workspace,
         selected_setting=selected_setting,
         set_selected_setting=set_selected_setting
       ),
       mainwindow=MainWindow(
         current_view=current_view,
-        workspace=selected_workspace,
+        workspace=editing_workspace,
         workspace_mode=workspace_mode,
         on_save_workspace=handle_save_workspace,
         on_delete_workspace=handle_delete_workspace,
@@ -319,6 +330,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
+      workspace_name=active_chat_workspace.name if active_chat_workspace else "General"
     )
   ]
 
