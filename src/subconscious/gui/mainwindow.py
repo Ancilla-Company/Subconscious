@@ -4,6 +4,7 @@ import flet as ft
 from .screens.chat import ChatWindow
 from .components.buttons import TextButton
 from .components.forms import FormField, TextArea
+from .components.layout import ResponsiveItem, ResponsiveParent
 
 
 @ft.component
@@ -61,46 +62,55 @@ def MainWindow(
       def delete_ws(e):
         if on_delete_workspace and workspace:
           asyncio.create_task(on_delete_workspace(workspace.id))
-
+        
       content = ft.Container(
-        content=ft.Column(
+        content=ResponsiveParent(
           [
-            ft.Row([
+            ResponsiveItem(
+              ft.Container(
                 ft.Text(
                   "New Workspace" if workspace_mode == "create" else "Edit Workspace",
                   size=20,
                   weight=ft.FontWeight.W_500,
                   color=ft.Colors.PRIMARY,
+                  expand=True
                 ),
-              ],
-              spacing=4,
-              height=40,
+                height=40,
+                padding=ft.padding.only(0, 6, 0 , 0),
+                margin=ft.margin.only(0, 4, 0, 4)
+              )
             ),
-            FormField(
-              label="Name",
-              value=ws_name,
-              on_change=lambda e: set_ws_name(e.control.value),
-              hint="Enter a name for your workspace"
+            ResponsiveItem(
+              FormField(
+                label="Name",
+                value=ws_name,
+                on_change=lambda e: set_ws_name(e.control.value),
+                hint="Enter a name for your workspace"
+              )
             ),
-            TextArea(
-              label="Description",
-              value=ws_description,
-              on_change=lambda e: set_ws_description(e.control.value),
-              hint="Enter a description for your workspace"
+            ResponsiveItem(
+              TextArea(
+                label="Description",
+                value=ws_description,
+                on_change=lambda e: set_ws_description(e.control.value),
+                hint="Enter a description for your workspace"
+              )
             ),
-            ft.Row(
-              [
-                TextButton(on_click=save_ws, text="Save"),
-                TextButton(on_click=delete_ws, text="Delete") if workspace_mode == "edit" else ft.Container(),
-              ],
-              spacing=4,
-              height=40
+            ResponsiveItem(
+              ft.Row(
+                [
+                  TextButton(on_click=save_ws, text="Save"),
+                  TextButton(on_click=delete_ws, text="Delete") if workspace_mode == "edit" else ft.Container(),
+                ],
+                wrap=True,
+                spacing=4
+              ),
             )
-          ],
-          spacing=15,
-          scroll=ft.ScrollMode.AUTO, # BUG: Causes the column content to be vertically centered
-        )
+          ]
+        ),
+        expand=True
       )
+
     else:
       content = ft.Container(
         content=ft.Text("Select a workspace to view or edit", size=16, color=ft.Colors.GREY_500),
