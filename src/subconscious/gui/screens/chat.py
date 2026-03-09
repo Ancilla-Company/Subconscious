@@ -283,7 +283,7 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
               ),
               ], alignment=ft.MainAxisAlignment.END, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0,
             ),
-            width=784,
+            width=750,
             padding = ft.padding.only(15, 4, 15, 15),
             alignment=ft.Alignment.BOTTOM_CENTER,
             bgcolor=ft.Colors.SURFACE,

@@ -182,10 +182,8 @@ class MessageBubble(ft.Row):
           ], clip_behavior=ft.ClipBehavior.NONE),
           clip_behavior=ft.ClipBehavior.NONE, 
           padding=ft.padding.only(15, 0, 15, 0)
-          # width=750,
-          # alignment= "end" if self.message.type == 'human' else "start",
         ),
-      ], width=750, alignment= "end" if message.type == 'human' else "start", wrap=True),
+      ], width=750, alignment=ft.MainAxisAlignment.END if message.type == 'human' else ft.MainAxisAlignment.START, wrap=True),
     ]
 
   def update_message_stream(self, chunk, drain: bool = False):

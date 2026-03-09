@@ -146,6 +146,7 @@ def ContextList(
     visible=visible,
     width=width,
     bgcolor=ft.Colors.SURFACE,
+    padding=ft.padding.only(0, 4, 0, 4),
     content=ft.Column([
       # Header
       ft.Container(
@@ -159,7 +160,7 @@ def ContextList(
           ),
           *headers
         ], spacing=4),
-        padding=ft.padding.only(15, 4, 15, 4)
+        padding=ft.padding.only(15, 0, 15, 0)
       ),
       
       # List container
@@ -171,5 +172,5 @@ def ContextList(
           controls=list_items,
         ),
       ),
-    ], spacing=0),
+    ], spacing=4),
   )
