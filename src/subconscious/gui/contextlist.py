@@ -66,7 +66,12 @@ def ContextList(
           )
         )
     else:
-        list_items = [ft.Text("No threads found.", size=14, color=ft.Colors.GREY_600)]
+      list_items = [
+        ft.Container(
+          content=ft.Text("No threads found.", size=14, color=ft.Colors.GREY_600),
+          padding=ft.padding.only(15, 0, 15, 0)
+        )
+      ]
 
     headers = [
       SvgButton(on_click=lambda _: on_new_thread() if on_new_thread else None, svg_path="/new_thread.svg", tooltip="New Thread"),
@@ -96,7 +101,12 @@ def ContextList(
           )
         )
     else:
-      list_items = [ft.Text("No workspaces found.", size=14, color=ft.Colors.GREY_600)]
+      list_items = [
+        ft.Container(
+          content=ft.Text("No workspaces found.", size=14, color=ft.Colors.GREY_600),
+          padding=ft.padding.only(15, 0, 15, 0)
+        )
+      ]
 
     headers = [IconButton(icon=ft.Icons.ADD, tooltip="New Workspace", on_click=on_new_workspace)]
 
@@ -130,19 +140,21 @@ def ContextList(
     visible=visible,
     width=width,
     bgcolor=ft.Colors.SURFACE,
-    padding=ft.padding.only(15, 4, 15, 4),
     content=ft.Column([
       # Header
-      ft.Row([
-        ft.Text(
-          title_text,
-          size=20,
-          weight=ft.FontWeight.W_500,
-          color=ft.Colors.PRIMARY,
-          expand=True,
-        ),
-        *headers
-      ], spacing=4),
+      ft.Container(
+        content=ft.Row([
+          ft.Text(
+            title_text,
+            size=20,
+            weight=ft.FontWeight.W_500,
+            color=ft.Colors.PRIMARY,
+            expand=True,
+          ),
+          *headers
+        ], spacing=4),
+        padding=ft.padding.only(15, 4, 15, 4)
+      ),
       
       # List container
       ft.Container(
@@ -153,5 +165,5 @@ def ContextList(
           controls=list_items,
         ),
       ),
-    ], spacing=4),
+    ], spacing=0),
   )

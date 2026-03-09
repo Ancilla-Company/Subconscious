@@ -179,7 +179,9 @@ class MessageBubble(ft.Row):
               margin=ft.margin.only(right=7, left=7),
             )
 
-          ], clip_behavior=ft.ClipBehavior.NONE), clip_behavior=ft.ClipBehavior.NONE, 
+          ], clip_behavior=ft.ClipBehavior.NONE),
+          clip_behavior=ft.ClipBehavior.NONE, 
+          padding=ft.padding.only(15, 0, 15, 0)
           # width=750,
           # alignment= "end" if self.message.type == 'human' else "start",
         ),

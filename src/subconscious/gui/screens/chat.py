@@ -221,7 +221,7 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
     # Chat thread messages
     ft.Container(
       content=ft.SelectionArea(content=message_list) if llm_configured() else ft.Text("Configure LLM"),
-      padding=ft.padding.only(0, 48, 0, 110),
+      padding=ft.padding.only(0, 48, 0, 106),
       expand=True,
       alignment=ft.Alignment.TOP_CENTER,
     ),
@@ -284,11 +284,11 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
                   horizontal_alignment=ft.CrossAxisAlignment.END, spacing=0,
                 ),
               ),
-              model_in_use,
+              # model_in_use,
               ], alignment=ft.MainAxisAlignment.END, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0,
             ),
             width=784,
-            padding = ft.padding.only(14, 0, 14, 0),
+            padding = ft.padding.only(15, 4, 15, 15),
             alignment=ft.Alignment.BOTTOM_CENTER,
             bgcolor=ft.Colors.SURFACE,
           ),

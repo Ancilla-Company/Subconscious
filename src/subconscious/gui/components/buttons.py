@@ -85,22 +85,25 @@ def ContextItem(key, name, description, on_click, updated_at=None, selected=Fals
     if updated_at is None: return ""
     return updated_at.strftime("%d/%m/%Y %H:%M")
 
-  return ft.TextButton(
-    on_click=handle_click,
-    style=ft.ButtonStyle(
-      shape=ft.RoundedRectangleBorder(radius=3),
-      bgcolor=ft.Colors.SECONDARY_CONTAINER if selected else ft.Colors.TRANSPARENT,
+  return ft.Container(
+    content=ft.TextButton(
+      on_click=handle_click,
+      style=ft.ButtonStyle(
+        shape=ft.RoundedRectangleBorder(radius=3),
+        bgcolor=ft.Colors.SECONDARY_CONTAINER if selected else ft.Colors.TRANSPARENT,
+      ),
+      content=ft.Container(
+        ft.Column([
+          ft.Row([
+            ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
+            ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
+          ], spacing=10),
+            ft.Text(description, size=14, weight=ft.FontWeight.W_100, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, tooltip=description)
+        ], spacing=5),
+        padding=ft.padding.all(10)
+      )
     ),
-    content=ft.Container(
-      ft.Column([
-        ft.Row([
-          ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
-          ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
-        ], spacing=10),
-          ft.Text(description, size=14, weight=ft.FontWeight.W_100, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, tooltip=description)
-      ], spacing=5),
-      padding=ft.padding.all(10)
-    )
+    padding=ft.padding.only(15, 0, 15, 0)
   )
 
 @ft.component

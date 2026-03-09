@@ -112,7 +112,7 @@ def MainWindow(
 
   return ft.Container(
     content=content,
-    padding=ft.padding.only(0, 4, 0, 4),
+    padding=ft.padding.only(0, 0, 0, 0),
     expand=True,
     bgcolor=ft.Colors.SURFACE,
   )
