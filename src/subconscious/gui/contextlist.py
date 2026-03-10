@@ -140,7 +140,12 @@ def ContextList(
 
   else:
     title_text = "No Activity Selected"
-    list_items = [ft.Text("Select an activity from the sidebar", size=14, color=ft.Colors.GREY_600)]
+    list_items = [
+      ft.Container(
+        content=ft.Text("Select an activity from the sidebar", size=14, color=ft.Colors.GREY_600),
+        padding=ft.padding.only(15, 0, 15, 0)
+      )
+    ]
 
   return ft.Container(
     visible=visible,
