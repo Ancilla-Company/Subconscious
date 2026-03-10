@@ -83,5 +83,6 @@ class AppState(Base):
   __tablename__ = 'app_state'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
-  key = Column(String, nullable=False, unique=True)
+  key = Column(String, nullable=False)
   value = Column(String, nullable=False)
+  tag = Column(String, nullable=True) # To categorize state/settings

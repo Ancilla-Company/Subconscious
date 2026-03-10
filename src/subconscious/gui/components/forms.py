@@ -80,3 +80,15 @@ def TextArea(label, value, on_change, hint, lines=10) -> ft.Control:
       ],
       spacing=0,
     )
+
+def CheckBox(label, value, on_change) -> ft.Control:
+  """ Checkbox formatted to the application's styling """
+  return ft.Row([
+    ft.Checkbox(
+      label=label,
+      # data=(title, key, val),
+      value=value, on_change=on_change,
+      shape=ft.RoundedRectangleBorder(radius=3),
+      label_style=ft.TextStyle(size=15, overflow=ft.TextOverflow.CLIP), tooltip=label, expand_loose=True
+    ),
+  ], spacing=0, wrap=True)

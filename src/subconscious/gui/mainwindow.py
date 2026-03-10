@@ -2,8 +2,9 @@ import asyncio
 import flet as ft
 
 from .screens.chat import ChatWindow
+from .screens.settings import General
 from .components.buttons import TextButton
-from .components.forms import FormField, TextArea
+from .components.forms import FormField, TextArea, CheckBox
 from .components.layout import ResponsiveItem, ResponsiveParent
 
 
@@ -12,11 +13,14 @@ def MainWindow(
     current_view: str = "default",
     workspace=None,
     workspace_mode="view",
+    settings_mode="general",
     on_save_workspace=None,
     on_delete_workspace=None,
     thread=None,
     messages=None,
-    on_send_message=None
+    on_send_message=None,
+    settings=None,
+    on_setting_change=None
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -39,11 +43,28 @@ def MainWindow(
   # Choose content based on navigation state
   content = default_content
   if current_view == "threads":
-    content = ChatWindow(
-      thread=thread,
-      messages=messages,
-      on_send_message=on_send_message
+    content = ft.Container(
+      content=ChatWindow(
+        thread=thread,
+        messages=messages,
+        on_send_message=on_send_message
+      )
     )
+  elif current_view == "settings":
+    if settings_mode == "general":
+      content = General(settings=settings, on_setting_change=on_setting_change)
+    elif settings_mode == "models":
+      content = ft.Container(
+        content=ft.Text("Model Settings (Work in Progress)", size=16, color=ft.Colors.GREY_500),
+        alignment=ft.Alignment.CENTER,
+        expand=True
+      )
+    else:
+      content = ft.Container(
+        content=ft.Text("Select a settings category", size=16, color=ft.Colors.GREY_500),
+        alignment=ft.Alignment.CENTER,
+        expand=True
+      )
   elif current_view == "workspaces":
     if workspace_mode in ["create", "edit"]:
       ws_name, set_ws_name = ft.use_state(workspace.name if workspace else "")

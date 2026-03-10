@@ -42,13 +42,7 @@ def ContextList(
   selected_setting=None,
   set_selected_setting=None
 ) -> ft.Control:
-  """ Displays a list of items for the active view (Threads, Workspaces, etc.) """
-  
-  # Ensure the selected state is reflected in the UI
-  # This use_effect might be redundant if the parent component re-renders correctly, 
-  # but user specifically asked for it to ensure updates.
-  # ft.use_effect(lambda: None, [editing_workspace, selected_thread, workspaces_list, threads_list])
-
+  """ Displays a list of items for the active view (Threads, Workspaces, Settings, etc.) """
   headers = []
 
   if current_context == "threads":
@@ -123,17 +117,15 @@ def ContextList(
         key="general",
         name="General",
         description="App settings and preferences",
-        on_click=lambda _: print("General settings"),
-        selected=selected_setting == "general",
-        set_selected=set_selected_setting
+        on_click=lambda _: set_selected_setting("general"),
+        selected=selected_setting == "general"
       ),
       ContextItem(
         key="models",
-        name="Language Models",
+        name="Models",
         description="Configure LLMs and API keys",
-        on_click=lambda _: print("Model settings"),
-        selected=selected_setting == "models",
-        set_selected=set_selected_setting
+        on_click=lambda _: set_selected_setting("models"),
+        selected=selected_setting == "models"
       )
     ]
     headers = []
