@@ -9,6 +9,7 @@ from ..engine import Engine
 from ..gui.frame import Frame
 from ..gui.sidebar import Sidebar
 from ..gui.titlebar import TitleBar
+# from ..gui.components.tray import *
 from ..gui.mainwindow import MainWindow
 from ..gui.contextlist import ContextList
 from ..db.models import Workspace, Thread, Message
@@ -349,6 +350,9 @@ async def main(page: ft.Page, config):
   page.theme_mode = ft.ThemeMode.LIGHT
   page.theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.BLACK, secondary=ft.Colors.GREY, surface=ft.Colors.WHITE, secondary_container=ft.Colors.GREY_300, primary_container=ft.Colors.GREY_300))
   page.dark_theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.WHITE, secondary=ft.Colors.GREY, surface=ft.Colors.BLACK87, secondary_container=ft.Colors.GREY_800, primary_container=ft.Colors.GREY_800))
+
+  # Initialize Tray Icon, buggy
+  # Tray(page)
 
   # Start the engine and gui
   engine = Engine()
