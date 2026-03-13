@@ -1,8 +1,8 @@
 import asyncio
 import flet as ft
 
+from .screens.settings import Model
 from .screens.chat import ChatWindow
-from .screens.settings import General
 from .components.buttons import TextButton
 from .components.forms import FormField, TextArea, CheckBox
 from .components.layout import ResponsiveItem, ResponsiveParent
@@ -13,7 +13,7 @@ def MainWindow(
     current_view: str = "default",
     workspace=None,
     workspace_mode="view",
-    settings_mode="general",
+    settings_mode="models",
     on_save_workspace=None,
     on_delete_workspace=None,
     thread=None,
@@ -51,12 +51,34 @@ def MainWindow(
       )
     )
   elif current_view == "settings":
-    if settings_mode == "general":
-      content = General(settings=settings, on_setting_change=on_setting_change)
-    elif settings_mode == "models":
+    # if settings_mode == "general":
+    #   content = General(settings=settings, on_setting_change=on_setting_change)
+    if settings_mode == "models":
       content = ft.Container(
-        content=ft.Text("Model Settings (Work in Progress)", size=16, color=ft.Colors.GREY_500),
-        alignment=ft.Alignment.CENTER,
+        content=ResponsiveParent(
+          [
+            # ResponsiveItem(
+            #   ft.Container(
+            #     ft.Text(
+            #       "Settings",
+            #       size=20,
+            #       weight=ft.FontWeight.W_500,
+            #       color=ft.Colors.PRIMARY,
+            #       expand=True
+            #     ),
+            #     height=40,
+            #     padding=ft.padding.only(0, 6, 0 , 0),
+            #     margin=ft.margin.only(0, 4, 0, 4)
+            #   )
+            # ),
+            ResponsiveItem(
+              Model(
+                settings=settings,
+                on_setting_change=on_setting_change
+              ),
+            ),
+          ]
+        ),
         expand=True
       )
     else:

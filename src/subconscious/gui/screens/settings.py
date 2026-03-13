@@ -3,7 +3,7 @@ import json
 import asyncio
 import flet as ft
 
-from ..components.buttons import IconButton
+from ..components.buttons import IconButton, TextButton
 from ..components.layout import ResponsiveParent, ResponsiveItem
 from ..components.forms import FormField, PasswordField, DropdownField
 
@@ -123,12 +123,33 @@ def Model(settings: dict = None, on_setting_change=None) -> ft.Control:
         hint="Enter a memmorable name for this configuration"
       ),
 
-      # Delete button
-      IconButton(
-        on_click=lambda _: print("Delete Clicked"),
-        icon=ft.Icons.DELETE_OUTLINE,
-        icon_colour=ft.Colors.ERROR,
-        tooltip="Delete configuration"
+      # Save & Delete button
+      ft.Row(
+        [
+          TextButton(
+            on_click=lambda _: print("Save Button Clicked"),
+            text="Save",
+            icon=ft.Icons.SAVE_OUTLINED,
+            visible=True
+          ),
+          ft.Container(
+            ft.Row(
+              [
+                IconButton(
+                  on_click=lambda _: print("Delete Clicked"),
+                  icon=ft.Icons.DELETE_OUTLINE,
+                  icon_colour=ft.Colors.ERROR,
+                  tooltip="Delete configuration"
+                )
+              ],
+              expand=True,
+              wrap=True,
+              alignment=ft.MainAxisAlignment.END,
+            ), 
+            expand=True
+          ),
+        ],
+        spacing=4
       )
     ],
     spacing=15,
@@ -146,52 +167,64 @@ def Model(settings: dict = None, on_setting_change=None) -> ft.Control:
     title_text = alias if alias else (f"{provider}-{model_name}" if provider or model_name else "New Model")
 
   panel = ft.ExpansionPanel(
-    header=ft.Text("Model", weight=ft.FontWeight.BOLD),
+    header=ft.Container(
+      content=ft.Text(
+        "Model",
+        size=18,
+        weight=ft.FontWeight.W_400
+      ),
+      padding=ft.padding.only(15, 10, 0, 0)
+    ),
     content=ft.Container(
       content=panel_content,
       padding=ft.padding.all(0),
-      # bgcolor=ft.Colors.SURFACE if ft.ThemeMode.LIGHT else ft.Colors.GREY_900,
       border_radius=ft.border_radius.only(3, 3, 3, 3)
-      # border_radius=ft.border_radius.only(bottom_left=3, bottom_right=3)
     ),
     can_tap_header=True,
     expanded=True,
-    # shape=ft.RoundedRectangleBorder(radius=3),
-    # collapsed_shape=ft.RoundedRectangleBorder(radius=3),
   )
 
   return ft.Container(
-    content=ft.Column([
-      ft.Row([
-        ft.Text(
-          "Models",
-          size=20,
-          weight=ft.FontWeight.W_500,
-          expand=True
+    content=ft.Column(
+      [
+        ft.Container(
+          content=ft.Row(
+            [
+              ft.Text(
+                "Models",
+                size=20,
+                weight=ft.FontWeight.W_500,
+                expand=True
+              ),
+              TextButton(
+                on_click=add_model,
+                text="Add Model",
+                icon=ft.Icons.ADD
+              )
+            ],
+            height=40
+          ),
+          padding=ft.padding.only(0, 4, 0, 0)
         ),
-        ft.ElevatedButton(
-          "Add Model",
-          icon=ft.Icons.ADD,
-          on_click=add_model
-        ),
-      ]),
-      ft.Column(
-        [
-          ft.ExpansionPanelList(
-            expand_icon_color=ft.Colors.PRIMARY,
+        ft.Column(
+          [
+            ft.ExpansionPanelList(
+              expand_icon_color=ft.Colors.PRIMARY,
 
-            elevation=0,
-            divider_color=ft.Colors.SECONDARY_CONTAINER,
-            expanded_header_padding=ft.padding.all(0),
-            controls=[
-              panel,
-            ]
-          )
-        ],
-        spacing=10,
-        scroll=ft.ScrollMode.ADAPTIVE
-      ),
-    ], spacing=15),
+              elevation=0,
+              divider_color=ft.Colors.SECONDARY_CONTAINER,
+              expanded_header_padding=ft.padding.all(0),
+              controls=[
+                panel,
+              ]
+            )
+          ],
+          spacing=10,
+          scroll=ft.ScrollMode.ADAPTIVE
+        ),
+      ],
+      spacing=4
+    ),
     padding=ft.padding.all(0),
     expand=True
   )

@@ -167,13 +167,21 @@ def PopupMenuButton(tooltip, menu_items, icon=None, src=None) -> ft.Control:
     )
 
 @ft.component
-def TextButton(on_click, text, tooltip=None) -> ft.Control:
+def TextButton(on_click, text, tooltip=None, icon=None, visible=True) -> ft.Control:
   """ Style lanugage for Text Area type button """
   return ft.TextButton(
-    content=ft.Text(text, size=14, weight=ft.FontWeight.W_500),
+    content=ft.Text(
+      text,
+      size=14,
+      weight=ft.FontWeight.W_500
+    ),
     tooltip=tooltip,
     on_click=on_click,
-    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+    style=ft.ButtonStyle(
+      shape=ft.RoundedRectangleBorder(radius=3)
+    ),
     margin=ft.margin.only(0, 0, 0, 0),
-    height=40
+    height=40,
+    icon=icon,
+    visible=visible
   )
