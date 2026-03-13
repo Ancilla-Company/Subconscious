@@ -48,12 +48,13 @@ def SvgButton(on_click, svg_path, tooltip=None) -> ft.Control:
   )
 
 @ft.component
-def IconButton(on_click, icon, tooltip=None) -> ft.Control:
+def IconButton(on_click, icon, icon_colour=None, tooltip=None) -> ft.Control:
   """ A button component that displays a built in icon. """
   return ft.IconButton(
     icon=icon,
     tooltip=tooltip,
     on_click=on_click,
+    icon_color=icon_colour,
     style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
   )
 

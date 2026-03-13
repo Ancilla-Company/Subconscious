@@ -25,8 +25,96 @@ def FormField(label, value, on_change, hint) -> ft.Control:
             clip_behavior=ft.ClipBehavior.HARD_EDGE, 
             content_padding=ft.padding.only(10, -10, 2, 2),
             hint_text=hint,
-            hint_style=ft.TextStyle(color=ft.Colors.SECONDARY, weight=ft.FontWeight.NORMAL),
+            hint_style=ft.TextStyle(
+              color=ft.Colors.SECONDARY,
+              weight=ft.FontWeight.NORMAL
+            ),
             expand=True
+          ),
+          border=ft.border.all(1, ft.Colors.PRIMARY),
+          padding=ft.padding.only(0, 0, 0, 0),
+          border_radius=3,
+          margin=ft.margin.all(0),
+          bgcolor=ft.Colors.SURFACE,
+          expand=True,
+          height=40,
+          clip_behavior=ft.ClipBehavior.HARD_EDGE,
+        )
+      ],
+      spacing=0,
+    )
+
+def PasswordField(label, value, on_change, hint) -> ft.Control:
+  """ Password field formatted to the application's style language """
+  return ft.Column(
+      [
+        ft.Container(
+          content=ft.Text(
+            label,
+            size=15,
+            color=ft.Colors.PRIMARY,
+          ),
+          height=25
+        ),
+        ft.Container(content=
+          ft.TextField(
+            value=value,
+            on_change=on_change,
+            border=ft.InputBorder.NONE,
+            border_color=ft.Colors.TRANSPARENT,
+            bgcolor=ft.Colors.TRANSPARENT,
+            border_radius=3,
+            password=True,
+            can_reveal_password=True,
+            multiline=False, 
+            clip_behavior=ft.ClipBehavior.HARD_EDGE, 
+            content_padding=ft.padding.only(10, 5, 2, 2),
+            hint_text=hint,
+            hint_style=ft.TextStyle(
+              color=ft.Colors.SECONDARY,
+              weight=ft.FontWeight.NORMAL
+            ),
+            expand=True
+          ),
+          border=ft.border.all(1, ft.Colors.PRIMARY),
+          padding=ft.padding.only(0, 0, 0, 0),
+          border_radius=3,
+          margin=ft.margin.all(0),
+          bgcolor=ft.Colors.SURFACE,
+          expand=True,
+          height=40,
+          clip_behavior=ft.ClipBehavior.HARD_EDGE,
+        )
+      ],
+      spacing=0,
+    )
+
+def DropdownField(label, values, on_change, hint) -> ft.Control:
+  """ Dropdown field formatted to the application's style language """
+  return ft.Column(
+      [
+        ft.Container(
+          content=ft.Text(
+            label,
+            size=15,
+            color=ft.Colors.PRIMARY,
+          ),
+          height=25
+        ),
+        ft.Container(content=
+          ft.Dropdown(
+            border_color=ft.Colors.TRANSPARENT,
+            # bgcolor=ft.Colors.TRANSPARENT,
+            border_radius=3,
+            content_padding=ft.padding.only(10, 5, 2, 2),
+            hint_text=hint,
+            hint_style=ft.TextStyle(
+              color=ft.Colors.SECONDARY,
+              weight=ft.FontWeight.NORMAL
+            ),
+            expand=True,
+            dense=True,
+            options=values,
           ),
           border=ft.border.all(1, ft.Colors.PRIMARY),
           padding=ft.padding.only(0, 0, 0, 0),

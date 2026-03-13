@@ -3,15 +3,24 @@ import sys
 import uuid
 import yaml
 import time
+import json
 import logging
 import pathlib
 import keyring
 from typing import Optional
+from cryptography.fernet import Fernet
 from dataclasses import dataclass, field
 
 
 # Logging setup
 logger = logging.getLogger("subconscious")
+
+# Secrets Setup
+SUBCONSCIOUS_KEY = keyring.get_password("subconscious", "encryption_key")
+if not SUBCONSCIOUS_KEY:
+  SUBCONSCIOUS_KEY = Fernet.generate_key().decode()
+  keyring.set_password("subconscious", "encryption_key", SUBCONSCIOUS_KEY)
+CIPHER = Fernet(SUBCONSCIOUS_KEY.encode())
 
 
 LOGO = """
@@ -55,30 +64,6 @@ def get_default_data_dir() -> pathlib.Path:
     if xdg_config:
       return pathlib.Path(xdg_config) / "subconscious"
     return pathlib.Path.home() / ".config" / "subconscious"
-
-
-class KeyManager:
-  """Manage API keys using the system keyring service."""
-  SERVICE_NAME = "subconscious-engine"
-
-  @staticmethod
-  def set_key(provider: str, key: str):
-    """Securely store an API key."""
-    try:
-      keyring.set_password(KeyManager.SERVICE_NAME, provider.upper(), key)
-      return True
-    except Exception as e:
-      logger.error(f"Failed to set key for {provider}: {e}")
-      return False
-
-  @staticmethod
-  def get_key(provider: str) -> Optional[str]:
-    """Retrieve an API key."""
-    try:
-      return keyring.get_password(KeyManager.SERVICE_NAME, provider.upper())
-    except Exception as e:
-      logger.error(f"Failed to get key for {provider}: {e}")
-      return None
 
 
 @dataclass
@@ -126,6 +111,31 @@ class Config:
   def db_path(self) -> str:
     """Returns the path to the SQLite database."""
     return f"sqlite+aiosqlite:///{self.data_dir / 'subconscious.db'}"
+  
+  async def write_keyring(self) -> None:
+    """ Update the keyring with the new secrets """
+    encrypted = CIPHER.encrypt(json.dumps(self.secrets).encode())
+    with open(f'{self.data_dir}/data.enc', 'wb') as f:
+      f.write(encrypted)
+
+  def read_keyring(self) -> None:
+    """ Read the keyring for the secrets """
+    # Check if the keyring file exists
+    if os.path.exists(f'{self.data_dir}/data.enc'):
+      with open(f'{self.data_dir}/data.enc', 'rb') as f:
+        encrypted = f.read()
+        decrypted = CIPHER.decrypt(encrypted).decode()
+    # Else set to none
+    else:
+      decrypted = None
+
+    # Return the decrypted settings or default values
+    self.secrets = json.loads(decrypted) if decrypted else {
+      "models": {},
+      "tools": {},
+      "mcp": {},
+      "_thread_tools": {}
+    }
 
 
 def log_config(config: Config):
