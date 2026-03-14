@@ -3,6 +3,7 @@ import asyncio
 import flet as ft
 from typing import Optional, cast
 
+from ...constants import VERSION
 from ..components.buttons import IconButton, TextButton
 from ..components.layout import ResponsiveParent, ResponsiveItem
 from ..components.forms import FormField, PasswordField, DropdownField
@@ -302,7 +303,6 @@ def Model(
             ],
             height=40
           ),
-          # padding=ft.padding.only(0, 4, 0, 0)
         ),
         ft.Column(
           [
@@ -317,6 +317,122 @@ def Model(
           ],
           spacing=10,
           scroll=ft.ScrollMode.ADAPTIVE
+        ),
+      ],
+      spacing=4
+    ),
+    padding=ft.padding.only(0, 4, 0, 4),
+    expand=True
+  )
+
+
+@ft.component
+def About() -> ft.Control:
+  """ Renders the about settings panel """
+  return ft.Container(
+    content=ft.Column(
+      [
+        ft.Container(
+          content=ft.Row(
+            [
+              ft.Container(
+                ft.Icon(
+                  ft.Icons.INFO_OUTLINE,
+                  size=20,
+                  color=ft.Colors.PRIMARY
+                ),
+                padding=ft.padding.only(0, 3, 0, 0)
+              ),
+              ft.Text(
+                "About",
+                size=20,
+                weight=ft.FontWeight.W_500,
+              )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            height=40,
+            expand=True
+          ),
+        ),
+        ft.Column(
+          [
+            ft.Container(
+              ft.Row(
+                [
+                  ft.Column(
+                    [
+                      ft.Image(
+                        src="./logo.svg",
+                        width=100,
+                        height=100,
+                        color=ft.Colors.PRIMARY
+                      ),
+                      ft.Text(
+                        "Subconscious",
+                        size=20,
+                        weight=ft.FontWeight.BOLD
+                      )
+                    ],
+                    expand=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                  )
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+              ),
+              margin=ft.margin.only(0, 60, 0, 60)
+            ),
+            ft.Text(
+              "Subconscious is a simple desktop open sourced UI for LLM and Agent interaction.",
+              size=15,
+              color=ft.Colors.GREY,
+              text_align=ft.TextAlign.CENTER
+            ),
+            ft.Text(
+              spans=[
+                ft.TextSpan("Visit us at: "),
+                ft.TextSpan(
+                  "Subconscious.chat",
+                  ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
+                  url="https://subconscious.chat/",
+                ),
+              ],
+              size=15
+            ),
+            ft.Text(
+              spans=[
+                ft.TextSpan(
+                  "View License",
+                  ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
+                  url="https://github.com/baebranch/subconscious/blob/main/LICENSE",
+                ),
+              ],
+              size=15
+            ),
+            ft.Text(
+              spans=[
+                ft.TextSpan(
+                  "Report an Issue",
+                  ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
+                  url="https://github.com/baebranch/subconscious/issues",
+                ),
+              ],
+              size=15
+            ),
+            ft.Text(
+              f"Version: {VERSION}",
+              size=15,
+              color=ft.Colors.GREY
+            ),
+            ft.Text(
+              "© 2026 Subconscious",
+              size=15,
+              color=ft.Colors.GREY,
+            )    
+          ],
+          spacing=10,
+          scroll=ft.ScrollMode.ADAPTIVE,
+          expand=True,
+          horizontal_alignment=ft.CrossAxisAlignment.CENTER
         ),
       ],
       spacing=4

@@ -126,6 +126,13 @@ def ContextList(
         description="Configure LLMs and API keys",
         on_click=lambda _: set_selected_setting("models"),
         selected=selected_setting == "models"
+      ),
+      ContextItem(
+        key="about",
+        name="About",
+        description="About Subconscious",
+        on_click=lambda _: set_selected_setting("about"),
+        selected=selected_setting == "about"
       )
     ]
     headers = []
