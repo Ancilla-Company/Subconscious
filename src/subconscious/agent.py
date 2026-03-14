@@ -2,7 +2,7 @@ import os
 import logging
 from pydantic_ai import Agent
 
-from .config import Config, KeyManager
+from .config import Config
 
 
 # Logging setup
@@ -23,7 +23,6 @@ class AgentManager:
       return
 
     provider = self.config.model_provider.lower()
-    key = KeyManager.get_key(provider)
     
     if key:
       # Map common providers to their expected env vars

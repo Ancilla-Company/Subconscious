@@ -52,12 +52,12 @@ class MessageBubble(ft.Row):
   """
   def __init__(self, message):
     super().__init__()
+    self.wrap = True
     self.expand = True
     self.message = message
+    self.alignment = ft.MainAxisAlignment.CENTER
     self.parts = self.split_markdown_sections(self.message.content)
     self.message_content = ft.Text(self.message.content, size=14, color=ft.Colors.PRIMARY)
-    self.alignment = "center"
-    self.wrap = True
 
     # For streaming tokens
     self.buffer = '' # A buffer to hold the incoming token stream from LLMs
@@ -143,47 +143,83 @@ class MessageBubble(ft.Row):
               clip_behavior=ft.ClipBehavior.NONE,
             ))
     
-    self.bubble_content = ft.Column([
-      *self.content,
+    self.bubble_content = ft.Column(
+      [
+        *self.content,
 
-      # Message Bubble - timestamp and copy button
-      *[ft.Container(content=ft.Row([
-        ft.Container(content=
-          ft.Stack([
-            ft.IconButton(icon="copy", on_click=lambda e: self.copy_message(e), tooltip="Copy", style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)), icon_size=16, height=30, width=30, padding=4, top=-3, left=-3),
-          ], width=25, height=25),
-          border_radius=ft.border_radius.all(3),
-        ),
-      ft.Text(self.format_timestamp(self.message.timestamp) if hasattr(self.message, 'timestamp') else "--:--", size=12),
-      ],spacing=5, height=25,
-      wrap=True,
-      alignment= "end" if message.type == 'human' else "start"
-      ), padding=ft.padding.only(0, 10, 0, 0))]
-
-    ], spacing=0, wrap=False)  # content
+        # Message Bubble - timestamp and copy button
+        *[
+          ft.Container(
+            content=ft.Row(
+              [
+                ft.Container(
+                  content=
+                  ft.Stack(
+                    [
+                      ft.IconButton(
+                        icon=ft.Icons.COPY,
+                        on_click=lambda e: self.copy_message(e),
+                        tooltip="Copy",
+                        style=ft.ButtonStyle(
+                          shape=ft.RoundedRectangleBorder(radius=3)
+                        ),
+                        icon_size=16,
+                        height=30,
+                        width=30,
+                        padding=4,
+                        top=-3,
+                        left=-3
+                      )
+                    ],
+                    width=25,
+                    height=25
+                  ),
+                  border_radius=ft.border_radius.all(3),
+                ),
+                ft.Text(
+                  self.format_timestamp(self.message.timestamp) if hasattr(self.message, 'timestamp') else "--:--", size=12
+                ),
+              ],
+              spacing=5,
+              height=25,
+              wrap=True,
+              alignment= "end" if message.type == 'human' else "start"
+            ),
+            padding=ft.padding.only(0, 10, 0, 0)
+          )
+        ]
+      ],
+      spacing=0,
+      wrap=False
+    )  # content
     
     self.controls = [
-      ft.Row([
-        ft.Container(
-          ft.Stack([
-            # Message pointer
-            self.sender_message_pointer() if self.message.type == 'human' else self.receiver_message_pointer(),
+      ft.Row(
+        [
+          ft.Container(
+            ft.Stack(
+              [
+                # Message pointer
+                self.sender_message_pointer() if self.message.type == 'human' else self.receiver_message_pointer(),
 
-            # Message bubble
-            ft.Container(
-              bgcolor=ft.Colors.PRIMARY_CONTAINER if self.message.type == 'human' else ft.Colors.SURFACE_CONTAINER_HIGHEST,
-              border_radius = ft.BorderRadius(5, 5, 5, 5),
-              padding = ft.padding.only(10, 5, 10, 5),
-              content = self.bubble_content,
-
-              margin=ft.margin.only(right=7, left=7),
-            )
-
-          ], clip_behavior=ft.ClipBehavior.NONE),
-          clip_behavior=ft.ClipBehavior.NONE, 
-          padding=ft.padding.only(15, 0, 15, 0)
-        ),
-      ], width=750, alignment=ft.MainAxisAlignment.END if message.type == 'human' else ft.MainAxisAlignment.START, wrap=True),
+                # Message bubble
+                ft.Container(
+                  bgcolor=ft.Colors.PRIMARY_CONTAINER if self.message.type == 'human' else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                  border_radius = ft.BorderRadius(5, 5, 5, 5),
+                  padding = ft.padding.only(10, 5, 10, 5),
+                  content = self.bubble_content,
+                  margin=ft.margin.only(right=7, left=7),
+                )
+              ],
+              clip_behavior=ft.ClipBehavior.NONE),
+              clip_behavior=ft.ClipBehavior.NONE, 
+              padding=ft.padding.only(15, 0, 15, 0)
+          ),
+        ],
+        width=750,
+        alignment=ft.MainAxisAlignment.END if message.type == 'human' else ft.MainAxisAlignment.START,
+        wrap=True
+      )
     ]
 
   def update_message_stream(self, chunk, drain: bool = False):
@@ -355,24 +391,26 @@ class MessageBubble(ft.Row):
       height=15,
       left=0,
       alignment=ft.Alignment.TOP_LEFT,
-      content = ft.Stack([
-        ft.Container(
-          bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-          width=20,
-          height=15,
-          border_radius=ft.BorderRadius(2, 2, 2, 2),
-          rotate=pi/2,
-          offset=ft.Offset(0.525, -0.1)
-        ),
-        ft.Container(
-          bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-          width=20,
-          height=15,
-          border_radius=ft.BorderRadius(2, 2, 2, 2),
-          rotate=pi/4,
-          offset=ft.Offset(0.075, -0.3),
-        ),
-      ])
+      content = ft.Stack(
+        [
+          ft.Container(
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            width=20,
+            height=15,
+            border_radius=ft.BorderRadius(2, 2, 2, 2),
+            rotate=pi/2,
+            offset=ft.Offset(0.525, -0.1)
+          ),
+          ft.Container(
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            width=20,
+            height=15,
+            border_radius=ft.BorderRadius(2, 2, 2, 2),
+            rotate=pi/4,
+            offset=ft.Offset(0.075, -0.3),
+          ),
+        ]
+      )
     )
 
   def sender_message_pointer(self):
@@ -382,24 +420,26 @@ class MessageBubble(ft.Row):
       height=15,
       right=0,
       alignment=ft.Alignment.TOP_RIGHT,
-      content = ft.Stack([
-        ft.Container(
-          bgcolor=ft.Colors.PRIMARY_CONTAINER,
-          width=20,
-          height=15,
-          border_radius=ft.BorderRadius(2, 2, 2, 2),
-          rotate=pi/2,
-          offset=ft.Offset(-0.525, -0.1)
-        ),
-        ft.Container(
-          bgcolor=ft.Colors.PRIMARY_CONTAINER,
-          width=20,
-          height=15,
-          border_radius=ft.BorderRadius(2, 2, 2, 2),
-          rotate=3*(pi/4),
-          offset=ft.Offset(-0.075, -0.3),
-        ),
-      ])
+      content = ft.Stack(
+        [
+          ft.Container(
+            bgcolor=ft.Colors.PRIMARY_CONTAINER,
+            width=20,
+            height=15,
+            border_radius=ft.BorderRadius(2, 2, 2, 2),
+            rotate=pi/2,
+            offset=ft.Offset(-0.525, -0.1)
+          ),
+          ft.Container(
+            bgcolor=ft.Colors.PRIMARY_CONTAINER,
+            width=20,
+            height=15,
+            border_radius=ft.BorderRadius(2, 2, 2, 2),
+            rotate=3*(pi/4),
+            offset=ft.Offset(-0.075, -0.3),
+          ),
+        ]
+      )
     )
   
   def format_timestamp(self, timestamp):

@@ -208,7 +208,7 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
   # Message display logic
   message_list = ft.ListView(
     controls=[MessageBubble(m) for m in (messages or [])],
-    spacing=10,
+    spacing=15,
     auto_scroll=True,
     expand=True
   )
@@ -218,7 +218,7 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
     # Chat thread messages
     ft.Container(
       content=ft.SelectionArea(content=message_list) if llm_configured() else ft.Text("Configure LLM"),
-      padding=ft.padding.only(0, 48, 0, 106),
+      padding=ft.padding.only(0, 52, 0, 106),
       expand=True,
       alignment=ft.Alignment.TOP_CENTER,
     ),

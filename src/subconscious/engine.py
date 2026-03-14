@@ -1,5 +1,7 @@
 import uuid
+import json
 import logging
+import pathlib
 from sqlalchemy import select
 
 from .config import Config
@@ -14,9 +16,42 @@ logger = logging.getLogger("subconscious")
 
 class Engine:
   """ Subconscious Engine Core """
+  async def init_settings(self):
+    """ Initialize settings from settings.json to AppState if not present """
+    settings_path = pathlib.Path(__file__).parent / "gui" / "settings.json"
+    if not settings_path.exists():
+      return
+
+    try:
+      with open(settings_path, "r") as f:
+        settings_data = json.load(f)
+      
+      system_settings = settings_data.get("system", {})
+      
+      async with self.db.get_session() as session:
+        for key, value in system_settings.items():
+          # Check if already in DB
+          exists = await session.scalar(
+            select(AppState).where(AppState.key == key, AppState.tag == "system")
+          )
+          
+          if not exists:
+            # If it's a list (options), we might want to store the first one as default
+            # based on the prompt "The list next to each key outlines the possible values it can have"
+            default_value = value[0] if isinstance(value, list) else value
+            # Convert to string for storage in Value Column
+            new_setting = AppState(key=key, value=str(default_value), tag="system")
+            session.add(new_setting)
+            logger.debug(f"Initialized system setting: {key}={default_value}")
+        
+        await session.commit()
+    except Exception as e:
+      logger.error(f"Failed to initialize settings: {e}")
+
   async def init_system(self):
     """ Initialize system components (DB, Default Workspace) """
     await self.db.init_models()
+    await self.init_settings()
 
     async with self.db.get_session() as session:
       # Find current network inside app_state

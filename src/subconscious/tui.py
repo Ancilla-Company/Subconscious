@@ -5,7 +5,7 @@ import pathlib
 import asyncio
 
 from .engine import Engine  
-from .config import Config, log_config, LOGO, KeyManager
+from .config import Config, log_config, LOGO
 
 
 # Platform specific non-blocking input check
@@ -63,10 +63,6 @@ class SubconsciousCLI(cmd.Cmd):
     
     provider, nickname, key = args
     identifier = f"{provider}:{nickname}"
-    if KeyManager.set_key(identifier, key):
-      print(f"Key saved as '{identifier}'. You can use this by setting model_provider to '{provider}:{identifier}'.")
-    else:
-      print("Failed to save key.")
 
   def do_set_model(self, arg):
     """Set the current model. Usage: set_model <provider> <model_name>"""

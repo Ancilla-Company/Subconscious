@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
@@ -15,7 +16,7 @@ class Database:
     )
 
   async def init_models(self):
-    """Create tables if they don't exist."""
+    """ Create tables if they don't exist and handle migrations. """
     async with self.engine.begin() as conn:
       await conn.run_sync(Base.metadata.create_all)
 
