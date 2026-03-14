@@ -12,7 +12,7 @@ from ..gui.titlebar import TitleBar
 # from ..gui.components.tray import *
 from ..gui.mainwindow import MainWindow
 from ..gui.contextlist import ContextList
-from ..db.models import Workspace, Thread, Message
+from ..db.models import Workspace, Thread, Message, AppState
 from ..gui.components.messages import HumanMessage, AIMessage
 
 
@@ -80,6 +80,86 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   # Settings Management State
   selected_setting, set_selected_setting = ft.use_state(None)
+  settings, set_settings = ft.use_state({})
+  # Model configs loaded from encrypted storage: list of dicts
+  model_configs, set_model_configs = ft.use_state([])
+  # Expanded panel indices for the model settings list - persisted across navigation
+  model_expanded_indices, set_model_expanded_indices = ft.use_state(set())
+
+  async def load_settings():
+    async with engine.db.get_session() as session:
+      stmt = select(AppState).where(AppState.tag.in_(["system", "general"]))
+      result = await session.scalars(stmt)
+      db_settings = {s.key: s.value for s in result.all()}
+      set_settings(db_settings)
+      
+      # Apply some settings immediately if needed
+      if "mode" in db_settings:
+        page.theme_mode = ft.ThemeMode.DARK if db_settings["mode"] == "dark" else ft.ThemeMode.LIGHT
+      page.update()
+
+    # Load model configs from encrypted storage
+    engine.config.read_keyring()
+    raw_models = engine.config.secrets.get("models", {})
+    # secrets["models"] is stored as {uuid: {...fields}} – convert to list
+    loaded = [{"id": k, **v} for k, v in raw_models.items()]
+    set_model_configs(loaded)
+
+  async def handle_setting_change(key, value, tag):
+    print("Settings Changed")
+
+  async def handle_save_model(model_dict: dict):
+    """Persist a model config (add or update) to the encrypted secrets file."""
+    engine.config.read_keyring()
+    models_store = engine.config.secrets.get("models", {})
+    model_id = model_dict["id"]
+    # Store only the real fields (strip the internal id key)
+    _ui_keys = {"id"}
+    models_store[model_id] = {k: v for k, v in model_dict.items() if k not in _ui_keys}
+    engine.config.secrets["models"] = models_store
+    await engine.config.write_keyring()
+    # Refresh local state
+    loaded = [{"id": k, **v} for k, v in models_store.items()]
+    set_model_configs(loaded)
+
+  def handle_delete_model(model_id: str, on_confirmed=None):
+    """Show a confirmation dialog then delete the model config from encrypted storage."""
+    def close_dlg(e):
+      dlg.open = False
+      page.update()
+
+    async def do_delete(e):
+      engine.config.read_keyring()
+      models_store = engine.config.secrets.get("models", {})
+      models_store.pop(model_id, None)
+      engine.config.secrets["models"] = models_store
+      await engine.config.write_keyring()
+      loaded = [{"id": k, **v} for k, v in models_store.items()]
+      set_model_configs(loaded)
+      if on_confirmed:
+        on_confirmed()
+      close_dlg(e)
+
+    dlg = ft.AlertDialog(
+      modal=True,
+      title=ft.Text("Delete Model"),
+      content=ft.Text("Are you sure you want to delete this model configuration?"),
+      actions=[
+        ft.TextButton(
+          "Delete", on_click=do_delete,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+        ft.TextButton(
+          "Cancel", on_click=close_dlg,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+      ],
+      actions_alignment=ft.MainAxisAlignment.END,
+      shape=ft.RoundedRectangleBorder(radius=3),
+    )
+    page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
 
   async def load_workspaces():
     async with engine.db.get_session() as session:
@@ -115,19 +195,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   def on_mount():
     asyncio.create_task(load_workspaces())
     asyncio.create_task(load_threads())
+    asyncio.create_task(load_settings())
   
   ft.use_effect(on_mount, [])
 
   def handle_new_workspace(e):
-    # Deselect threads when creating a new workspace?
-    # set_selected_thread(None)
     set_editing_workspace(None)
     set_workspace_mode("create")
     set_current_view("workspaces")
     set_current_context("workspaces")
 
   def handle_workspace_click(workspace):
-    # set_selected_thread(None)
     set_editing_workspace(workspace)
     set_workspace_mode("edit")
     set_current_view("workspaces")
@@ -323,11 +401,19 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         current_view=current_view,
         workspace=editing_workspace,
         workspace_mode=workspace_mode,
+        settings_mode=selected_setting,
         on_save_workspace=handle_save_workspace,
         on_delete_workspace=handle_delete_workspace,
         thread=selected_thread,
         messages=messages,
-        on_send_message=handle_send_message
+        on_send_message=handle_send_message,
+        settings=settings,
+        on_setting_change=handle_setting_change,
+        model_configs=model_configs,
+        on_save_model=handle_save_model,
+        on_delete_model=handle_delete_model,
+        model_expanded_indices=model_expanded_indices,
+        set_model_expanded_indices=set_model_expanded_indices
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
@@ -343,7 +429,7 @@ async def main(page: ft.Page, config):
   page.window.height = 800
   page.title = "Subconscious"
   page.window.min_width = 506
-  page.window.min_height = 506
+  page.window.min_height = 300
   page.window.frameless = False
   page.bgcolor = ft.Colors.SURFACE
   page.window.title_bar_hidden = True

@@ -113,13 +113,13 @@ def ContextList(
   elif current_context == "settings":
     title_text = "Settings"
     list_items = [
-      ContextItem(
-        key="general",
-        name="General",
-        description="App settings and preferences",
-        on_click=lambda _: set_selected_setting("general"),
-        selected=selected_setting == "general"
-      ),
+      # ContextItem(
+      #   key="general",
+      #   name="General",
+      #   description="App settings and preferences",
+      #   on_click=lambda _: set_selected_setting("general"),
+      #   selected=selected_setting == "general"
+      # ),
       ContextItem(
         key="models",
         name="Models",
@@ -147,16 +147,20 @@ def ContextList(
     content=ft.Column([
       # Header
       ft.Container(
-        content=ft.Row([
-          ft.Text(
-            title_text,
-            size=20,
-            weight=ft.FontWeight.W_500,
-            color=ft.Colors.PRIMARY,
-            expand=True,
-          ),
-          *headers
-        ], spacing=4),
+        content=ft.Row(
+          [
+            ft.Text(
+              title_text,
+              size=20,
+              weight=ft.FontWeight.W_500,
+              color=ft.Colors.PRIMARY,
+              expand=True,
+            ),
+            *headers
+          ],
+          spacing=4,
+          height=40
+        ),
         padding=ft.padding.only(15, 0, 15, 0)
       ),
       

@@ -89,7 +89,8 @@ def PasswordField(label, value, on_change, hint) -> ft.Control:
       spacing=0,
     )
 
-def DropdownField(label, values, on_change, hint) -> ft.Control:
+@ft.component
+def DropdownField(label, values, on_change, hint, value=None) -> ft.Control:
   """ Dropdown field formatted to the application's style language """
   return ft.Column(
       [
@@ -103,6 +104,8 @@ def DropdownField(label, values, on_change, hint) -> ft.Control:
         ),
         ft.Container(content=
           ft.Dropdown(
+            value=value,
+            on_select=on_change,
             border_color=ft.Colors.TRANSPARENT,
             # bgcolor=ft.Colors.TRANSPARENT,
             border_radius=3,

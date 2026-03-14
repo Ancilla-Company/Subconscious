@@ -20,7 +20,12 @@ def MainWindow(
     messages=None,
     on_send_message=None,
     settings=None,
-    on_setting_change=None
+    on_setting_change=None,
+    model_configs=None,
+    on_save_model=None,
+    on_delete_model=None,
+    model_expanded_indices=None,
+    set_model_expanded_indices=None
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -74,7 +79,12 @@ def MainWindow(
             ResponsiveItem(
               Model(
                 settings=settings,
-                on_setting_change=on_setting_change
+                on_setting_change=on_setting_change,
+                model_configs=model_configs,
+                on_save_model=on_save_model,
+                on_delete_model=on_delete_model,
+                expanded_indices=model_expanded_indices,
+                set_expanded_indices=set_model_expanded_indices
               ),
             ),
           ]
