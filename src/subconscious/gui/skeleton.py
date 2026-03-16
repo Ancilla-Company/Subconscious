@@ -1,8 +1,10 @@
 import uuid
 import asyncio
 import pathlib
+import logging
 import flet as ft
 from sqlalchemy import select
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 from ..engine import Engine
@@ -14,6 +16,9 @@ from ..gui.mainwindow import MainWindow
 from ..gui.contextlist import ContextList
 from ..db.models import Workspace, Thread, Message, AppState
 from ..gui.components.messages import HumanMessage, AIMessage
+
+
+logger = logging.getLogger("subconscious")
 
 
 @ft.observable
@@ -77,6 +82,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   threads, set_threads = ft.use_state(list())
   selected_thread, set_selected_thread = ft.use_state(None)
   messages, set_messages = ft.use_state(list())
+  is_streaming, set_is_streaming = ft.use_state(False)
 
   # Settings Management State
   selected_setting, set_selected_setting = ft.use_state(None)
@@ -179,6 +185,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_threads(result.all())
 
   def on_workspace_change():
+    # Clear thread selection and messages when switching workspace
+    set_selected_thread(None)
+    set_messages([])
     if active_chat_workspace:
       asyncio.create_task(load_threads(active_chat_workspace.id))
     else:
@@ -187,10 +196,15 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ft.use_effect(on_workspace_change, [active_chat_workspace])
 
   async def load_messages(thread_id):
-    async with engine.db.get_session() as session:
-      stmt = select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at)
-      result = await session.scalars(stmt)
-      set_messages(result.all())
+    db_msgs = await engine.load_thread_messages(thread_id)
+    ui_msgs = []
+    for m in db_msgs:
+      ts = m.created_at.replace(tzinfo=timezone.utc) if m.created_at else datetime.now(timezone.utc)
+      if m.role == "user":
+        ui_msgs.append(HumanMessage(content=m.content, timestamp=ts))
+      else:
+        ui_msgs.append(AIMessage(content=m.content, timestamp=ts))
+    set_messages(ui_msgs)
 
   def on_mount():
     asyncio.create_task(load_workspaces())
@@ -199,90 +213,121 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   
   ft.use_effect(on_mount, [])
 
-  def handle_new_workspace(e):
+  async def handle_new_workspace(e):
     set_editing_workspace(None)
     set_workspace_mode("create")
     set_current_view("workspaces")
     set_current_context("workspaces")
 
-  def handle_workspace_click(workspace):
+  async def handle_workspace_click(workspace):
     set_editing_workspace(workspace)
     set_workspace_mode("edit")
     set_current_view("workspaces")
     set_current_context("workspaces")
+  
+  async def handle_settings_click(setting):
+    set_selected_setting(setting)
 
-  def handle_new_thread(e=None):
+  async def handle_new_thread(e=None):
     set_selected_thread(None)
     set_messages([])
     set_current_view("threads")
     set_current_context("threads")
-
-  async def handle_send_message(content):
-    print("Send message:", content)
-
-    # 1. Add Human Message
-    user_msg = HumanMessage(content=content)
-    new_messages = messages + [user_msg]
-    set_messages(new_messages)
-
-    # Wait a second to simulate thinking time and show the message sending flow in the UI
-    await asyncio.sleep(1)
-
-    # 2. Add AI Echo
-    ai_msg = AIMessage(content=f"Echo: {content}")
-    set_messages(new_messages + [ai_msg])
-
-    # Update the message history for the current thread
-
-    # async with engine.db.get_session() as session:
-    #   # Get thread or create one
-    #   thread_to_use = selected_thread
-    #   if not thread_to_use:
-    #     # Determine workspace
-    #     workspace_id = selected_workspace.id if selected_workspace else None
-    #     if not workspace_id:
-    #       # Find default or first workspace
-    #       ws_result = await session.scalars(select(Workspace).limit(1))
-    #       first_ws = ws_result.first()
-    #       if first_ws:
-    #         workspace_id = first_ws.id
-    #       else:
-    #         new_ws = Workspace(name="General", description="Default workspace", network_id=engine.current_network.value, uuid=str(uuid.uuid4()))
-    #         session.add(new_ws)
-    #         await session.commit()
-    #         await session.refresh(new_ws)
-    #         workspace_id = new_ws.id
-        
-    #     thread_to_use = Thread(
-    #       title=content[:20] if len(content) > 0 else "New Thread",
-    #       description="A new conversation",
-    #       workspace_id=workspace_id
-    #     )
-    #     session.add(thread_to_use)
-    #     await session.commit()
-    #     await session.refresh(thread_to_use)
-    #     set_selected_thread(thread_to_use)
-      
-    #   # Add user message
-    #   user_msg = Message(thread_id=thread_to_use.id, role="user", content=content)
-    #   session.add(user_msg)
-      
-    #   # Add assistant echo
-    #   assistant_msg = Message(thread_id=thread_to_use.id, role="assistant", content=f"Echo: {content}")
-    #   session.add(assistant_msg)
-      
-    #   await session.commit()
-      
-    # await load_threads(selected_workspace.id if selected_workspace else None)
-    # if thread_to_use:
-    #   await load_messages(thread_to_use.id)
-
-  # Add logic to switch to threads for a workspace if we want that behavior later
-
+  
   async def handle_thread_click(thread):
     set_selected_thread(thread)
     set_current_view("threads")
-    await load_messages(thread.id)
+
+    # Load messages from DB and convert to UI message objects
+    db_msgs = await engine.load_thread_messages(thread.id)
+    ui_msgs = []
+    for m in db_msgs:
+      ts = m.created_at.replace(tzinfo=timezone.utc) if m.created_at else datetime.now(timezone.utc)
+      if m.role == "user":
+        ui_msgs.append(HumanMessage(content=m.content, timestamp=ts))
+      else:
+        ui_msgs.append(AIMessage(content=m.content, timestamp=ts))
+    set_messages(ui_msgs)
+
+  async def handle_send_message(content):
+    """
+    Full message lifecycle:
+    1. Resolve / create thread and workspace.
+    2. Persist the user message to the DB.
+    3. Add the user bubble immediately to the UI.
+    4. Create an empty AI bubble and stream tokens into it live.
+    5. Persist the completed AI message to the DB.
+    6. Refresh the threads list (title may have been updated).
+    """
+    if not content.strip():
+      return
+
+    set_is_streaming(True)
+
+    # --- 1. Resolve workspace ---
+    workspace_id: int | None = active_chat_workspace.id if active_chat_workspace else None
+    if workspace_id is None:
+      async with engine.db.get_session() as session:
+        first_ws = await session.scalar(select(Workspace))
+        if first_ws:
+          workspace_id = first_ws.id
+        else:
+          logger.error("No workspace available to attach message to.")
+          set_is_streaming(False)
+          return
+
+    # --- 2. Get or create thread ---
+    is_new_thread = (selected_thread is None)
+    thread = await engine.get_or_create_thread(
+      content=content,
+      workspace_id=workspace_id,
+      thread_id=selected_thread.id if selected_thread else None,
+    )
+
+    # --- 3. Persist user message ---
+    user_db_msg = await engine.save_message(thread.id, "user", content)
+
+    # --- 4. Update UI: show user bubble immediately ---
+    user_ui_msg = HumanMessage(
+      content=content,
+      timestamp=user_db_msg.created_at.replace(tzinfo=timezone.utc)
+        if user_db_msg.created_at else datetime.now(timezone.utc),
+    )
+    # If we just created a new thread, set it as selected so the UI shows the header
+    if is_new_thread:
+      set_selected_thread(thread)
+      set_current_view("threads")
+
+    new_messages = list(messages) + [user_ui_msg]
+    set_messages(new_messages)
+
+    # --- 5. Create streaming AI bubble ---
+    ai_ui_msg = AIMessage(content="", timestamp=datetime.now(timezone.utc))
+    streaming_messages = new_messages + [ai_ui_msg]
+    set_messages(streaming_messages)
+
+    # --- 6. Stream from the LLM, accumulate, update bubble in-place ---
+    full_response = ""
+    try:
+      async for chunk in engine.stream_chat(content=content, thread_id=thread.id):
+        full_response += chunk
+        ai_ui_msg.content = full_response
+        # Reassign list so Flet detects state change and re-renders the bubble
+        set_messages(list(streaming_messages))
+    except Exception as exc:
+      logger.error(f"LLM stream error: {exc}")
+      ai_ui_msg.content = f"⚠ Error reaching the model: {exc}"
+      set_messages(list(streaming_messages))
+
+    # --- 7. Persist the final AI message ---
+    if full_response:
+      await engine.save_message(thread.id, "assistant", full_response)
+
+    # --- 8. Refresh thread list so new/renamed threads appear ---
+    await load_threads(workspace_id)
+    # Re-select the thread so the context list highlights it correctly
+    set_selected_thread(thread)
+    set_is_streaming(False)
 
   async def handle_save_workspace(name, description, ws_id=None):
     async with engine.db.get_session() as session:
@@ -395,7 +440,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         active_chat_workspace=active_chat_workspace,
         on_chat_workspace_change=set_active_chat_workspace,
         selected_setting=selected_setting,
-        set_selected_setting=set_selected_setting
+        set_selected_setting=handle_settings_click
       ),
       mainwindow=MainWindow(
         current_view=current_view,
@@ -407,6 +452,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         thread=selected_thread,
         messages=messages,
         on_send_message=handle_send_message,
+        is_streaming=is_streaming,
         settings=settings,
         on_setting_change=handle_setting_change,
         model_configs=model_configs,

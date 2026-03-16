@@ -17,10 +17,6 @@ class WorkspacePopupItem(ft.PopupMenuItem):
     self.data = slug
     self.on_click = switch_workspace
   
-  # async def update_settings(self, event):
-  #   event.data = self.data
-  #   self.scm(self.name)
-  #   await SettingsQueue.put((self.switch_llm, (event,), {}))
 
 @ft.component
 def ContextList(
@@ -55,7 +51,7 @@ def ContextList(
           ContextItem(
             key=thread.id,
             name=thread.title if thread.title else "Untitled Thread",
-            description=thread.description if thread.description else "No description",
+            description=thread.description,
             updated_at=thread.created_at,
             on_click=lambda _, t=thread: on_thread_select(t) if on_thread_select else None,
             selected=is_selected

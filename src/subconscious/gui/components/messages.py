@@ -111,7 +111,7 @@ class MessageBubble(ft.Row):
                 ft.Row([
                   ft.Text(self.extract_code_block_headers(part).capitalize(), color=ft.Colors.PRIMARY, selectable=True),
                 ], spacing=0, alignment="start", expand=True),
-                ft.TextButton(text="Copy", icon="copy", on_click=lambda e: self.copy_code_block(e), data=part, tooltip="Copy",
+                ft.TextButton(text="Copy", icon="copy", on_click=self.copy_code_block, data=part, tooltip="Copy",
                 style=ft.ButtonStyle(text_style=ft.TextStyle(font_family="Roboto Mono", size=12), shape=ft.RoundedRectangleBorder(radius=3)),
                 ),
                 ], spacing=0), padding=ft.padding.only(10, 2, 2, 2),
@@ -158,7 +158,7 @@ class MessageBubble(ft.Row):
                     [
                       ft.IconButton(
                         icon=ft.Icons.COPY,
-                        on_click=lambda e: self.copy_message(e),
+                        on_click=self.copy_message,
                         tooltip="Copy",
                         style=ft.ButtonStyle(
                           shape=ft.RoundedRectangleBorder(radius=3)
@@ -328,7 +328,7 @@ class MessageBubble(ft.Row):
           ft.Row([
             ft.Text(self.extract_code_block_headers(part).capitalize(), color=ft.Colors.PRIMARY, selectable=True),
           ], spacing=0, alignment="start", expand=True),
-          ft.TextButton(text="Copy", icon="copy", on_click=lambda e: self.copy_code_block(e), data=part, tooltip="Copy",
+          ft.TextButton(text="Copy", icon="copy", on_click=self.copy_code_block, data=part, tooltip="Copy",
           style=ft.ButtonStyle(text_style=ft.TextStyle(font_family="Roboto Mono", size=12), shape=ft.RoundedRectangleBorder(radius=3)),
           ),
           ], spacing=0), padding=ft.padding.only(10, 2, 2, 2),
@@ -375,14 +375,13 @@ class MessageBubble(ft.Row):
     
     return headers[0] if headers else "Code"
   
-  def copy_code_block(self, e):
+  async def copy_code_block(self, e):
     """ Copy code block to clipboard and strip the code block delimiters and headers """
-    e.page.set_clipboard(e.control.data.strip('`~').split('\n', 1)[1].strip())
+    await ft.Clipboard().set(e.control.data.strip('`~').split('\n', 1)[1].strip())
   
-  def copy_message(self, e):
+  async def copy_message(self, e):
     """ Copy the message content to clipboard """
-    e.page.set_clipboard(self.message.content)
-  
+    await ft.Clipboard().set(self.message.content)
   
   def receiver_message_pointer(self):
     return ft.Container(

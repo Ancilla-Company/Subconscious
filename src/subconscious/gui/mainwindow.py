@@ -1,8 +1,8 @@
 import asyncio
 import flet as ft
 
-from .screens.settings import Model
 from .screens.chat import ChatWindow
+from .screens.settings import Model, About
 from .components.buttons import TextButton
 from .components.forms import FormField, TextArea, CheckBox
 from .components.layout import ResponsiveItem, ResponsiveParent
@@ -19,6 +19,7 @@ def MainWindow(
     thread=None,
     messages=None,
     on_send_message=None,
+    is_streaming=False,
     settings=None,
     on_setting_change=None,
     model_configs=None,
@@ -52,7 +53,8 @@ def MainWindow(
       content=ChatWindow(
         thread=thread,
         messages=messages,
-        on_send_message=on_send_message
+        on_send_message=on_send_message,
+        is_streaming=is_streaming,
       )
     )
   elif current_view == "settings":
@@ -91,6 +93,18 @@ def MainWindow(
         ),
         expand=True
       )
+    elif settings_mode == "about":
+      content = ft.Container(
+        content=ResponsiveParent(
+          [
+            ResponsiveItem(
+              About(),
+            ),
+          ]
+        ),
+        expand=True
+      )
+
     else:
       content = ft.Container(
         content=ft.Text("Select a settings category", size=16, color=ft.Colors.GREY_500),

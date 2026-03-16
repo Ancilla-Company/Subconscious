@@ -3,11 +3,16 @@ import json
 import logging
 import pathlib
 from sqlalchemy import select
+from typing import AsyncIterator, Optional
+from pydantic_ai.messages import (
+  ModelMessage, ModelRequest, ModelResponse,
+  UserPromptPart, TextPart,
+)
 
 from .config import Config
 from .agent import AgentManager
 from .db.session import Database
-from .db.models import Workspace, AppState, Networks
+from .db.models import Workspace, Thread, Message, AppState, Networks
 
 
 # Logging setup
@@ -125,24 +130,124 @@ class Engine:
     self.db = Database(config)
     await self.init_system()
 
-    # Initialize Agent Manager (load keys etc)
+    # Initialize Agent Manager
     self.agent_manager = AgentManager(config)
 
-    # Pre-warm or just verify we can create an agent
-    try:
-      if config.model_provider and config.model_name:
-        self.agent = self.agent_manager.get_agent()
-        logger.debug(f"Agent system initialized with provider: {config.model_provider}")
-      else:
-        self.agent = None
-        logger.debug("Agent system not initialized: model_provider or model_name missing.")
-    except Exception as e:
-      self.agent = None
-      logger.error(f"Failed to initialize agent system: {e}")
+  # ------------------------------------------------------------------
+  # Thread & Message helpers
+  # ------------------------------------------------------------------
+
+  async def get_or_create_thread(
+    self,
+    content: str,
+    workspace_id: int,
+    thread_id: Optional[int] = None,
+  ) -> Thread:
+    """
+    If thread_id is given and the thread exists, return it.
+    Otherwise create a new Thread in the given workspace with a
+    placeholder title derived from the first message.
+    """
+    async with self.db.get_session() as session:
+      if thread_id:
+        thread = await session.get(Thread, thread_id)
+        if thread:
+          return thread
+
+      # Auto-generate a short title from the first few words
+      words = content.strip().split()
+      title = " ".join(words[:6])
+      if len(words) > 6:
+        title += "…"
+      if not title:
+        title = "New Thread"
+
+      thread = Thread(
+        workspace_id=workspace_id,
+        title=title,  # type: ignore[arg-type]
+        description=None,
+      )
+      session.add(thread)
+      await session.commit()
+      await session.refresh(thread)
+      return thread
+
+  async def save_message(self, thread_id: int, role: str, content: str) -> Message:
+    """Persist a single message and return the ORM object."""
+    async with self.db.get_session() as session:
+      msg = Message(thread_id=thread_id, role=role, content=content)
+      session.add(msg)
+      await session.commit()
+      await session.refresh(msg)
+      return msg
+
+  async def load_thread_messages(self, thread_id: int) -> list[Message]:
+    """Return all messages for a thread ordered chronologically."""
+    async with self.db.get_session() as session:
+      result = await session.scalars(
+        select(Message)
+        .where(Message.thread_id == thread_id)
+        .order_by(Message.created_at)
+      )
+      return list(result.all())
+
+  def _build_history(self, db_messages: list[Message]) -> list[ModelMessage]:
+    """
+    Convert stored Message rows into the pydantic-ai message history format
+    so the LLM has full conversation context.
+    """
+    history: list[ModelMessage] = []
+    for msg in db_messages:
+      content_str = str(msg.content)
+      if msg.role == "user":
+        history.append(ModelRequest(parts=[UserPromptPart(content=content_str)]))
+      elif msg.role in ("assistant", "agent"):
+        history.append(ModelResponse(parts=[TextPart(content=content_str)]))
+    return history
+
+  async def stream_chat(
+    self,
+    content: str,
+    thread_id: int,
+    model_cfg: Optional[dict] = None,
+  ) -> AsyncIterator[str]:
+    """
+    Stream an AI response for *content* given the existing thread history.
+    Yields text chunks as they arrive from the LLM.
+
+    The caller is responsible for:
+      - saving the user message before calling this
+      - accumulating the yielded chunks and saving the final AI message
+    """
+    # Load history (excluding the message we're about to send – it was just saved)
+    db_messages = await self.load_thread_messages(thread_id)
+    # Drop the last message (the user message we just persisted) so it's only
+    # included as the explicit new prompt, not duplicated in history.
+    history = self._build_history(db_messages[:-1])
+
+    # Resolve model config
+    if model_cfg is None:
+      model_cfg = self.agent_manager.get_best_model_cfg()
+    if model_cfg is None:
+      raise ValueError("No model configured. Add a model in Settings → Models.")
+
+    agent = self.agent_manager.build_agent(model_cfg)
+
+    async with agent.run_stream(content, message_history=history) as result:
+      async for chunk in result.stream_text(delta=True):
+        yield chunk
+
+  async def update_thread_title(self, thread_id: int, title: str) -> None:
+    """Update the thread title (called after the first exchange if desired)."""
+    async with self.db.get_session() as session:
+      thread = await session.get(Thread, thread_id)
+      if thread:
+        thread.title = title  # type: ignore[assignment]
+        await session.commit()
 
   async def run_agent_stream(self, message: str):
-    """ Runs the agent in streaming mode. """
-    if not self.agent:
+    """ Legacy: Runs the agent in streaming mode (kept for TUI / API compatibility). """
+    if not hasattr(self, 'agent') or not self.agent:
       raise ValueError("Agent not configured. Use 'set_model <provider> <model_name>' and ensures keys are set with 'add_key'.")
     async with self.agent.run_stream(message) as result:
       async for chunk in result.stream_output():

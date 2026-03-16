@@ -22,10 +22,10 @@ class ToolMenu(ft.Container):
           content=ft.Stack([
               ft.Image(
                 src="./tools.svg",
-                width=30,
-                height=30,
-                top=5,
-                left=5,
+                width=25,
+                height=25,
+                top=7.5,
+                left=7.5,
                 color=ft.Colors.PRIMARY
               ),
               ft.PopupMenuButton(
@@ -38,7 +38,6 @@ class ToolMenu(ft.Container):
                 splash_radius=35,
                 icon_size=0,
                 tooltip="Tools",
-                # surface_tint_color=ft.Colors.TRANSPARENT,
                 items=[
                   # *self.load_tools_ui()
                 ],
@@ -170,7 +169,7 @@ class ToolMenu(ft.Container):
 
 
 @ft.component
-def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
+def ChatWindow(thread=None, messages=None, on_send_message=None, is_streaming=False) -> ft.Control:
   """ Handles the main chat window, including message display and input form """
   
   # Message state
@@ -181,12 +180,11 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
   def focus_message_form(e): pass
 
   async def handle_submit(e):
-    if message_text.strip():
+    if message_text.strip() and not is_streaming:
       user_msg_content = message_text
       set_message_text("")
 
       # Call parent on_send_message (for Engine/Skeleton logic)
-      # This will now handle the state updates (Human message & AI Echo)
       if on_send_message:
         await on_send_message(user_msg_content)
   
@@ -205,20 +203,31 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
     border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER))
   )
 
-  # Message display logic
+  # Message display logic — rebuild the list whenever messages changes so streaming updates render
   message_list = ft.ListView(
     controls=[MessageBubble(m) for m in (messages or [])],
     spacing=15,
     auto_scroll=True,
-    expand=True
+    expand=True,
+    padding=ft.padding.only(0, 15, 0, 15)
   )
 
   # Returns the chat window content
   return ft.Stack([
     # Chat thread messages
     ft.Container(
-      content=ft.SelectionArea(content=message_list) if llm_configured() else ft.Text("Configure LLM"),
-      padding=ft.padding.only(0, 52, 0, 106),
+      content=ft.ShaderMask(
+        content=ft.SelectionArea(content=message_list) if llm_configured() else ft.Text("Configure LLM"),
+        blend_mode=ft.BlendMode.DST_IN,
+        # border_radius=10,
+        shader=ft.LinearGradient(
+          begin=ft.Alignment.TOP_CENTER,
+          end=ft.Alignment.BOTTOM_CENTER,
+          colors=[ft.Colors.BLACK, ft.Colors.TRANSPARENT],
+          stops=[0.95, 1.0],
+        )
+      ),
+      padding=ft.padding.only(0, 48, 0, 102),
       expand=True,
       alignment=ft.Alignment.TOP_CENTER,
     ),
@@ -256,24 +265,24 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
                     ft.Row([
                       ft.Row(
                         [
-                          # Tool Menu
-                          # ToolMenu(settings={}, load_tools=lambda: print("Load tools")),
-                          
                           # Attach file button
-                          # IconButton(
-                          #   icon=ft.Icons.ATTACH_FILE,
-                          #   tooltip="Attach file",
-                          #   on_click=lambda e: print("Attach file placeholder"),
-                          # ),
+                          IconButton(
+                            icon=ft.Icons.ADD,
+                            tooltip="Attach file",
+                            on_click=lambda e: print("Attach file placeholder"),
+                          ),
+                          
+                          # Tool Menu
+                          ToolMenu(settings={}, load_tools=lambda: print("Load tools")),
                         ],
                         spacing=4,
                         expand=True
                       ),
                       # Send message button
                       IconButton(
-                        icon=ft.Icons.SEND_ROUNDED,
-                        tooltip="Send message",
-                        on_click=handle_submit,
+                        icon=ft.Icons.SEND_ROUNDED if not is_streaming else ft.Icons.HOURGLASS_EMPTY_ROUNDED,
+                        tooltip="Send message" if not is_streaming else "Waiting for response…",
+                        on_click=handle_submit if not is_streaming else lambda e: None,
                       ),
                     ], spacing=0),
                   ],
@@ -284,7 +293,7 @@ def ChatWindow(thread=None, messages=None, on_send_message=None) -> ft.Control:
               ], alignment=ft.MainAxisAlignment.END, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=0,
             ),
             width=750,
-            padding = ft.padding.only(15, 4, 15, 15),
+            padding = ft.padding.only(15, 0, 15, 15),
             alignment=ft.Alignment.BOTTOM_CENTER,
             bgcolor=ft.Colors.SURFACE,
           ),

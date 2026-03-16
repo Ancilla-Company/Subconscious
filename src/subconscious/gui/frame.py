@@ -1,5 +1,7 @@
 import flet as ft
 
+from ..constants import VERSION
+
 
 @ft.component
 def Frame(
@@ -53,7 +55,7 @@ def Frame(
               content=ft.Row([
                 ft.Text(f"Workspace: {workspace_name}", size=10, color=ft.Colors.GREY_600),
                 ft.VerticalDivider(width=1, color=ft.Colors.SECONDARY_CONTAINER),
-                ft.Text("Version 0.1.0  ", size=10, color=ft.Colors.GREY_600),
+                ft.Text(f"Version {VERSION}  ", size=10, color=ft.Colors.GREY_600),
               ], alignment=ft.MainAxisAlignment.END, spacing=10),
             ),
           ], spacing=0, height=20)
