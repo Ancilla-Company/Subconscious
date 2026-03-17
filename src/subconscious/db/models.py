@@ -86,3 +86,75 @@ class AppState(Base):
   key = Column(String, nullable=False)
   value = Column(String, nullable=False)
   tag = Column(String, nullable=True) # To categorize state/settings
+
+
+# ---------------------------------------------------------------------------
+# Tool-backing tables
+# ---------------------------------------------------------------------------
+
+class TodoItem(Base):
+  """
+  A to-do item created by the user or agent, scoped to a workspace.
+  Status values: 'open', 'in_progress', 'done', 'cancelled'
+  Priority values: 'low', 'normal', 'high', 'urgent'
+  """
+  __tablename__ = 'todo_items'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
+  thread_id = Column(Integer, ForeignKey('threads.id'), nullable=True) # optional origin thread
+  title = Column(String, nullable=False)
+  notes = Column(Text, nullable=True)
+  status = Column(String, nullable=False, default='open')
+  priority = Column(String, nullable=False, default='normal')
+  due_date = Column(DateTime, nullable=True)
+  created_at = Column(DateTime, default=datetime.now)
+  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class WorkspaceMemory(Base):
+  """
+  Long-term key/value memory scoped to a workspace.
+  The agent can store and retrieve facts that should persist across threads.
+  """
+  __tablename__ = 'workspace_memory'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
+  key = Column(String, nullable=False)        # e.g. "user_name", "preferred_language"
+  value = Column(Text, nullable=False)
+  source_thread_id = Column(Integer, ForeignKey('threads.id'), nullable=True)
+  created_at = Column(DateTime, default=datetime.now)
+  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class Note(Base):
+  """
+  User/agent-created notes scoped to a workspace.
+  Unlike memory these are human-readable documents, not key/value pairs.
+  """
+  __tablename__ = 'notes'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
+  title = Column(String, nullable=False)
+  content = Column(Text, nullable=False, default='')
+  tags = Column(String, nullable=True)        # comma-separated tag list
+  created_at = Column(DateTime, default=datetime.now)
+  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class Contact(Base):
+  """
+  Simple contact book scoped to a workspace.
+  """
+  __tablename__ = 'contacts'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
+  name = Column(String, nullable=False)
+  email = Column(String, nullable=True)
+  phone = Column(String, nullable=True)
+  notes = Column(Text, nullable=True)
+  created_at = Column(DateTime, default=datetime.now)
+  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

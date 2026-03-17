@@ -12,6 +12,7 @@ from pydantic_ai.messages import (
 from .config import Config
 from .agent import AgentManager
 from .db.session import Database
+from .tools import ToolRegistry, EngineContext
 from .db.models import Workspace, Thread, Message, AppState, Networks
 
 
@@ -133,6 +134,9 @@ class Engine:
     # Initialize Agent Manager
     self.agent_manager = AgentManager(config)
 
+    # Initialize Tool Registry
+    self.tool_registry = ToolRegistry()
+
   # ------------------------------------------------------------------
   # Thread & Message helpers
   # ------------------------------------------------------------------
@@ -209,15 +213,21 @@ class Engine:
     self,
     content: str,
     thread_id: int,
+    workspace_id: Optional[int] = None,
     model_cfg: Optional[dict] = None,
+    enabled_tools: Optional[list[str]] = None,
   ) -> AsyncIterator[str]:
     """
     Stream an AI response for *content* given the existing thread history.
     Yields text chunks as they arrive from the LLM.
 
-    The caller is responsible for:
-      - saving the user message before calling this
-      - accumulating the yielded chunks and saving the final AI message
+    Args:
+      content:       The user message text.
+      thread_id:     ID of the active thread (used to load history).
+      workspace_id:  ID of the active workspace (used as tool scope).
+      model_cfg:     Override model config dict; uses best available if None.
+      enabled_tools: List of tool slugs to attach, e.g. ['time', 'calculator'].
+                     Defaults to all registered tools when None.
     """
     # Load history (excluding the message we're about to send – it was just saved)
     db_messages = await self.load_thread_messages(thread_id)
@@ -231,9 +241,21 @@ class Engine:
     if model_cfg is None:
       raise ValueError("No model configured. Add a model in Settings → Models.")
 
-    agent = self.agent_manager.build_agent(model_cfg)
+    # Resolve tools
+    slugs = enabled_tools if enabled_tools is not None else self.tool_registry.all_slugs()
+    tools = self.tool_registry.get_tools(slugs)
 
-    async with agent.run_stream(content, message_history=history) as result:
+    agent = self.agent_manager.build_agent(model_cfg, tools=tools)  # type: ignore[call-arg]
+
+    # Build the dependency context for tools that need DB / workspace access
+    ctx_deps = EngineContext(
+      db=self.db,
+      workspace_id=workspace_id or 0,
+      thread_id=thread_id,
+      data_dir=str(self.config.data_dir),
+    )
+
+    async with agent.run_stream(content, message_history=history, deps=ctx_deps) as result:  # type: ignore[call-overload]
       async for chunk in result.stream_text(delta=True):
         yield chunk
 

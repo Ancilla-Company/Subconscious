@@ -5,9 +5,9 @@ from subconscious.config import Config
 def test_config_defaults():
   config = Config()
   assert config.dev is False
-  assert config.config_path is None
+  assert "-dev" not in str(config.data_dir)
 
 def test_config_custom():
-  config = Config(dev=True, config_path="test.yaml")
+  config = Config(dev=True)
   assert config.dev is True
-  assert config.config_path == "test.yaml"
+  assert "-dev" in str(config.data_dir)

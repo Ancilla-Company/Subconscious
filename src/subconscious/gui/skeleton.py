@@ -309,7 +309,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     # --- 6. Stream from the LLM, accumulate, update bubble in-place ---
     full_response = ""
     try:
-      async for chunk in engine.stream_chat(content=content, thread_id=thread.id):
+      async for chunk in engine.stream_chat(
+        content=content,
+        thread_id=thread.id,
+        workspace_id=workspace_id,
+      ):
         full_response += chunk
         ai_ui_msg.content = full_response
         # Reassign list so Flet detects state change and re-renders the bubble

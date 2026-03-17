@@ -1,10 +1,13 @@
 import os
 import logging
-from typing import Optional, AsyncIterator
 from pydantic_ai import Agent
+from typing import Optional, Callable, TYPE_CHECKING
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart, ModelResponse, TextPart
 
 from .config import Config
+
+if TYPE_CHECKING:
+  from .tools import EngineContext
 
 
 # Logging setup
@@ -63,10 +66,16 @@ class AgentManager:
     elif not api_key:
       logger.warning(f"No api_key stored for provider '{provider}' (model id={model_cfg.get('id')})")
 
-  def build_agent(self, model_cfg: dict) -> Agent:
+  def build_agent(self, model_cfg: dict, tools: Optional[list[Callable]] = None) -> Agent:
     """
     Construct a pydantic-ai Agent from a stored model config dict.
     Ensures the matching env-var is set first.
+
+    Args:
+      model_cfg: Provider/model/key dict as stored in secrets["models"].
+      tools:     Optional list of pydantic-ai tool callables to attach.
+                 When provided, EngineContext is used as the deps type so
+                 tools receive the DB session and workspace context.
     """
     self.set_env_for_model(model_cfg)
 
@@ -84,8 +93,23 @@ class AgentManager:
     else:
       raise ValueError(f"Model name is empty in config for provider '{provider}'")
 
-    logger.debug(f"Building agent with model: {full_model_str}")
-    return Agent(model=full_model_str, system_prompt=system_prompt)
+    logger.debug(f"Building agent with model: {full_model_str}, tools: {len(tools or [])} attached")
+
+    if tools:
+      # Import here to avoid a circular dependency at module load time
+      from .tools import EngineContext
+      # pydantic-ai uses overloads that Pylance cannot narrow past when
+      # deps_type is non-None; cast through Any to silence the false positive.
+      from typing import Any, cast
+      agent_kwargs: Any = dict(
+        model=full_model_str,
+        system_prompt=system_prompt,
+        tools=tools,
+        deps_type=EngineContext,
+      )
+      return cast(Agent, Agent(**agent_kwargs))
+
+    return Agent(model=full_model_str, system_prompt=system_prompt)  # type: ignore[return-value]
 
   def get_best_model_cfg(self) -> Optional[dict]:
     """Return the first usable model config from encrypted storage, or None."""
