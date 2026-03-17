@@ -57,6 +57,7 @@ class Thread(Base):
   workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
   title = Column(String)
   description = Column(String, nullable=True)
+  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
   workspace = relationship("Workspace", back_populates="threads")

@@ -83,6 +83,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   selected_thread, set_selected_thread = ft.use_state(None)
   messages, set_messages = ft.use_state(list())
   is_streaming, set_is_streaming = ft.use_state(False)
+  # Persists the last-selected thread per workspace so it's restored on switch-back
+  thread_by_workspace, set_thread_by_workspace = ft.use_state(dict())
+  # When True the threads list shows threads across all workspaces
+  show_all_threads, set_show_all_threads = ft.use_state(False)
 
   # Settings Management State
   selected_setting, set_selected_setting = ft.use_state(None)
@@ -173,27 +177,47 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_workspaces(result.all())
 
   async def load_threads(workspace_id=None):
+    from sqlalchemy import func, case
     async with engine.db.get_session() as session:
+      # Sort by updated_at when available, fall back to created_at for older rows
+      recency = func.coalesce(Thread.updated_at, Thread.created_at).desc()
       if workspace_id:
-        stmt = select(Thread).where(Thread.workspace_id == workspace_id).order_by(Thread.created_at.desc())
+        stmt = select(Thread).where(Thread.workspace_id == workspace_id).order_by(recency)
       else:
-        # Depending on requirement, we might show all threads or no threads if no workspace selected
-        # For now let's show all latest threads if no workspace selected (global view) or empty list
-        stmt = select(Thread).order_by(Thread.created_at.desc())
+        stmt = select(Thread).order_by(recency)
       
       result = await session.scalars(stmt)
       set_threads(result.all())
 
   def on_workspace_change():
-    # Clear thread selection and messages when switching workspace
-    set_selected_thread(None)
-    set_messages([])
-    if active_chat_workspace:
+    # Restore the previously selected thread for this workspace (if any)
+    ws_key = active_chat_workspace.id if active_chat_workspace else None
+    restored = thread_by_workspace.get(ws_key)
+    if restored:
+      set_selected_thread(restored)
+      asyncio.create_task(load_messages(restored.id))
+    else:
+      set_selected_thread(None)
+      set_messages([])
+    if show_all_threads:
+      asyncio.create_task(load_threads())
+    elif active_chat_workspace:
       asyncio.create_task(load_threads(active_chat_workspace.id))
     else:
       asyncio.create_task(load_threads())
   
   ft.use_effect(on_workspace_change, [active_chat_workspace])
+
+  def on_show_all_threads_change():
+    """Reload thread list when the all-threads toggle changes."""
+    if show_all_threads:
+      asyncio.create_task(load_threads())
+    elif active_chat_workspace:
+      asyncio.create_task(load_threads(active_chat_workspace.id))
+    else:
+      asyncio.create_task(load_threads())
+
+  ft.use_effect(on_show_all_threads_change, [show_all_threads])
 
   async def load_messages(thread_id):
     db_msgs = await engine.load_thread_messages(thread_id)
@@ -237,6 +261,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   async def handle_thread_click(thread):
     set_selected_thread(thread)
     set_current_view("threads")
+    # Remember which thread was selected for this workspace so we can restore it later
+    ws_key = active_chat_workspace.id if active_chat_workspace else None
+    set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
 
     # Load messages from DB and convert to UI message objects
     db_msgs = await engine.load_thread_messages(thread.id)
@@ -331,6 +358,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     await load_threads(workspace_id)
     # Re-select the thread so the context list highlights it correctly
     set_selected_thread(thread)
+    # Keep workspace→thread map up-to-date
+    ws_key = active_chat_workspace.id if active_chat_workspace else None
+    set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
     set_is_streaming(False)
 
   async def handle_save_workspace(name, description, ws_id=None):
@@ -411,6 +441,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("threads")
     set_context_visible(True)
 
+  def handle_chat_workspace_change(workspace):
+    """Switch the active chat workspace and reset the all-threads view."""
+    set_show_all_threads(False)
+    set_active_chat_workspace(workspace)
+
   async def switch_to_settings(e=None):
     set_current_view("settings")
     set_current_context("settings")
@@ -442,9 +477,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_thread_select=handle_thread_click,
         selected_thread=selected_thread,
         active_chat_workspace=active_chat_workspace,
-        on_chat_workspace_change=set_active_chat_workspace,
+        on_chat_workspace_change=handle_chat_workspace_change,
         selected_setting=selected_setting,
-        set_selected_setting=handle_settings_click
+        set_selected_setting=handle_settings_click,
+        show_all_threads=show_all_threads,
+        on_toggle_all_threads=lambda: set_show_all_threads(not show_all_threads)
       ),
       mainwindow=MainWindow(
         current_view=current_view,

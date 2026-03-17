@@ -16,17 +16,30 @@ logger = logging.getLogger("subconscious")
 
 # Map provider display names (as stored in settings) to pydantic-ai prefixes and env-var names
 _PROVIDER_MAP = {
-  "openai":      ("openai",    "OPENAI_API_KEY"),
-  "anthropic":   ("anthropic", "ANTHROPIC_API_KEY"),
-  "google":      ("google-gla","GOOGLE_API_KEY"),
-  "gemini":      ("google-gla","GOOGLE_API_KEY"),
-  "groq":        ("groq",      "GROQ_API_KEY"),
-  "mistralai":   ("mistral",   "MISTRAL_API_KEY"),
-  "mistral":     ("mistral",   "MISTRAL_API_KEY"),
-  "xai":         ("xai",       "XAI_API_KEY"),
-  "deepseek":    ("deepseek",  "DEEPSEEK_API_KEY"),
-  "ollama":      ("ollama",    None),            # no API key needed for local
-  "hugging face":("huggingface","HUGGINGFACEHUB_API_TOKEN"),
+  # Native pydantic-ai providers
+  "openai":                           ("openai",      "OPENAI_API_KEY"),
+  "anthropic":                        ("anthropic",   "ANTHROPIC_API_KEY"),
+  "gemini":                           ("google-gla",  "GOOGLE_API_KEY"),
+  "groq":                             ("groq",        "GROQ_API_KEY"),
+  "mistral":                          ("mistral",     "MISTRAL_API_KEY"),
+  "xai":                              ("xai",         "XAI_API_KEY"),
+  "bedrock":                          ("bedrock",     "AWS_ACCESS_KEY_ID"),
+  "cerebras":                         ("cerebras",    "CEREBRAS_API_KEY"),
+  "cohere":                           ("cohere",      "CO_API_KEY"),
+  "hugging face":                     ("huggingface", "HUGGINGFACEHUB_API_TOKEN"),
+  "openrouter":                       ("openrouter",  "OPENROUTER_API_KEY"),
+  # OpenAI-compatible providers (use openai prefix with custom base_url)
+  "alibaba cloud model studio":       ("openai",      "DASHSCOPE_API_KEY"),
+  "azure ai foundry":                 ("openai",      "AZURE_OPENAI_API_KEY"),
+  "deepseek":                         ("deepseek",    "DEEPSEEK_API_KEY"),
+  "fireworks ai":                     ("openai",      "FIREWORKS_API_KEY"),
+  "github models":                    ("openai",      "GITHUB_TOKEN"),
+  "litellm":                          ("openai",      "LITELLM_API_KEY"),
+  "nebius ai studio":                 ("openai",      "NEBIUS_API_KEY"),
+  "ollama":                           ("ollama",      None),             # no API key needed for local
+  "perplexity":                       ("openai",      "PERPLEXITY_API_KEY"),
+  "sambanova":                        ("openai",      "SAMBANOVA_API_KEY"),
+  "together ai":                      ("openai",      "TOGETHER_API_KEY"),
 }
 
 

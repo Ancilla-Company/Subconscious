@@ -36,13 +36,15 @@ def ContextList(
   active_chat_workspace=None,
   on_chat_workspace_change=None,
   selected_setting=None,
-  set_selected_setting=None
+  set_selected_setting=None,
+  show_all_threads: bool = False,
+  on_toggle_all_threads=None
 ) -> ft.Control:
   """ Displays a list of items for the active view (Threads, Workspaces, Settings, etc.) """
   headers = []
 
   if current_context == "threads":
-    title_text = "Latest Threads"
+    title_text = "Threads"
     list_items = []
     if threads_list:
       for thread in threads_list:
@@ -52,7 +54,7 @@ def ContextList(
             key=thread.id,
             name=thread.title if thread.title else "Untitled Thread",
             description=thread.description,
-            updated_at=thread.created_at,
+            updated_at=thread.updated_at,
             on_click=lambda _, t=thread: on_thread_select(t) if on_thread_select else None,
             selected=is_selected
           )
@@ -66,7 +68,7 @@ def ContextList(
       ]
 
     headers = [
-      SvgButton(on_click=lambda _: on_new_thread() if on_new_thread else None, svg_path="/new_thread.svg", tooltip="New Thread"),
+      SvgButton(on_click=on_new_thread if on_new_thread else None, svg_path="/new_thread.svg", tooltip="New Thread"),
       PopupMenuButton(
         icon=ft.Icons.FOLDER_OPEN_OUTLINED,
         tooltip="Switch Workspace",
@@ -76,6 +78,19 @@ def ContextList(
             switch_workspace=lambda _, w=ws: on_chat_workspace_change(w) if on_chat_workspace_change else None,
             slug=ws.id
           ) for ws in (workspaces_list or [])
+        ] + [
+          ft.PopupMenuItem(),  # divider
+          ft.PopupMenuItem(
+            content=ft.Row([
+              ft.Icon(
+                ft.Icons.CHECK if show_all_threads else ft.Icons.CHECK,
+                size=16,
+                color=ft.Colors.PRIMARY if show_all_threads else ft.Colors.TRANSPARENT,
+              ),
+              ft.Text("All Workspaces"),
+            ], spacing=8),
+            on_click=lambda _: on_toggle_all_threads() if on_toggle_all_threads else None,
+          ),
         ]
       )
     ]

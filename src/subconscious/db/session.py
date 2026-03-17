@@ -19,6 +19,14 @@ class Database:
     """ Create tables if they don't exist and handle migrations. """
     async with self.engine.begin() as conn:
       await conn.run_sync(Base.metadata.create_all)
+    
+    # Column migrations – add columns that didn't exist in older DB versions
+    async with self.engine.begin() as conn:
+      # threads.updated_at
+      result = await conn.execute(text("PRAGMA table_info(threads)"))
+      columns = {row[1] for row in result.fetchall()}
+      if "updated_at" not in columns:
+        await conn.execute(text("ALTER TABLE threads ADD COLUMN updated_at DATETIME"))
 
   def get_session(self) -> AsyncSession:
     """ Get a new async database session. """

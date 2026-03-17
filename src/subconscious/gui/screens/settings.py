@@ -10,15 +10,30 @@ from ..components.forms import FormField, PasswordField, DropdownField
 
 
 _PROVIDERS = [
-  ft.dropdown.Option("XAI"),
-  ft.dropdown.Option("Groq"),
-  ft.dropdown.Option("OpenAI"),
-  ft.dropdown.Option("Google"),
-  ft.dropdown.Option("Ollama"),
-  ft.dropdown.Option("DeepSeek"),
-  ft.dropdown.Option("MistralAI"),
+  # Native pydantic-ai providers
   ft.dropdown.Option("Anthropic"),
+  ft.dropdown.Option("Bedrock"),
+  ft.dropdown.Option("Cerebras"),
+  ft.dropdown.Option("Cohere"),
+  ft.dropdown.Option("Gemini"),
+  ft.dropdown.Option("Groq"),
   ft.dropdown.Option("Hugging Face"),
+  ft.dropdown.Option("Mistral"),
+  ft.dropdown.Option("OpenAI"),
+  ft.dropdown.Option("OpenRouter"),
+  ft.dropdown.Option("xAI"),
+  # OpenAI-compatible providers
+  ft.dropdown.Option("Alibaba Cloud Model Studio"),
+  ft.dropdown.Option("Azure AI Foundry"),
+  ft.dropdown.Option("DeepSeek"),
+  ft.dropdown.Option("Fireworks AI"),
+  ft.dropdown.Option("GitHub Models"),
+  ft.dropdown.Option("LiteLLM"),
+  ft.dropdown.Option("Nebius AI Studio"),
+  ft.dropdown.Option("Ollama"),
+  ft.dropdown.Option("Perplexity"),
+  ft.dropdown.Option("SambaNova"),
+  ft.dropdown.Option("Together AI"),
 ]
 
 

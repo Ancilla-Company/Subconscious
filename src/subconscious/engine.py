@@ -2,6 +2,7 @@ import uuid
 import json
 import logging
 import pathlib
+from datetime import datetime
 from sqlalchemy import select
 from typing import AsyncIterator, Optional
 from pydantic_ai.messages import (
@@ -177,10 +178,17 @@ class Engine:
       return thread
 
   async def save_message(self, thread_id: int, role: str, content: str) -> Message:
-    """Persist a single message and return the ORM object."""
+    """Persist a single message and return the ORM object. Also bumps the thread's updated_at."""
+    from sqlalchemy import update as sql_update
     async with self.db.get_session() as session:
       msg = Message(thread_id=thread_id, role=role, content=content)
       session.add(msg)
+      # Bump the parent thread's updated_at so the list stays sorted by recent activity
+      await session.execute(
+        sql_update(Thread)
+        .where(Thread.id == thread_id)
+        .values(updated_at=datetime.now())
+      )
       await session.commit()
       await session.refresh(msg)
       return msg

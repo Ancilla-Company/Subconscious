@@ -89,14 +89,20 @@ class MessageBubble(ft.Row):
                 ),
                 bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
                 can_tap_header=True,
-                content=ft.Container(ft.Markdown(
-                  value=f"```json\n {json.dumps(data, indent=2)} \n```",
-                  extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                  code_theme=CODE_THEME,
-                  code_style_sheet=ft.MarkdownStyleSheet(code_text_style=ft.TextStyle(font_family="Roboto Mono"), blockquote_text_style=ft.TextStyle(font_family="Roboto Mono")),
-                ), padding=ft.padding.only(0, 0, 0, 0))
+                content=ft.Container(
+                  ft.Markdown(
+                    value=f"```json\n {json.dumps(data, indent=2)} \n```",
+                    extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                    code_theme=CODE_THEME,
+                    code_style_sheet=ft.MarkdownStyleSheet(
+                      code_text_style=ft.TextStyle(font_family="Roboto Mono"),
+                      blockquote_text_style=ft.TextStyle(font_family="Roboto Mono")
+                    ),
+                  ),
+                  padding=ft.padding.only(0, 0, 0, 0)
+                )
               )
-            ],
+            ]
           ),
           border_radius=ft.BorderRadius(3,3,3,3),
           padding=ft.padding.only(0,-10,0,-7)
@@ -105,43 +111,76 @@ class MessageBubble(ft.Row):
     else:
       for part in self.parts:
         if part.startswith(("```", "~~~")):
-          self.content.append(ft.Container(content=ft.Column([
-              # Get the code block language
-              ft.Container(content=ft.Row([
-                ft.Row([
-                  ft.Text(self.extract_code_block_headers(part).capitalize(), color=ft.Colors.PRIMARY, selectable=True),
-                ], spacing=0, alignment="start", expand=True),
-                ft.TextButton(text="Copy", icon="copy", on_click=self.copy_code_block, data=part, tooltip="Copy",
-                style=ft.ButtonStyle(text_style=ft.TextStyle(font_family="Roboto Mono", size=12), shape=ft.RoundedRectangleBorder(radius=3)),
-                ),
-                ], spacing=0), padding=ft.padding.only(10, 2, 2, 2),
-              ),
+          self.content.append(
+            ft.Container(
+              content=ft.Column(
+                [
+                  # Get the code block language
+                  ft.Container(
+                    content=ft.Row(
+                      [
+                        ft.Row(
+                          [
+                            ft.Text(
+                              self.extract_code_block_headers(part).capitalize(),
+                              color=ft.Colors.PRIMARY,
+                              selectable=True
+                            )
+                          ],
+                          spacing=0,
+                          alignment="start",
+                          expand=True
+                        ),
+                        ft.IconButton(
+                          icon=ft.Icons.COPY,
+                          icon_size=16,
+                          height=30,
+                          width=30,
+                          padding=4,
+                          on_click=self.copy_code_block,
+                          data=part,
+                          tooltip="Copy",
+                          style=ft.ButtonStyle(
+                            text_style=ft.TextStyle(font_family="Roboto Mono", size=12),
+                            shape=ft.RoundedRectangleBorder(radius=3)
+                          ),
+                        ),
+                      ], 
+                      spacing=0
+                    ),
+                    padding=ft.padding.only(10, 2, 2, 2)
+                  ),
 
-              # Render the code block
-              ft.Container(content=
-                ft.Markdown(
-                  part,
-                  extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                  code_theme=CODE_THEME,
-                  code_style_sheet=ft.MarkdownStyleSheet(code_text_style=ft.TextStyle(font_family="Roboto Mono"), blockquote_text_style=ft.TextStyle(font_family="Roboto Mono")),
-                ),
-                border_radius=ft.BorderRadius(0,0,5,5),
-              )
-            ],
-            spacing=0),
-            padding=ft.padding.only(0, 0, 0, 0),
-            bgcolor=ft.Colors.SURFACE,
-            margin=ft.margin.only(bottom=10, top=10),
-            border_radius=ft.BorderRadius(5,5,5,5),
-            border=ft.border.all(1, ft.Colors.SECONDARY),  # Add a
-          ))
-        else:
-          self.content.append(ft.Container(content=
-              ft.Markdown(
-                part,
+                  # Render the code block
+                  ft.Container(
+                    content=ft.Markdown(
+                      part,
+                      extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                      code_theme=CODE_THEME,
+                      code_style_sheet=ft.MarkdownStyleSheet(
+                        code_text_style=ft.TextStyle(font_family="Roboto Mono"),
+                        blockquote_text_style=ft.TextStyle(font_family="Roboto Mono")
+                      ),
+                    ),
+                    border_radius=ft.BorderRadius(0, 0, 3, 3),
+                  )
+                ],
+                spacing=0
               ),
+              padding=ft.padding.only(0, 0, 0, 0),
+              bgcolor=ft.Colors.SURFACE,
+              margin=ft.margin.only(bottom=10, top=10),
+              border_radius=ft.BorderRadius(3, 3, 3, 3),
+              border=ft.border.all(1, ft.Colors.SECONDARY),
+            )
+          )
+        else:
+          self.content.append(
+            ft.Container(
+              content=ft.Markdown(part),
               clip_behavior=ft.ClipBehavior.NONE,
-            ))
+            )
+          )
     
     self.bubble_content = ft.Column(
       [
@@ -152,32 +191,22 @@ class MessageBubble(ft.Row):
           ft.Container(
             content=ft.Row(
               [
-                ft.Container(
-                  content=
-                  ft.Stack(
-                    [
-                      ft.IconButton(
-                        icon=ft.Icons.COPY,
-                        on_click=self.copy_message,
-                        tooltip="Copy",
-                        style=ft.ButtonStyle(
-                          shape=ft.RoundedRectangleBorder(radius=3)
-                        ),
-                        icon_size=16,
-                        height=30,
-                        width=30,
-                        padding=4,
-                        top=-3,
-                        left=-3
-                      )
-                    ],
-                    width=25,
-                    height=25
+                ft.IconButton(
+                  icon=ft.Icons.COPY,
+                  on_click=self.copy_message,
+                  tooltip="Copy",
+                  style=ft.ButtonStyle(
+                    shape=ft.RoundedRectangleBorder(radius=3)
                   ),
-                  border_radius=ft.border_radius.all(3),
+                  icon_size=16,
+                  height=30,
+                  width=30,
+                  padding=4,
                 ),
                 ft.Text(
-                  self.format_timestamp(self.message.timestamp) if hasattr(self.message, 'timestamp') else "--:--", size=12
+                  self.format_timestamp(self.message.timestamp) if hasattr(self.message, 'timestamp') else "--:--",
+                  size=12,
+                  height=20
                 ),
               ],
               spacing=5,
@@ -185,13 +214,13 @@ class MessageBubble(ft.Row):
               wrap=True,
               alignment= "end" if message.type == 'human' else "start"
             ),
-            padding=ft.padding.only(0, 10, 0, 0)
+            padding=ft.padding.only(0, 5, 0, 5)
           )
         ]
       ],
       spacing=0,
       wrap=False
-    )  # content
+    )
     
     self.controls = [
       ft.Row(
@@ -205,7 +234,7 @@ class MessageBubble(ft.Row):
                 # Message bubble
                 ft.Container(
                   bgcolor=ft.Colors.PRIMARY_CONTAINER if self.message.type == 'human' else ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                  border_radius = ft.BorderRadius(5, 5, 5, 5),
+                  border_radius = ft.BorderRadius(3, 3, 3, 3),
                   padding = ft.padding.only(10, 5, 10, 5),
                   content = self.bubble_content,
                   margin=ft.margin.only(right=7, left=7),
