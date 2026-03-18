@@ -63,10 +63,63 @@ async def test_read_file_outside_home_blocked(ctx, tmp_path, monkeypatch):
 
 async def test_read_file_truncates_large_file(ctx, tmp_home_dir):
   f = tmp_home_dir / "big.txt"
-  # Write 110 KB of data
-  f.write_bytes(b"A" * 110_000_000)
+  # Write 110,000 chars. The limit is 100,000 (_MAX_READ_SIZE)
+  f.write_text("A" * 110_000, encoding="utf-8")
   result = await read_file(ctx, str(f))
   assert "truncated" in result
+
+
+# ---------------------------------------------------------------------------
+# Document Readers (.docx, .xlsx, .pdf)
+# ---------------------------------------------------------------------------
+
+async def test_read_docx_mock(ctx, tmp_home_dir):
+  """
+  Verify docx reading. We'll create a simple docx using the library.
+  """
+  import docx
+  f = tmp_home_dir / "test.docx"
+  doc = docx.Document()
+  doc.add_paragraph("Hello from Word")
+  doc.save(f)
+  
+  result = await read_file(ctx, str(f))
+  assert "Hello from Word" in result
+
+
+async def test_read_xlsx_mock(ctx, tmp_home_dir):
+  """
+  Verify Excel reading.
+  """
+  import openpyxl
+  f = tmp_home_dir / "test.xlsx"
+  wb = openpyxl.Workbook()
+  ws = wb.active
+  ws.title = "Data"
+  ws["A1"] = "Header"
+  ws["A2"] = "Value123"
+  wb.save(f)
+  
+  result = await read_file(ctx, str(f))
+  assert "Sheet: Data" in result
+  assert "Header" in result
+  assert "Value123" in result
+
+
+async def test_read_pdf_mock(ctx, tmp_home_dir):
+  """
+  PDFs are hard to generate from scratch without more dependencies (like reportlab).
+  However, we can verify that the code attempts to read it and handles errors 
+  or empty states gracefully if we give it a dummy.
+  For a robust test, we'll check that a non-PDF file renamed to .pdf 
+  triggers the pypdf error handler rather than the text decoder.
+  """
+  f = tmp_home_dir / "fake.pdf"
+  f.write_text("not a real pdf content")
+  
+  result = await read_file(ctx, str(f))
+  # Should trigger the internal try/except in _read_pdf
+  assert "Error reading PDF" in result
 
 
 # ---------------------------------------------------------------------------

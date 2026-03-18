@@ -11,10 +11,10 @@ from ..engine import Engine
 from ..gui.frame import Frame
 from ..gui.sidebar import Sidebar
 from ..gui.titlebar import TitleBar
-# from ..gui.components.tray import *
+from ..gui.components.tray import *
 from ..gui.mainwindow import MainWindow
 from ..gui.contextlist import ContextList
-from ..db.models import Workspace, Thread, Message, AppState
+from ..db.models import Workspace, Thread, AppState
 from ..gui.components.messages import HumanMessage, AIMessage
 
 
@@ -508,8 +508,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     )
   ]
 
-async def main(page: ft.Page, config):
+async def main(page: ft.Page, engine):
   """ Application window config """
+
+  # async def on_window_event(e: ft.WindowEvent):
+  #   if e.type == ft.WindowEventType.CLOSE:
+  #     await engine.stop_engine()
+
+  # page.window.on_event = on_window_event
   page.padding = 0
   page.spacing = 0
   page.window.width = 800
@@ -524,20 +530,39 @@ async def main(page: ft.Page, config):
   page.theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.BLACK, secondary=ft.Colors.GREY, surface=ft.Colors.WHITE, secondary_container=ft.Colors.GREY_300, primary_container=ft.Colors.GREY_300))
   page.dark_theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.WHITE, secondary=ft.Colors.GREY, surface=ft.Colors.BLACK87, secondary_container=ft.Colors.GREY_800, primary_container=ft.Colors.GREY_800))
 
-  # Initialize Tray Icon, buggy
-  # Tray(page)
-
-  # Start the engine and gui
-  engine = Engine()
-  await engine.start_engine(config)
+  # Start rendering Subconscious
   return page.render(lambda: AppView(page, engine))
 
 async def start_gui(config):
-  """ Starts the GUI engine """
+  """ Starts the GUI, engine & tray """
   assets_path = str(pathlib.Path(__file__).parent.parent / "assets")
+  engine = Engine()
+  await engine.start_engine(config)
+
+  # Create tray and close event to stop the engine
+  close = asyncio.Event()
+  tray = Tray(engine, close)
+
+  async def handle_close():
+    await close.wait()
+    await engine.stop_engine()
+
+  asyncio.create_task(handle_close())
   
   # create a wrapper so flet can call main(page)
   async def main_wrapper(page: ft.Page):
-    await main(page, config)
+    # Pass in page to tray
+    tray.set_gui(page)
 
-  await ft.run_async(main_wrapper, assets_dir=assets_path)
+    # Create an on window event that alerts tray when the GUI is closed and 
+    # async def on_window_event(e: ft.WindowEvent):
+    #   print(e.type)
+    #   if e.type == ft.WindowEventType.CLOSE:
+    #     await engine.stop_engine()
+
+    # page.window.on_event = on_window_event
+
+
+    await main(page, engine)
+  
+  await tray.start_gui(main_wrapper, assets_path)

@@ -1,5 +1,6 @@
 import uuid
 import json
+import asyncio
 import logging
 import pathlib
 from datetime import datetime
@@ -131,6 +132,9 @@ class Engine:
     self.config.load()
     self.db = Database(config)
     await self.init_system()
+
+    # start the heartbeat
+    self._heartbeat_task = asyncio.create_task(self.heartbeat())
 
     # Initialize Agent Manager
     self.agent_manager = AgentManager(config)
@@ -285,5 +289,25 @@ class Engine:
 
   async def stop_engine(self):
     """ Cleanup engine resources """
+    if hasattr(self, '_heartbeat_task') and not self._heartbeat_task.done():
+      self._heartbeat_task.cancel()
+      try:
+        await self._heartbeat_task
+      except asyncio.CancelledError:
+        pass
     if hasattr(self, 'db'):
-      await self.db.close()
+      try:
+        await asyncio.wait_for(self.db.close(), timeout=1.0)
+      except asyncio.TimeoutError:
+        logger.warning("Engine stop_engine: db.close() timed out.")
+    logger.debug("Engine stopped.")
+
+
+  async def heartbeat(self):
+    """ A simple heartbeat task to indicate the engine is still running normally """
+    try:
+      while True:
+        logger.debug("heartbeat")
+        await asyncio.sleep(5)
+    except asyncio.CancelledError:
+      pass

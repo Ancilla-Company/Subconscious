@@ -1,4 +1,6 @@
-from sqlalchemy import text
+import asyncio
+import logging
+from sqlalchemy import text, NullPool
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
@@ -6,11 +8,21 @@ from .models import Base
 from ..config import Config
 
 
+logger = logging.getLogger("subconscious")
+
+
 class Database:
   """ Database session manager. """
   def __init__(self, config: Config):
     """ Initialize the database engine and session maker. """
-    self.engine = create_async_engine(config.db_path, echo=False)
+    # NullPool disables connection pooling entirely. Each session opens and
+    # closes its own connection, so dispose() returns immediately and there
+    # is no background pool thread to hang on shutdown.
+    self.engine = create_async_engine(
+      config.db_path,
+      echo=False,
+      poolclass=NullPool,
+    )
     self.async_session = async_sessionmaker(
       self.engine, class_=AsyncSession, expire_on_commit=False
     )

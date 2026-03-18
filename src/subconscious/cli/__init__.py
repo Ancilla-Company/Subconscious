@@ -61,7 +61,8 @@ def main():
     logger.setLevel(logging.INFO)
   
   try:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     if args.command == "engine":
       print(LOGO)
       loop.run_until_complete(Engine().start_engine(
@@ -80,6 +81,15 @@ def main():
       print(LOGO)
       parser.print_help()
   except KeyboardInterrupt:
+    pass
+  finally:
+    try:
+      # Cancel all tasks still pending on the loop
+      pending = asyncio.all_tasks(loop)
+      if pending:
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    finally:
+      loop.close()
     sys.exit(0)
 
 

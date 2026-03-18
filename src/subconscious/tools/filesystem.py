@@ -15,13 +15,12 @@ from pydantic_ai import RunContext
 
 logger = logging.getLogger("subconscious")
 
-_MAX_READ_BYTES = 100_000_000  # ~100 KB max read
+_MAX_READ_SIZE = 100_000  # 100 KB limit
 
 
 def _safe_path(raw: str) -> pathlib.Path:
   """Resolve and return the path. Raises ValueError if obviously unsafe."""
   p = pathlib.Path(raw).expanduser().resolve()
-  return p
   home = pathlib.Path.home().resolve()
   # Block absolute paths that escape the user's home tree entirely
   try:
@@ -36,13 +35,14 @@ def _safe_path(raw: str) -> pathlib.Path:
 
 async def read_file(ctx: RunContext[EngineContext], path: str, encoding: str = "utf-8") -> str:
   """
-  Read and return the text content of a file.
+  Read and return the content of a file. Supports text (.txt, .md, .py, etc.), 
+  Word documents (.docx), Excel spreadsheets (.xlsx), and PDF files (.pdf).
   Limited to files inside the user's home directory for safety.
-  Returns up to 100 KB of content; larger files are truncated.
+  Returns up to 100 KB of content; larger files/extractions are truncated.
 
   Args:
     path: Absolute or ~ relative path to the file.
-    encoding: Text encoding (default utf-8).
+    encoding: Text encoding (default utf-8, used for plain text files).
   """
   try:
     p = _safe_path(path)
@@ -51,21 +51,74 @@ async def read_file(ctx: RunContext[EngineContext], path: str, encoding: str = "
     if not p.is_file():
       return f"'{p}' is not a file."
 
-    size = p.stat().st_size
-    raw = p.read_bytes()[:_MAX_READ_BYTES]
-    try:
-      text = raw.decode(encoding)
-    except UnicodeDecodeError:
-      return f"File appears to be binary or not {encoding} encoded."
+    ext = p.suffix.lower()
+    text = ""
+    
+    if ext == ".docx":
+      text = _read_docx(p)
+    elif ext == ".xlsx":
+      text = _read_xlsx(p)
+    elif ext == ".pdf":
+      text = _read_pdf(p)
+    else:
+      # Default to plain text reading
+      raw = p.read_bytes()
+      try:
+        text = raw.decode(encoding)
+      except UnicodeDecodeError:
+        return f"File appears to be binary or not {encoding} encoded. Use a supported document extension (.docx, .xlsx, .pdf) or a text format."
 
-    if size > _MAX_READ_BYTES:
-      text += f"\n\n[... file truncated — showed {_MAX_READ_BYTES} of {size} bytes]"
+    size = len(text)
+    if size > _MAX_READ_SIZE:
+      text = text[:_MAX_READ_SIZE] + f"\n\n[... content truncated — showed {_MAX_READ_SIZE} of {size} characters]"
 
     return text
   except ValueError as exc:
     return str(exc)
   except Exception as exc:
     return f"Error reading file: {exc}"
+
+
+def _read_docx(path: pathlib.Path) -> str:
+  """Extract text from a .docx file using python-docx."""
+  try:
+    import docx
+    doc = docx.Document(path)
+    return "\n".join([para.text for para in doc.paragraphs])
+  except Exception as e:
+    return f"Error reading Word document: {e}"
+
+
+def _read_xlsx(path: pathlib.Path) -> str:
+  """Extract text/data from an .xlsx file using openpyxl."""
+  try:
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    output = []
+    for sheet in wb.worksheets:
+      output.append(f"--- Sheet: {sheet.title} ---")
+      for row in sheet.iter_rows(values_only=True):
+        # Filter out empty rows
+        if any(cell is not None for cell in row):
+          output.append("\t".join([str(cell) if cell is not None else "" for cell in row]))
+    return "\n".join(output)
+  except Exception as e:
+    return f"Error reading Excel spreadsheet: {e}"
+
+
+def _read_pdf(path: pathlib.Path) -> str:
+  """Extract text from a .pdf file using pypdf."""
+  try:
+    import pypdf
+    reader = pypdf.PdfReader(path)
+    output = []
+    for i, page in enumerate(reader.pages):
+      text = page.extract_text()
+      if text:
+        output.append(f"--- Page {i+1} ---\n{text}")
+    return "\n".join(output)
+  except Exception as e:
+    return f"Error reading PDF: {e}"
 
 
 async def list_directory(
