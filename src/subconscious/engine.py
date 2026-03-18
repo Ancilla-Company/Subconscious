@@ -6,6 +6,7 @@ import pathlib
 from datetime import datetime
 from sqlalchemy import select
 from typing import AsyncIterator, Optional
+from desktop_notifier import DesktopNotifier, Icon
 from pydantic_ai.messages import (
   ModelMessage, ModelRequest, ModelResponse,
   UserPromptPart, TextPart,
@@ -16,6 +17,12 @@ from .agent import AgentManager
 from .db.session import Database
 from .tools import ToolRegistry, EngineContext
 from .db.models import Workspace, Thread, Message, AppState, Networks
+
+_icon_path = pathlib.Path(__file__).parent / "assets" / "icon.png"
+notifier = DesktopNotifier(
+  app_name="Subconscious",
+  app_icon=Icon(path=_icon_path),
+)
 
 
 # Logging setup
@@ -142,9 +149,9 @@ class Engine:
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
 
-  # ------------------------------------------------------------------
-  # Thread & Message helpers
-  # ------------------------------------------------------------------
+    # Show ready notification
+    await self.show_notification("Subconscious", "Startup Complete.")
+
 
   async def get_or_create_thread(
     self,
@@ -302,7 +309,6 @@ class Engine:
         logger.warning("Engine stop_engine: db.close() timed out.")
     logger.debug("Engine stopped.")
 
-
   async def heartbeat(self):
     """ A simple heartbeat task to indicate the engine is still running normally """
     try:
@@ -311,3 +317,12 @@ class Engine:
         await asyncio.sleep(5)
     except asyncio.CancelledError:
       pass
+  
+  async def show_notification(self, title, message):
+    try:
+      await notifier.send(
+        title=title,
+        message=message
+      )
+    except Exception as e:
+      print(f"Notification error: {e}")

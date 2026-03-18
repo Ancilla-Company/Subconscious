@@ -49,7 +49,6 @@ class Tray:
       self._reopen_event.clear()
       if self._exiting:
         break
-      # await ft.run_async(self.main, assets_dir=self.assets)
   
   def set_gui(self, gui):
     """ Stores the flet page object """
@@ -68,7 +67,6 @@ class Tray:
       # Unblock the wait loop so it can exit cleanly
       if self.gui.window.visible:
         asyncio.run_coroutine_threadsafe(self.gui.window.close(), self.loop)
-        # self.loop.call_soon_threadsafe(self.gui.window.close)
       self.loop.call_soon_threadsafe(self.close.set)
       self.loop.call_soon_threadsafe(self._reopen_event.set)
     if self.gui:

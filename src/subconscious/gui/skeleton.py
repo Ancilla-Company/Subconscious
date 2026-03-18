@@ -510,12 +510,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
 async def main(page: ft.Page, engine):
   """ Application window config """
-
-  # async def on_window_event(e: ft.WindowEvent):
-  #   if e.type == ft.WindowEventType.CLOSE:
-  #     await engine.stop_engine()
-
-  # page.window.on_event = on_window_event
   page.padding = 0
   page.spacing = 0
   page.window.width = 800
@@ -549,20 +543,8 @@ async def start_gui(config):
 
   asyncio.create_task(handle_close())
   
-  # create a wrapper so flet can call main(page)
   async def main_wrapper(page: ft.Page):
-    # Pass in page to tray
     tray.set_gui(page)
-
-    # Create an on window event that alerts tray when the GUI is closed and 
-    # async def on_window_event(e: ft.WindowEvent):
-    #   print(e.type)
-    #   if e.type == ft.WindowEventType.CLOSE:
-    #     await engine.stop_engine()
-
-    # page.window.on_event = on_window_event
-
-
     await main(page, engine)
   
   await tray.start_gui(main_wrapper, assets_path)
