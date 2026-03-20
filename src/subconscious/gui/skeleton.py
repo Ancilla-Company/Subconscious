@@ -518,6 +518,7 @@ async def main(page: ft.Page, engine):
   page.window.min_width = 506
   page.window.min_height = 300
   page.window.frameless = False
+  page.window.icon = "favicon.ico" # Windows only
   page.bgcolor = ft.Colors.SURFACE
   page.window.title_bar_hidden = True
   page.theme_mode = ft.ThemeMode.LIGHT

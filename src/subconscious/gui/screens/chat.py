@@ -1,4 +1,3 @@
-import asyncio
 import flet as ft
 
 from ..components.buttons import IconButton

@@ -4,7 +4,6 @@ Unit tests for subconscious.tools.calculator
 
 import pytest
 from subconscious.tools.calculator import calculate, convert_units, list_supported_units
-# pytest already imported above
 
 
 # ---------------------------------------------------------------------------

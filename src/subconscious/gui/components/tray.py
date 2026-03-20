@@ -1,4 +1,3 @@
-import os
 import asyncio
 import pathlib
 import pystray
@@ -7,7 +6,7 @@ from PIL import Image
 
 
 class Tray:
-  """ Manages the tray icon """
+  """ Manages the tray icon service """
   def __init__(self, engine, close):
     """ Sets up the tray icon to allow running in the backround without stopping the engine """
     self.main = None
@@ -22,6 +21,7 @@ class Tray:
     base_dir = pathlib.Path(__file__).parent.parent.parent
     icon_path = base_dir / "assets" / "favicon.ico"
 
+    # Initialize tray icon
     self.__tray_icon = pystray.Icon(
       name="Subconscious",
       icon=Image.open(str(icon_path)),
@@ -32,6 +32,7 @@ class Tray:
       ),
       visible=True,
     )
+    
     self.__tray_icon.run_detached()
   
   async def start_gui(self, main, assets):
@@ -39,6 +40,7 @@ class Tray:
     if main and assets:
       self.main = main
       self.assets = assets
+    
     self.loop = asyncio.get_running_loop()
     self._reopen_event = asyncio.Event()
 
@@ -63,11 +65,13 @@ class Tray:
     """ Completely exit the program """
     self._exiting = True
     self.__tray_icon.stop()
+
     if self.loop and self._reopen_event:
       # Unblock the wait loop so it can exit cleanly
       if self.gui.window.visible:
         asyncio.run_coroutine_threadsafe(self.gui.window.close(), self.loop)
       self.loop.call_soon_threadsafe(self.close.set)
       self.loop.call_soon_threadsafe(self._reopen_event.set)
+
     if self.gui:
       asyncio.run_coroutine_threadsafe(self.gui.window.destroy(), self.loop)

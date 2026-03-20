@@ -12,8 +12,6 @@ standing up a real pydantic-ai agent.
 import pytest
 import pytest_asyncio
 from dataclasses import dataclass
-from typing import Any
-
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from subconscious.db.models import Base

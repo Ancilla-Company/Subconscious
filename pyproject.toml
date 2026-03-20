@@ -6,21 +6,27 @@ authors = [
   { name = "Brian Branch", email = "you@example.com" }
 ]
 dependencies = [
-  "pydantic-ai",
-  "ray",
-  "flet[all]",
-  "nats-py",
-  "fastapi",
-  "sqlalchemy",
-  "textual",
-  "openfga-sdk",
-  "pyyaml",
+  "httpx",
+  "bcrypt",
   "pytest",
-  "pytest-asyncio",
+  "pyyaml",
+  "fastapi",
   "keyring",
-  "aiosqlite"
+  "aiosqlite",
+  "flet[all]",
+  "sqlalchemy",
+  "pydantic-ai",
+  "pytest-asyncio",
+  
+  "bs4",
+  "python-docx",
+  "pypdf",
+  "openpyxl",
+  "pyperclip",
+  "speedtest-cli",
+  "send2trash"
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [project.scripts]
 subconscious = "subconscious.cli:main"

@@ -1,13 +1,11 @@
 import os
 import logging
 from pydantic_ai import Agent
-from typing import Optional, Callable, TYPE_CHECKING
+from typing import Optional, Callable, TYPE_CHECKING, Any, cast
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart, ModelResponse, TextPart
 
 from .config import Config
-
-if TYPE_CHECKING:
-  from .tools import EngineContext
+from .tools import EngineContext
 
 
 # Logging setup
@@ -109,11 +107,6 @@ class AgentManager:
     logger.debug(f"Building agent with model: {full_model_str}, tools: {len(tools or [])} attached")
 
     if tools:
-      # Import here to avoid a circular dependency at module load time
-      from .tools import EngineContext
-      # pydantic-ai uses overloads that Pylance cannot narrow past when
-      # deps_type is non-None; cast through Any to silence the false positive.
-      from typing import Any, cast
       agent_kwargs: Any = dict(
         model=full_model_str,
         system_prompt=system_prompt,

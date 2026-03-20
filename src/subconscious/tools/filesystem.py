@@ -3,15 +3,17 @@ Filesystem tools — read files, list directories, create files, move to trash.
 Operations are sandboxed: paths outside the user's home directory are blocked
 unless the engine context data_dir is explicitly set wider.
 """
-
-import os
-import stat
+import docx
+import pypdf
 import logging
 import pathlib
-import platform
-from typing import Optional
-from . import EngineContext
+import datetime
+import openpyxl
+import send2trash
 from pydantic_ai import RunContext
+
+from . import EngineContext
+
 
 logger = logging.getLogger("subconscious")
 
@@ -82,7 +84,6 @@ async def read_file(ctx: RunContext[EngineContext], path: str, encoding: str = "
 def _read_docx(path: pathlib.Path) -> str:
   """Extract text from a .docx file using python-docx."""
   try:
-    import docx
     doc = docx.Document(path)
     return "\n".join([para.text for para in doc.paragraphs])
   except Exception as e:
@@ -92,7 +93,6 @@ def _read_docx(path: pathlib.Path) -> str:
 def _read_xlsx(path: pathlib.Path) -> str:
   """Extract text/data from an .xlsx file using openpyxl."""
   try:
-    import openpyxl
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     output = []
     for sheet in wb.worksheets:
@@ -109,7 +109,6 @@ def _read_xlsx(path: pathlib.Path) -> str:
 def _read_pdf(path: pathlib.Path) -> str:
   """Extract text from a .pdf file using pypdf."""
   try:
-    import pypdf
     reader = pypdf.PdfReader(path)
     output = []
     for i, page in enumerate(reader.pages):
@@ -203,7 +202,6 @@ async def get_file_info(ctx: RunContext[EngineContext], path: str) -> dict:
     if not p.exists():
       return {"error": f"Path not found: {p}"}
     info = p.stat()
-    import datetime
     return {
       "name": p.name,
       "path": str(p),
@@ -227,10 +225,6 @@ async def move_to_trash(ctx: RunContext[EngineContext], path: str) -> str:
   Args:
     path: Path to the file or folder to trash.
   """
-  try:
-    import send2trash  # pip install send2trash
-  except ImportError:
-    return "Required package missing. Install: send2trash"
   try:
     p = _safe_path(path)
     if not p.exists():

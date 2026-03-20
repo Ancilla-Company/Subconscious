@@ -1,11 +1,11 @@
 import uuid
-import json
 import asyncio
 import logging
 import pathlib
 from datetime import datetime
 from sqlalchemy import select
 from typing import AsyncIterator, Optional
+from sqlalchemy import update as sql_update
 from desktop_notifier import DesktopNotifier, Icon
 from pydantic_ai.messages import (
   ModelMessage, ModelRequest, ModelResponse,
@@ -18,12 +18,12 @@ from .db.session import Database
 from .tools import ToolRegistry, EngineContext
 from .db.models import Workspace, Thread, Message, AppState, Networks
 
+
 _icon_path = pathlib.Path(__file__).parent / "assets" / "icon.png"
 notifier = DesktopNotifier(
   app_name="Subconscious",
   app_icon=Icon(path=_icon_path),
 )
-
 
 # Logging setup
 logger = logging.getLogger("subconscious")
@@ -33,15 +33,14 @@ class Engine:
   """ Subconscious Engine Core """
   async def init_settings(self):
     """ Initialize settings from settings.json to AppState if not present """
-    settings_path = pathlib.Path(__file__).parent / "gui" / "settings.json"
-    if not settings_path.exists():
-      return
-
     try:
-      with open(settings_path, "r") as f:
-        settings_data = json.load(f)
-      
-      system_settings = settings_data.get("system", {})
+      system_settings = {
+        "mode": [ "light", "dark", "auto" ],
+        "language": [ "en" ],
+        "position": [ "x", "y" ],
+        "size": [ "width", "height" ],
+        "maximized": [ False, True ]
+      }
       
       async with self.db.get_session() as session:
         for key, value in system_settings.items():
@@ -51,10 +50,7 @@ class Engine:
           )
           
           if not exists:
-            # If it's a list (options), we might want to store the first one as default
-            # based on the prompt "The list next to each key outlines the possible values it can have"
-            default_value = value[0] if isinstance(value, list) else value
-            # Convert to string for storage in Value Column
+            default_value = value[0]
             new_setting = AppState(key=key, value=str(default_value), tag="system")
             session.add(new_setting)
             logger.debug(f"Initialized system setting: {key}={default_value}")
@@ -190,7 +186,6 @@ class Engine:
 
   async def save_message(self, thread_id: int, role: str, content: str) -> Message:
     """Persist a single message and return the ORM object. Also bumps the thread's updated_at."""
-    from sqlalchemy import update as sql_update
     async with self.db.get_session() as session:
       msg = Message(thread_id=thread_id, role=role, content=content)
       session.add(msg)
