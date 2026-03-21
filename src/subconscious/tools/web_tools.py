@@ -10,7 +10,7 @@ import httpx
 import logging
 import asyncio
 import urllib.parse
-import speedtest as st  # speedtest-cli package
+# import speedtest as st  # speedtest-cli package
 from . import EngineContext
 from bs4 import BeautifulSoup
 from pydantic_ai import RunContext

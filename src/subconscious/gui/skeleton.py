@@ -104,19 +104,38 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_settings(db_settings)
       
       # Apply some settings immediately if needed
+      mode_mapping = {
+        "light": ft.ThemeMode.LIGHT,
+        "dark": ft.ThemeMode.DARK,
+        "auto": ft.ThemeMode.SYSTEM
+      }
       if "mode" in db_settings:
-        page.theme_mode = ft.ThemeMode.DARK if db_settings["mode"] == "dark" else ft.ThemeMode.LIGHT
-      page.update()
+        page.theme_mode = mode_mapping.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
 
     # Load model configs from encrypted storage
     engine.config.read_keyring()
     raw_models = engine.config.secrets.get("models", {})
+    
     # secrets["models"] is stored as {uuid: {...fields}} – convert to list
     loaded = [{"id": k, **v} for k, v in raw_models.items()]
     set_model_configs(loaded)
 
   async def handle_setting_change(key, value, tag):
-    print("Settings Changed")
+    """Save a setting to the database and update local state."""
+    await engine.update_setting(key, str(value), tag)
+    
+    # Update current page settings if relevant
+    if key == "mode":
+      mode_mapping = {
+        "light": ft.ThemeMode.LIGHT,
+        "dark": ft.ThemeMode.DARK,
+        "auto": ft.ThemeMode.SYSTEM
+      }
+      page.theme_mode = mode_mapping.get(value, ft.ThemeMode.SYSTEM)
+    
+    # Refresh local settings dict
+    new_settings = {**settings, key: str(value)}
+    set_settings(new_settings)
 
   async def handle_save_model(model_dict: dict):
     """Persist a model config (add or update) to the encrypted secrets file."""
@@ -426,11 +445,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     if 200 <= new_width <= 700:
       set_context_width(new_width)
 
-  async def toggle_theme(e=None):
-    page.theme_mode = (
-      ft.ThemeMode.DARK if page.theme_mode == ft.ThemeMode.LIGHT else ft.ThemeMode.LIGHT
-    )
-
   async def switch_to_workspace(e=None):
     set_current_view("workspaces")
     set_current_context("workspaces")
@@ -455,7 +469,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     TitleBar(),
     Frame(
       sidebar=Sidebar(
-        on_theme_toggle=toggle_theme,
         on_workspace_click=switch_to_workspace,
         on_threads_click=switch_to_threads,
         on_settings_click=switch_to_settings,
@@ -504,7 +517,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
-      workspace_name=active_chat_workspace.name if active_chat_workspace else "General"
+      workspace_name=active_chat_workspace.name if active_chat_workspace else "All Workspaces"
     )
   ]
 

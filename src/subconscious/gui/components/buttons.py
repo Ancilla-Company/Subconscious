@@ -30,8 +30,9 @@ def SvgButton(on_click, svg_path, tooltip=None) -> ft.Control:
   """ A button component that displays an SVG icon for when built in icons don't fit the use case. """
   return ft.Container(
     ft.Container(
-      content=ft.Stack([
-          ft.Image(
+      content=ft.Stack(
+        [
+          ft.Image( # Causes an error if the image is put in the TextButton
             src=svg_path,
             width=24, height=24,
             top=8, left=8,

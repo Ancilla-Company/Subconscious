@@ -62,6 +62,7 @@ def main():
   try:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
     if args.command == "engine":
       print(LOGO)
       loop.run_until_complete(Engine().start_engine(

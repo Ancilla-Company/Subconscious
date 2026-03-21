@@ -19,7 +19,7 @@ from .tools import ToolRegistry, EngineContext
 from .db.models import Workspace, Thread, Message, AppState, Networks
 
 
-_icon_path = pathlib.Path(__file__).parent / "assets" / "icon.png"
+_icon_path = pathlib.Path(__file__).parent / "assets" / "icon_sm.png"
 notifier = DesktopNotifier(
   app_name="Subconscious",
   app_icon=Icon(path=_icon_path),
@@ -35,7 +35,7 @@ class Engine:
     """ Initialize settings from settings.json to AppState if not present """
     try:
       system_settings = {
-        "mode": [ "light", "dark", "auto" ],
+        "mode": [ "auto", "light", "dark" ],
         "language": [ "en" ],
         "position": [ "x", "y" ],
         "size": [ "width", "height" ],
@@ -321,3 +321,25 @@ class Engine:
       )
     except Exception as e:
       print(f"Notification error: {e}")
+
+  async def update_setting(self, key: str, value: str, tag: str = "system"):
+    """Update a setting in the database."""
+    async with self.db.get_session() as session:
+      stmt = sql_update(AppState).where(
+        AppState.key == key,
+        AppState.tag == tag
+      ).values(value=value)
+      await session.execute(stmt)
+      await session.commit()
+      logger.debug(f"Updated setting: {key}={value} (tag={tag})")
+
+  async def get_setting(self, key: str, tag: str = "system") -> Optional[str]:
+    """Get a setting from the database."""
+    async with self.db.get_session() as session:
+      result = await session.scalar(
+        select(AppState.value).where(
+          AppState.key == key,
+          AppState.tag == tag
+        )
+      )
+      return result

@@ -107,7 +107,6 @@ def DropdownField(label, values, on_change, hint, value=None) -> ft.Control:
             value=value,
             on_select=on_change,
             border_color=ft.Colors.TRANSPARENT,
-            # bgcolor=ft.Colors.TRANSPARENT,
             border_radius=3,
             content_padding=ft.padding.only(10, 5, 2, 2),
             hint_text=hint,

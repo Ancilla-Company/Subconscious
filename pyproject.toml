@@ -10,6 +10,7 @@ dependencies = [
   "bcrypt",
   "pytest",
   "pyyaml",
+  "pystray",
   "fastapi",
   "keyring",
   "aiosqlite",
@@ -17,7 +18,8 @@ dependencies = [
   "sqlalchemy",
   "pydantic-ai",
   "pytest-asyncio",
-  
+  "desktop-notifier",
+
   "bs4",
   "python-docx",
   "pypdf",
@@ -37,3 +39,29 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.flet.app]
+module = "flet_ep.py"
+path = "src"
+
+[tool.flet]
+product = "Subconscious"
+artifact = "Subconscious"
+org = "company.ancilla"
+hidden_imports = [
+  "desktop_notifier.resources",
+  "desktop_notifier.backends.winrt",
+  "pydantic_core"
+]
+add_data = [
+  "src/subconscious;subconscious"
+]
+pyinstaller_args = [
+  "--collect-all=pydantic",
+  "--collect-all=pydantic_core",
+  "--copy-metadata=genai_prices",
+  "--copy-metadata=pydantic_ai_slim",
+  "--copy-metadata=pydantic-ai-slim",
+  "--copy-metadata=pydantic_ai",
+  "--copy-metadata=pydantic-ai"
+]

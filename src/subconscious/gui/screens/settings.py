@@ -5,7 +5,6 @@ from typing import Optional, cast
 
 from ...constants import VERSION
 from ..components.buttons import IconButton, TextButton
-from ..components.layout import ResponsiveParent, ResponsiveItem
 from ..components.forms import FormField, PasswordField, DropdownField
 
 
@@ -198,25 +197,52 @@ def General(settings: Optional[dict] = None, on_setting_change=None) -> ft.Contr
     settings = {}
 
   tray = settings.get("tray", "True") == "True"
+  theme_mode = settings.get("mode", "auto")
 
-  def handle_tray_change(e):
-    if on_setting_change:
-      on_setting_change("tray", str(e.control.value), "general")
+  async def handle_tray_change(e):
+    await on_setting_change("tray", str(e.control.value), "system")
+
+  async def handle_theme_change(e):
+    await on_setting_change("mode", e.control.value, "system")
+
+  _theme_options = [
+    ft.dropdown.Option("auto", "System Default"),
+    ft.dropdown.Option("light", "Light"),
+    ft.dropdown.Option("dark", "Dark"),
+  ]
 
   return ft.Container(
-    content=ResponsiveParent([
-      ResponsiveItem(
-        ft.Text("General Settings", size=20, weight=ft.FontWeight.W_500)
-      ),
-      ResponsiveItem(
-        ft.Checkbox(
-          label="Show tray icon",
-          value=tray,
-          on_change=handle_tray_change
-        )
-      ),
-    ]),
-    padding=ft.padding.all(20)
+     content=ft.Column(
+      [
+        ft.Container(
+          content=ft.Row(
+            [
+              ft.Text(
+                "General Settings",
+                size=20,
+                weight=ft.FontWeight.W_500,
+                expand=True
+              )
+            ],
+            height=40
+          ),
+        ),
+        ft.Column(
+          [
+            DropdownField(
+              label="Theme Mode",
+              values=_theme_options,
+              on_change=handle_theme_change,
+              value=theme_mode,
+              hint="Selecte theme mode"
+            )
+          ],
+          spacing=10,
+          scroll=ft.ScrollMode.ADAPTIVE
+        ),
+      ],
+      spacing=4
+    )
   )
 
 

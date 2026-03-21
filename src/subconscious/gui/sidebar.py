@@ -5,7 +5,6 @@ from .components.buttons import IconButton, SidebarButton
 
 @ft.component
 def Sidebar(
-  on_theme_toggle,
   on_workspace_click,
   on_threads_click,
   on_context_toggle,
@@ -37,8 +36,7 @@ def Sidebar(
         content=ft.Container(
           ft.Column(
             [
-              SidebarButton(ft.Icons.SETTINGS_OUTLINED, "Settings", "settings", selected_view, on_settings_click),
-              IconButton(icon=ft.Icons.BRIGHTNESS_HIGH, tooltip="Toggle dark/light mode", on_click=on_theme_toggle)
+              SidebarButton(ft.Icons.SETTINGS_OUTLINED, "Settings", "settings", selected_view, on_settings_click)
             ],
             spacing=4,
           ),
