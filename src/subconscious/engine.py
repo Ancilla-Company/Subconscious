@@ -1,9 +1,13 @@
+import sys
 import uuid
+import json
+import httpx
 import asyncio
 import logging
 import pathlib
 from datetime import datetime
 from sqlalchemy import select
+from packaging.version import Version
 from typing import AsyncIterator, Optional
 from sqlalchemy import update as sql_update
 from desktop_notifier import DesktopNotifier, Icon
@@ -13,6 +17,7 @@ from pydantic_ai.messages import (
 )
 
 from .config import Config
+from .constants import VERSION
 from .agent import AgentManager
 from .db.session import Database
 from .tools import ToolRegistry, EngineContext
@@ -31,6 +36,8 @@ logger = logging.getLogger("subconscious")
 
 class Engine:
   """ Subconscious Engine Core """
+  update_available = None
+
   async def init_settings(self):
     """ Initialize settings from settings.json to AppState if not present """
     try:
@@ -136,7 +143,10 @@ class Engine:
     self.db = Database(config)
     await self.init_system()
 
-    # start the heartbeat
+    # Check for updates
+    asyncio.create_task(self.check_for_updates())
+
+    # start the heartbeat: DEBUG
     self._heartbeat_task = asyncio.create_task(self.heartbeat())
 
     # Initialize Agent Manager
@@ -145,9 +155,8 @@ class Engine:
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
 
-    # Show ready notification
+    # Show ready notification: DEBUG
     await self.show_notification("Subconscious", "Startup Complete.")
-
 
   async def get_or_create_thread(
     self,
@@ -309,7 +318,7 @@ class Engine:
     try:
       while True:
         logger.debug("heartbeat")
-        await asyncio.sleep(5)
+        await asyncio.sleep(60) #@IgnoreException
     except asyncio.CancelledError:
       pass
   
@@ -343,3 +352,68 @@ class Engine:
         )
       )
       return result
+  
+  async def check_for_updates(self):
+    """ Check for updates """
+    try:
+      async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get("https://api.github.com/repos/Ancilla-Company/Subconscious/releases/latest", headers={"User-Agent": f"Subconscious/{VERSION}"})
+        resp.raise_for_status() #@IgnoreException
+        data = resp.json()
+      
+      latest_version = Version(data['tag_name'])
+      current_version = Version(VERSION)
+
+      if latest_version > current_version:
+        self.update_available = True
+      else:
+        self.update_available = False
+    except httpx.HTTPStatusError as e:
+      logger.error(f"The server returned and error: {e}")
+    except Exception as e:
+      logger.debug(f"Error checking for updates: {e}")
+
+  def _load_build_metadata(self) -> dict:
+    metadata_path = pathlib.Path(__file__).parent / "assets" / "build_metadata.json"
+    try:
+      return json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as e:
+      logger.debug(f"Failed to load build metadata: {e}")
+      return {}
+
+  async def run_update(self):
+    metadata = self._load_build_metadata()
+    package_method = metadata.get("package_method")
+    # For pip: the PyPI distribution name (e.g. "subconscious")
+    # For winget: the package ID (e.g. "Ancilla.Subconscious")
+    # For apt-get: the apt package name (e.g. "subconscious")
+    package_name = metadata.get("package_name", "Subconscious")
+
+    command_map = {
+      # pip upgrades by distribution name
+      "python": [sys.executable, "-m", "pip", "install", "--upgrade", package_name],
+      # winget requires --id for exact package identifier matching
+      "winget": ["winget", "upgrade", "--id", package_name, "--silent"],
+      # apt-get install --only-upgrade upgrades only if already installed
+      "apt-get": ["sudo", "apt-get", "install", "--only-upgrade", "-y", package_name],
+    }
+
+    command = command_map.get(package_method)
+    if not command:
+      raise ValueError(f"Unsupported or missing package_method in build metadata: {package_method!r}")
+
+    if getattr(self.config, 'dev', False):
+      logger.info("[dev] Would run update command: %s", " ".join(command))
+      print(f"[dev] run_update called — skipping real update.\n  method : {package_method}\n  package: {package_name}\n  command: {' '.join(command)}")
+      return
+
+    logger.info("Running update command: %s", " ".join(command))
+    process = await asyncio.create_subprocess_exec(*command)
+    return_code = await process.wait()
+
+    if return_code == 0:
+      logger.info("Update completed successfully.")
+      await self.show_notification("Subconscious", "Update installed. Please restart the app.")
+    else:
+      logger.error("Update command exited with code %d", return_code)
+      await self.show_notification("Subconscious", f"Update failed (exit code {return_code}). Check logs for details.")

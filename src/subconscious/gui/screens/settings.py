@@ -4,7 +4,7 @@ import flet as ft
 from typing import Optional, cast
 
 from ...constants import VERSION
-from ..components.buttons import IconButton, TextButton
+from ..components.buttons import IconButton, TextButton, Badge
 from ..components.forms import FormField, PasswordField, DropdownField
 
 
@@ -368,8 +368,13 @@ def Model(
 
 
 @ft.component
-def About() -> ft.Control:
+def About(update_available: bool = False, on_update=None) -> ft.Control:
   """ Renders the about settings panel """
+
+  async def handle_update(_):
+    if on_update:
+      await on_update()
+
   return ft.Container(
     content=ft.Column(
       [
@@ -423,7 +428,7 @@ def About() -> ft.Control:
               margin=ft.margin.only(0, 60, 0, 60)
             ),
             ft.Text(
-              "Subconscious is a simple desktop open sourced UI for LLM and Agent interaction.",
+              "Subconscious is a distributed agentic AI app, that allows you to create AI agents that run everywhere on every device at the same time.",
               size=15,
               color=ft.Colors.GREY,
               text_align=ft.TextAlign.CENTER
@@ -444,7 +449,7 @@ def About() -> ft.Control:
                 ft.TextSpan(
                   "View License",
                   ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
-                  url="https://github.com/baebranch/subconscious/blob/main/LICENSE",
+                  url="https://github.com/Ancilla-Company/Subconscious/blob/main/LICENSE",
                 ),
               ],
               size=15
@@ -454,7 +459,7 @@ def About() -> ft.Control:
                 ft.TextSpan(
                   "Report an Issue",
                   ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
-                  url="https://github.com/baebranch/subconscious/issues",
+                  url="https://github.com/Ancilla-Company/Subconscious/issues",
                 ),
               ],
               size=15
@@ -463,6 +468,13 @@ def About() -> ft.Control:
               f"Version: {VERSION}",
               size=15,
               color=ft.Colors.GREY
+            ),
+            TextButton(
+              on_click=handle_update,
+              text="Install Update",
+              icon=ft.Icons.SYSTEM_UPDATE_ALT,
+              visible=update_available,
+              badge=Badge()
             ),
             ft.Text(
               "© 2026 Subconscious",

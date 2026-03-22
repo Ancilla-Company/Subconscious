@@ -89,8 +89,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   show_all_threads, set_show_all_threads = ft.use_state(False)
 
   # Settings Management State
-  selected_setting, set_selected_setting = ft.use_state(None)
   settings, set_settings = ft.use_state({})
+  selected_setting, set_selected_setting = ft.use_state(None)
+  about_badge_dismissed, set_about_badge_dismissed = ft.use_state(False)
+  settings_badge_dismissed, set_settings_badge_dismissed = ft.use_state(False)
   # Model configs loaded from encrypted storage: list of dicts
   model_configs, set_model_configs = ft.use_state([])
   # Expanded panel indices for the model settings list - persisted across navigation
@@ -269,6 +271,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("workspaces")
   
   async def handle_settings_click(setting):
+    if setting == "about":
+      set_about_badge_dismissed(True)
     set_selected_setting(setting)
 
   async def handle_new_thread(e=None):
@@ -461,6 +465,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_active_chat_workspace(workspace)
 
   async def switch_to_settings(e=None):
+    set_settings_badge_dismissed(True)
     set_current_view("settings")
     set_current_context("settings")
     set_context_visible(True)
@@ -473,7 +478,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_threads_click=switch_to_threads,
         on_settings_click=switch_to_settings,
         on_context_toggle=toggle_context,
-        selected_view=current_context # Use context to light up the sidebar icon correctly
+        selected_view=current_context, # Use context to light up the sidebar icon correctly
+        show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
       ),
       contextlist=ContextList(
         visible=context_visible,
@@ -493,6 +499,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_chat_workspace_change=handle_chat_workspace_change,
         selected_setting=selected_setting,
         set_selected_setting=handle_settings_click,
+        show_about_badge=bool(engine.update_available) and not about_badge_dismissed,
         show_all_threads=show_all_threads,
         on_toggle_all_threads=lambda: set_show_all_threads(not show_all_threads)
       ),
@@ -513,7 +520,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_save_model=handle_save_model,
         on_delete_model=handle_delete_model,
         model_expanded_indices=model_expanded_indices,
-        set_model_expanded_indices=set_model_expanded_indices
+        set_model_expanded_indices=set_model_expanded_indices,
+        update_available=bool(engine.update_available),
+        on_update=engine.run_update,
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
@@ -537,6 +546,8 @@ async def main(page: ft.Page, engine):
   page.theme_mode = ft.ThemeMode.LIGHT
   page.theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.BLACK, secondary=ft.Colors.GREY, surface=ft.Colors.WHITE, secondary_container=ft.Colors.GREY_300, primary_container=ft.Colors.GREY_300))
   page.dark_theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.WHITE, secondary=ft.Colors.GREY, surface=ft.Colors.BLACK87, secondary_container=ft.Colors.GREY_800, primary_container=ft.Colors.GREY_800))
+
+  # Could put load settings here
 
   # Start rendering Subconscious
   return page.render(lambda: AppView(page, engine))

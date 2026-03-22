@@ -1,6 +1,6 @@
 import flet as ft
 
-from .components.buttons import SvgButton, ContextItem, IconButton, PopupMenuButton
+from .components.buttons import SvgButton, ContextItem, IconButton, PopupMenuButton, Badge
 
 
 class WorkspacePopupItem(ft.PopupMenuItem):
@@ -36,6 +36,7 @@ def ContextList(
   on_chat_workspace_change=None,
   selected_setting=None,
   set_selected_setting=None,
+  show_about_badge: bool = False,
   show_all_threads: bool = False,
   on_toggle_all_threads=None
 ) -> ft.Control:
@@ -142,7 +143,8 @@ def ContextList(
         name="About",
         description="About Subconscious",
         on_click=lambda _: set_selected_setting("about"),
-        selected=selected_setting == "about"
+        selected=selected_setting == "about",
+        badge=Badge() if show_about_badge else None
       )
     ]
     headers = []

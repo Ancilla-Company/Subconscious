@@ -3,9 +3,9 @@ import asyncio
 import logging
 import argparse
 
-from ..tui import start_tui
 from ..gui import start_gui
 from ..engine import Engine
+from ..tui.tui import start_tui
 from ..config import Config, LOGO
 
 

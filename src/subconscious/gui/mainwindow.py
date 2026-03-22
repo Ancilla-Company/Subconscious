@@ -26,7 +26,9 @@ def MainWindow(
     on_save_model=None,
     on_delete_model=None,
     model_expanded_indices=None,
-    set_model_expanded_indices=None
+    set_model_expanded_indices=None,
+    update_available: bool = False,
+    on_update=None,
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -96,7 +98,10 @@ def MainWindow(
         content=ResponsiveParent(
           [
             ResponsiveItem(
-              About(),
+              About(
+                update_available=update_available,
+                on_update=on_update,
+              ),
             ),
           ]
         ),

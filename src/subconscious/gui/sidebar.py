@@ -10,6 +10,7 @@ def Sidebar(
   on_context_toggle,
   on_settings_click,
   selected_view="none",
+  show_settings_badge: bool = False,
 ) -> ft.Control:
 
   return ft.Column(
@@ -36,7 +37,14 @@ def Sidebar(
         content=ft.Container(
           ft.Column(
             [
-              SidebarButton(ft.Icons.SETTINGS_OUTLINED, "Settings", "settings", selected_view, on_settings_click)
+              SidebarButton(
+                ft.Icons.SETTINGS_OUTLINED,
+                "Settings",
+                "settings",
+                selected_view,
+                on_settings_click,
+                badge=ft.Badge() if show_settings_badge else None,
+              )
             ],
             spacing=4,
           ),

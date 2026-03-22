@@ -3,7 +3,7 @@ from datetime import datetime
 
 
 @ft.component
-def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, selectable=True):
+def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, selectable=True, badge=None):
   is_selected = (selected_view == view_name) if selectable else False
 
   return ft.Container(
@@ -21,6 +21,7 @@ def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, s
           ft.ControlState.DEFAULT: ft.Colors.TRANSPARENT,
         }
       ),
+      badge=badge,
     ),
     clip_behavior=ft.ClipBehavior.HARD_EDGE,
   )
@@ -68,7 +69,7 @@ def IconButton(on_click, icon, icon_colour=None, tooltip=None) -> ft.Control:
     style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
   )
 
-def ContextItem(key, name, description, on_click, updated_at=None, selected=False) -> ft.Control:
+def ContextItem(key, name, description, on_click, updated_at=None, selected=False, badge=None) -> ft.Control:
   
   async def handle_click(e):
     await on_click(e)
@@ -109,15 +110,22 @@ def ContextItem(key, name, description, on_click, updated_at=None, selected=Fals
         bgcolor=ft.Colors.SECONDARY_CONTAINER if selected else ft.Colors.TRANSPARENT,
       ),
       content=ft.Container(
-        ft.Column([
-          ft.Row([
-            ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
-            ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
-          ], spacing=10),
-          *second_row
-        ], spacing=5),
+        ft.Column(
+          [
+            ft.Row(
+              [
+                ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
+                ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
+              ],
+              spacing=10
+            ),
+            *second_row
+          ],
+          spacing=5
+        ),
         padding=ft.padding.all(10)
-      )
+      ),
+      badge=badge
     ),
     padding=ft.padding.only(15, 0, 15, 0)
   )
@@ -182,7 +190,7 @@ def PopupMenuButton(tooltip, menu_items, icon=None, src=None) -> ft.Control:
     )
 
 @ft.component
-def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=False) -> ft.Control:
+def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=False, badge=None) -> ft.Control:
   """ Style lanugage for Text Area type button """
   return ft.TextButton(
     content=ft.Text(
@@ -199,5 +207,13 @@ def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=F
     height=40,
     icon=icon,
     visible=visible,
-    disabled=disabled
+    disabled=disabled,
+    badge=badge
+  )
+
+def Badge() -> ft.Component:
+  """ Returns a standard badge for buttons """
+  return ft.Badge(
+    small_size=10,
+    alignment=ft.Alignment.TOP_RIGHT
   )
