@@ -11,8 +11,8 @@ def ResponsiveParent(items) -> ft.Control:
       auto_scroll=False,
       scroll=ft.ScrollMode.AUTO, # BUG: Causes the column content to be vertically centered
     ),
-    alignment=ft.Alignment.TOP_CENTER,
-    expand=True
+    expand=True,
+    alignment=ft.Alignment.TOP_CENTER
   )
 
 def ResponsiveItem(item, height=40, width=750) -> ft.Control:
@@ -29,11 +29,12 @@ def ResponsiveItem(item, height=40, width=750) -> ft.Control:
         ],
         wrap=True,
         width=750,
-        spacing=0
+        spacing=0,
+        expand_loose=True
       )
     ],
-    alignment=ft.MainAxisAlignment.CENTER,
-    expand=True,
+    spacing=0,
     wrap=True,
-    spacing=0
+    expand=True,
+    alignment=ft.MainAxisAlignment.CENTER
   )

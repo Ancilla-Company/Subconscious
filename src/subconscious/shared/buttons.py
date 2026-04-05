@@ -26,6 +26,20 @@ def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, s
     clip_behavior=ft.ClipBehavior.HARD_EDGE,
   )
 
+class WorkspacePopupItem(ft.PopupMenuItem):
+  """ Popup Item for popup menu """
+  def __init__(self, name, switch_workspace, slug):
+    super().__init__()
+    self.switch_workspace = switch_workspace
+    self.name = name
+    self.content = ft.Row(
+      controls=[
+        ft.Text(name),
+      ],
+    )
+    self.data = slug
+    self.on_click = switch_workspace
+
 @ft.component
 def SvgButton(on_click, svg_path, tooltip=None) -> ft.Control:
   """ A button component that displays an SVG icon for when built in icons don't fit the use case. """
@@ -211,9 +225,52 @@ def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=F
     badge=badge
   )
 
-def Badge() -> ft.Component:
+def Badge() -> ft.Badge:
   """ Returns a standard badge for buttons """
   return ft.Badge(
     small_size=10,
     alignment=ft.Alignment.TOP_RIGHT
+  )
+
+# @ft.component
+def Chip(icon, label, delete, on_delete) -> ft.Container:
+  """ Creates a custom chip as the built in Chip behaves oddly """
+  return ft.Container(
+    content=ft.Row(
+      [
+        ft.Row(
+          [
+            # Leading icon
+            ft.Icon(
+              size=14,
+              icon=icon,
+              margin=ft.Margin.only(left=4)
+            ),
+            # Label
+            ft.Text(
+              size=14,
+              value=label,
+              expand=True,
+              tooltip=label,
+              overflow=ft.TextOverflow.ELLIPSIS
+            )
+          ],
+          expand=True
+        ),
+
+        # Delete Button
+        ft.IconButton(
+          icon_size=14,
+          on_click=on_delete,
+          icon=ft.Icons.CLOSE_OUTLINED,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        )
+      ],
+      spacing=4,
+      wrap=False
+    ),
+    height=40,
+    border_radius=3,
+    padding=ft.Padding.all(2),
+    bgcolor=ft.Colors.SURFACE
   )

@@ -1,6 +1,6 @@
 import flet as ft
 
-from .components.buttons import IconButton, SidebarButton
+from ..shared.buttons import IconButton, SidebarButton
 
 
 @ft.component

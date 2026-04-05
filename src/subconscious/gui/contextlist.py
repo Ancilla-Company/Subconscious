@@ -1,21 +1,7 @@
 import flet as ft
 
-from .components.buttons import SvgButton, ContextItem, IconButton, PopupMenuButton, Badge
+from ..shared.buttons import SvgButton, ContextItem, IconButton, PopupMenuButton, Badge, WorkspacePopupItem
 
-
-class WorkspacePopupItem(ft.PopupMenuItem):
-  def __init__(self, name, switch_workspace, slug):
-    super().__init__()
-    self.switch_workspace = switch_workspace
-    self.name = name
-    self.content = ft.Row(
-      controls=[
-        ft.Text(name),
-      ],
-    )
-    self.data = slug
-    self.on_click = switch_workspace
-  
 
 @ft.component
 def ContextList(
@@ -81,16 +67,19 @@ def ContextList(
         ] + [
           ft.PopupMenuItem(),  # divider
           ft.PopupMenuItem(
-            content=ft.Row([
-              ft.Icon(
-                ft.Icons.CHECK if show_all_threads else ft.Icons.CHECK,
-                size=16,
-                color=ft.Colors.PRIMARY if show_all_threads else ft.Colors.TRANSPARENT,
-              ),
-              ft.Text("All Workspaces"),
-            ], spacing=8),
+            content=ft.Row(
+              [
+                ft.Icon(
+                  ft.Icons.CHECK if show_all_threads else ft.Icons.CHECK,
+                  size=16,
+                  color=ft.Colors.PRIMARY if show_all_threads else ft.Colors.TRANSPARENT,
+                ),
+                ft.Text("All Workspaces"),
+              ],
+              spacing=8
+            ),
             on_click=lambda _: on_toggle_all_threads() if on_toggle_all_threads else None,
-          ),
+          )
         ]
       )
     ]
@@ -138,6 +127,20 @@ def ContextList(
         on_click=lambda _: set_selected_setting("models"),
         selected=selected_setting == "models"
       ),
+      # ContextItem(
+      #   key="tools",
+      #   name="Tools",
+      #   description="Configure Tools",
+      #   on_click=lambda _: set_selected_setting("tools"),
+      #   selected=selected_setting == "tools"
+      # ),
+      # ContextItem(
+      #   key="skills",
+      #   name="Skills",
+      #   description="Configure Skills",
+      #   on_click=lambda _: set_selected_setting("skills"),
+      #   selected=selected_setting == "skills"
+      # ),
       ContextItem(
         key="about",
         name="About",
