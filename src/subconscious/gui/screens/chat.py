@@ -229,17 +229,22 @@ def ChatWindow(thread=None, messages=None, on_send_message=None, is_streaming=Fa
 
   chat_name = thread.title if thread else "New Thread"
   chatwindow_header = ft.Container(
-    ft.Row([
-      ft.Text(chat_name, size=14, text_align=ft.TextAlign.LEFT, weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
-      # ft.IconButton(
-      #   icon=ft.Icons.MORE_VERT_ROUNDED,
-      #   tooltip="More",
-      #   style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-      #   on_click=lambda e: print("Show chat settings"),
-      # )
-    ], expand=True, height=40),
-    bgcolor=ft.Colors.SURFACE, expand=True, padding=ft.padding.only(10,4,4,4),
-    border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER))
+    ft.Row(
+      [
+        ft.Text(chat_name, size=14, text_align=ft.TextAlign.LEFT, weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
+        # ft.IconButton(
+        #   icon=ft.Icons.MORE_VERT_ROUNDED,
+        #   tooltip="More",
+        #   style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+        #   on_click=lambda e: print("Show chat settings"),
+        # )
+      ],
+      height=40,
+      expand=True
+    ),
+    expand=True,
+    bgcolor=ft.Colors.SURFACE,
+    padding=ft.padding.only(10, 4, 4, 4)
   )
 
   # Message display logic — rebuild the list whenever messages changes so streaming updates render
@@ -248,7 +253,7 @@ def ChatWindow(thread=None, messages=None, on_send_message=None, is_streaming=Fa
     spacing=15,
     auto_scroll=True,
     expand=True,
-    padding=ft.padding.only(0, 15, 0, 15)
+    padding=ft.padding.only(0, 0, 0, 15)
   )
 
   def grid_change(e):

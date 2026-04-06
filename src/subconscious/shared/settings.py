@@ -1087,7 +1087,7 @@ def About(update_available: bool = False, on_update=None) -> ft.Control:
                   "Subconscious.chat",
                   ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
                   url="https://subconscious.chat/",
-                ),
+                )
               ],
               size=15
             ),
@@ -1097,7 +1097,7 @@ def About(update_available: bool = False, on_update=None) -> ft.Control:
                   "View License",
                   ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
                   url="https://github.com/Ancilla-Company/Subconscious/blob/main/LICENSE",
-                ),
+                )
               ],
               size=15
             ),
@@ -1107,7 +1107,7 @@ def About(update_available: bool = False, on_update=None) -> ft.Control:
                   "Report an Issue",
                   ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
                   url="https://github.com/Ancilla-Company/Subconscious/issues",
-                ),
+                )
               ],
               size=15
             ),

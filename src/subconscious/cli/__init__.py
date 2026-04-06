@@ -1,7 +1,9 @@
+import os
 import sys
 import asyncio
 import logging
 import argparse
+import traceback
 
 from ..gui import start_gui
 from ..engine import Engine
@@ -58,13 +60,22 @@ def main():
     logger.setLevel(logging.DEBUG)
   else:
     logger.setLevel(logging.INFO)
+
+  # If running as a frozen exe, also write logs to a file next to the executable
+  if getattr(sys, 'frozen', False):
+    log_path = os.path.join(os.path.dirname(sys.executable), "subconscious_crash.log")
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter('[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+    logger.addHandler(fh)
+    logging.getLogger().addHandler(fh)  # Also capture root logger (3rd party libs)
   
   try:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
+    print(LOGO)
     if args.command == "engine":
-      print(LOGO)
       loop.run_until_complete(Engine().start_engine(
         Config(dev=args.dev, gui=False, tui=False)
       ))
@@ -73,15 +84,15 @@ def main():
         Config(dev=args.dev, gui=True, tui=False)
       ))
     elif args.command == "tui" or args.command is None:
-      print(LOGO)
       loop.run_until_complete(start_tui(
         Config(dev=args.dev, gui=False, tui=True)
       ))
     else:
-      print(LOGO)
       parser.print_help()
   except KeyboardInterrupt:
     pass
+  except Exception:
+    logger.error("Unhandled exception in main():\n" + traceback.format_exc())
   finally:
     try:
       # Cancel all tasks still pending on the loop
