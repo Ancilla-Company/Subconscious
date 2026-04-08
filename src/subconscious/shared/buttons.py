@@ -141,7 +141,7 @@ def ContextItem(key, name, description, on_click, updated_at=None, selected=Fals
       ),
       badge=badge
     ),
-    padding=ft.padding.only(15, 0, 15, 0)
+    padding=ft.padding.only(15, 0, 13, 0)
   )
 
 @ft.component

@@ -438,6 +438,32 @@ class Engine:
         thread.title = title  # type: ignore[assignment]
         await session.commit()
 
+  async def get_thread_model_id(self, thread_id: int) -> Optional[str]:
+    """
+    Return the persisted model ID for a thread, or None if not set.
+    A stored value of 'default' means the caller should resolve to the first
+    available model config rather than a specific one.
+    """
+    async with self.db.get_session() as session:
+      thread = await session.get(Thread, thread_id)
+      if thread:
+        return thread.default_model_id  # type: ignore[return-value]
+      return None
+
+  async def set_thread_model_id(self, thread_id: int, model_id: str) -> None:
+    """
+    Persist the selected model ID for a thread.
+    Pass 'default' when the user has selected the first/default model so that
+    future changes to the model list don't lock the thread to a stale ID.
+    """
+    async with self.db.get_session() as session:
+      await session.execute(
+        sql_update(Thread)
+        .where(Thread.id == thread_id)
+        .values(default_model_id=model_id)
+      )
+      await session.commit()
+
   async def run_agent_stream(self, message: str):
     """ Legacy: Runs the agent in streaming mode (kept for TUI / API compatibility). """
     if not hasattr(self, 'agent') or not self.agent:

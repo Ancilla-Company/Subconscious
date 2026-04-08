@@ -57,6 +57,7 @@ class Thread(Base):
   workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
   title = Column(String)
   description = Column(String, nullable=True)
+  default_model_id = Column(String, nullable=True, default="default") # NULL also means default
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
@@ -208,5 +209,4 @@ class ToolRegistry(Base):
   auth_env_var = Column(String, nullable=True)                    # env var name holding the key at runtime
   status = Column(String, nullable=False, default='active')       # active, disabled, error
   created_at = Column(DateTime, default=datetime.now)
-  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

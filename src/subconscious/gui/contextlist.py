@@ -49,7 +49,7 @@ def ContextList(
       list_items = [
         ft.Container(
           content=ft.Text("No threads found.", size=14, color=ft.Colors.GREY_600),
-          padding=ft.padding.only(15, 0, 15, 0)
+          padding=ft.padding.only(15, 0, 13, 0)
         )
       ]
 
@@ -104,7 +104,7 @@ def ContextList(
       list_items = [
         ft.Container(
           content=ft.Text("No workspaces found.", size=14, color=ft.Colors.GREY_600),
-          padding=ft.padding.only(15, 0, 15, 0)
+          padding=ft.padding.only(15, 0, 13, 0)
         )
       ]
 
@@ -157,7 +157,7 @@ def ContextList(
     list_items = [
       ft.Container(
         content=ft.Text("Select an activity from the sidebar", size=14, color=ft.Colors.GREY_600),
-        padding=ft.padding.only(15, 0, 15, 0)
+        padding=ft.padding.only(15, 0, 13, 0)
       )
     ]
 
@@ -183,7 +183,7 @@ def ContextList(
           spacing=4,
           height=40
         ),
-        padding=ft.padding.only(15, 0, 15, 0)
+        padding=ft.padding.only(15, 0, 13, 0)
       ),
       
       # List container

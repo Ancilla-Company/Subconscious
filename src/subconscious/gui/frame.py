@@ -17,7 +17,7 @@ def Frame(
   def move_vertical_divider(e: ft.DragUpdateEvent):
     # Pass the delta_x to the parent to handle context list width change
     if on_context_width_change:
-      on_context_width_change(e.local_delta.x*3)
+      on_context_width_change(e.local_delta.x*2)
 
   # Create divider component
   divider = ft.GestureDetector(

@@ -175,7 +175,15 @@ class ToolMenu(ft.Container):
 
 
 @ft.component
-def ChatWindow(thread=None, messages=None, on_send_message=None, is_streaming=False) -> ft.Control:
+def ChatWindow(
+  thread=None,
+  messages=None,
+  on_send_message=None,
+  is_streaming=False,
+  model_configs=None,
+  selected_model_config=None,
+  on_model_select=None
+) -> ft.Control:
   """ Handles the main chat window, including message display and input form """
   fp = ft.FilePicker() # Initialize and add file picker to page
   
@@ -408,10 +416,40 @@ def ChatWindow(thread=None, messages=None, on_send_message=None, is_streaming=Fa
                                         ],
                                         icon=ft.Icons.ATTACH_FILE,
                                         tooltip="Add File/Folder"
-                                      )
+                                      ),
                                       
                                       # Tool Menu
                                       # ToolMenu(settings={}, load_tools=lambda: print("Load tools")),
+
+                                      # Model Menu
+                                      PopupMenuButton(
+                                        menu_items=[
+                                          ft.PopupMenuItem(
+                                            content=ft.Row(
+                                              [
+                                                ft.Icon(
+                                                  ft.Icons.CHECK if (selected_model_config and cfg.get("id") == selected_model_config.get("id")) else ft.Icons.CIRCLE_OUTLINED,
+                                                  size=14,
+                                                  color=ft.Colors.PRIMARY,
+                                                ),
+                                                ft.Text(
+                                                  cfg.get("alias") or cfg.get("model") or cfg.get("id", "Unknown"),
+                                                  size=13,
+                                                ),
+                                              ],
+                                              spacing=6,
+                                            ),
+                                            on_click=lambda e, c=cfg: on_model_select(c) if on_model_select else None,
+                                          )
+                                          for cfg in (model_configs or [])
+                                        ],
+                                        src='ai_sparkle.svg',
+                                        tooltip=(
+                                          selected_model_config.get("alias") or
+                                          selected_model_config.get("model") or
+                                          "Select model"
+                                        ) if selected_model_config else "Select model"
+                                      )
                                     ],
                                     spacing=4,
                                     expand=True
@@ -440,7 +478,7 @@ def ChatWindow(thread=None, messages=None, on_send_message=None, is_streaming=Fa
                     width=750,
                     bgcolor=ft.Colors.SURFACE,
                     alignment=ft.Alignment.BOTTOM_CENTER,
-                    padding = ft.padding.only(15, 0, 15, 15),
+                    padding = ft.padding.only(13, 0, 15, 15),
                   )
                 ],
                 spacing=0,

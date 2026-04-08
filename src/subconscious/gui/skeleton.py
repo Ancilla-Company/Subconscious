@@ -1,49 +1,26 @@
+""" Desktop version of Subconscious skeleton - desktop layout with titlebar & contextlist """
 import uuid
 import asyncio
 import pathlib
 import logging
+import traceback
 import flet as ft
 from sqlalchemy import select
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
 
+from ..gui.tray import *
 from ..engine import Engine
 from ..gui.frame import Frame
 from ..gui.sidebar import Sidebar
 from ..gui.titlebar import TitleBar
-from ..gui.components.tray import *
 from ..gui.mainwindow import MainWindow
 from ..gui.contextlist import ContextList
 from ..db.models import Workspace, Thread, AppState
-from ..gui.components.messages import HumanMessage, AIMessage
+from ..shared.messages import HumanMessage, AIMessage
 
 
 logger = logging.getLogger("subconscious")
 
-
-@ft.observable
-@dataclass
-class User:
-  first_name: str
-  last_name: str
-
-  def update(self, first_name: str, last_name: str):
-    self.first_name = first_name
-    self.last_name = last_name
-
-
-@ft.observable
-@dataclass
-class App:
-  users: list[User] = field(default_factory=list)
-
-  def add_user(self, first_name: str, last_name: str):
-    if first_name.strip() or last_name.strip():
-      self.users.append(User(first_name, last_name))
-
-  def delete_user(self, user: User):
-    self.users.remove(user)
-  
 
 @ft.component
 def splash_screen(self):
@@ -63,7 +40,6 @@ def splash_screen(self):
 def AppView(page: ft.Page, engine) -> list[ft.Control]:
   """ Main application view - manages layout and global state """
   # TODO: Maybe splash screen can go here while engine is loading, then switch to main view once ready
-  # Should package the app and then decide how to do-it, not certain how the splash screen works at present
   # Perhaps log the config to the splash screen
 
   # Layout state
@@ -87,6 +63,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   thread_by_workspace, set_thread_by_workspace = ft.use_state(dict())
   # When True the threads list shows threads across all workspaces
   show_all_threads, set_show_all_threads = ft.use_state(False)
+  # Currently active model config for the chat window
+  selected_model_config, set_selected_model_config = ft.use_state(None)
 
   # Settings Management State
   settings, set_settings = ft.use_state({})
@@ -97,6 +75,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   model_configs, set_model_configs = ft.use_state([])
   # Expanded panel indices for the model settings list - persisted across navigation
   model_expanded_indices, set_model_expanded_indices = ft.use_state(set())
+
+  # Skill configs loaded from DB: list of dicts
+  skill_configs, set_skill_configs = ft.use_state([])
+  skill_expanded_indices, set_skill_expanded_indices = ft.use_state(set())
+
+  # Tool configs loaded from DB: list of dicts
+  tool_configs, set_tool_configs = ft.use_state([])
+  tool_expanded_indices, set_tool_expanded_indices = ft.use_state(set())
 
   async def load_settings():
     async with engine.db.get_session() as session:
@@ -121,6 +107,16 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     # secrets["models"] is stored as {uuid: {...fields}} – convert to list
     loaded = [{"id": k, **v} for k, v in raw_models.items()]
     set_model_configs(loaded)
+
+    # Default to the first model config if none is currently selected
+    if loaded and selected_model_config is None:
+      set_selected_model_config(loaded[0])
+
+    # Load skill and tool configs from DB
+    loaded_skills = await engine.load_skill_configs()
+    set_skill_configs(loaded_skills)
+    loaded_tools = await engine.load_tool_configs()
+    set_tool_configs(loaded_tools)
 
   async def handle_setting_change(key, value, tag):
     """Save a setting to the database and update local state."""
@@ -178,6 +174,88 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       actions=[
         ft.TextButton(
           "Delete", on_click=do_delete,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+        ft.TextButton(
+          "Cancel", on_click=close_dlg,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+      ],
+      actions_alignment=ft.MainAxisAlignment.END,
+      shape=ft.RoundedRectangleBorder(radius=3),
+    )
+    page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
+
+  async def handle_save_skill(skill_dict: dict):
+    """Install/validate a skill and refresh the skill list from the DB."""
+    await engine.save_skill_config(skill_dict)
+    loaded = await engine.load_skill_configs()
+    set_skill_configs(loaded)
+
+  def handle_delete_skill(skill_id: str, on_confirmed=None):
+    """Show a confirmation dialog then delete the skill and its installed files."""
+    def close_dlg(e):
+      dlg.open = False
+      page.update()
+
+    async def do_delete(e):
+      await engine.delete_skill_config(skill_id)
+      loaded = await engine.load_skill_configs()
+      set_skill_configs(loaded)
+      if on_confirmed:
+        on_confirmed()
+      close_dlg(e)
+
+    dlg = ft.AlertDialog(
+      modal=True,
+      title=ft.Text("Remove Skill"),
+      content=ft.Text("Are you sure you want to remove this skill and delete its installed files?"),
+      actions=[
+        ft.TextButton(
+          "Remove", on_click=do_delete,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+        ft.TextButton(
+          "Cancel", on_click=close_dlg,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+      ],
+      actions_alignment=ft.MainAxisAlignment.END,
+      shape=ft.RoundedRectangleBorder(radius=3),
+    )
+    page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
+
+  async def handle_save_tool(tool_dict: dict):
+    """Persist a tool config and refresh the tool list from the DB."""
+    await engine.save_tool_config(tool_dict)
+    loaded = await engine.load_tool_configs()
+    set_tool_configs(loaded)
+
+  def handle_delete_tool(tool_id: str, on_confirmed=None):
+    """Show a confirmation dialog then delete the tool config."""
+    def close_dlg(e):
+      dlg.open = False
+      page.update()
+
+    async def do_delete(e):
+      await engine.delete_tool_config(tool_id)
+      loaded = await engine.load_tool_configs()
+      set_tool_configs(loaded)
+      if on_confirmed:
+        on_confirmed()
+      close_dlg(e)
+
+    dlg = ft.AlertDialog(
+      modal=True,
+      title=ft.Text("Remove Tool"),
+      content=ft.Text("Are you sure you want to remove this tool configuration?"),
+      actions=[
+        ft.TextButton(
+          "Remove", on_click=do_delete,
           style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
         ),
         ft.TextButton(
@@ -288,6 +366,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
 
+    # Restore the persisted model config for this thread:
+    # Look up the DB-stored model_id; 'default'/NULL both resolve to the first config.
+    db_model_id = await engine.get_thread_model_id(thread.id)
+    if db_model_id and db_model_id != "default" and model_configs:
+      persisted = next((c for c in model_configs if c.get("id") == db_model_id), None)
+    elif model_configs:
+      persisted = model_configs[0]
+    else:
+      persisted = None
+    set_selected_model_config(persisted)
+
     # Load messages from DB and convert to UI message objects
     db_msgs = await engine.load_thread_messages(thread.id)
     ui_msgs = []
@@ -299,7 +388,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         ui_msgs.append(AIMessage(content=m.content, timestamp=ts))
     set_messages(ui_msgs)
 
-  async def handle_send_message(content):
+  def handle_model_select(model_cfg: dict):
+    """Persist the selected model config for the current thread and update state."""
+    set_selected_model_config(model_cfg)
+    if selected_thread:
+      # Store 'default' when the first config is chosen so the thread isn't
+      # locked to a specific UUID if the model list changes later.
+      is_default = model_configs and model_cfg.get("id") == model_configs[0].get("id")
+      model_id_to_store = "default" if is_default else model_cfg.get("id", "default")
+      asyncio.create_task(engine.set_thread_model_id(selected_thread.id, model_id_to_store))
+
+  async def handle_send_message(content, attachments=None):
     """
     Full message lifecycle:
     1. Resolve / create thread and workspace.
@@ -334,7 +433,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       thread_id=selected_thread.id if selected_thread else None,
     )
 
-    # --- 3. Persist user message ---
+    # --- 3. Persist user message (store original text, not the expanded prompt) ---
     user_db_msg = await engine.save_message(thread.id, "user", content)
 
     # --- 4. Update UI: show user bubble immediately ---
@@ -347,6 +446,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     if is_new_thread:
       set_selected_thread(thread)
       set_current_view("threads")
+      # Seed the model for the new thread: always 'default' so it tracks the
+      # first model config rather than being pinned to a specific UUID.
+      asyncio.create_task(engine.set_thread_model_id(thread.id, "default"))
 
     new_messages = list(messages) + [user_ui_msg]
     set_messages(new_messages)
@@ -363,6 +465,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         content=content,
         thread_id=thread.id,
         workspace_id=workspace_id,
+        attachments=attachments or [],
+        model_cfg=selected_model_config or (model_configs[0] if model_configs else None),
       ):
         full_response += chunk
         ai_ui_msg.content = full_response
@@ -521,8 +625,20 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_delete_model=handle_delete_model,
         model_expanded_indices=model_expanded_indices,
         set_model_expanded_indices=set_model_expanded_indices,
+        skill_configs=skill_configs,
+        on_save_skill=handle_save_skill,
+        on_delete_skill=handle_delete_skill,
+        skill_expanded_indices=skill_expanded_indices,
+        set_skill_expanded_indices=set_skill_expanded_indices,
+        tool_configs=tool_configs,
+        on_save_tool=handle_save_tool,
+        on_delete_tool=handle_delete_tool,
+        tool_expanded_indices=tool_expanded_indices,
+        set_tool_expanded_indices=set_tool_expanded_indices,
         update_available=bool(engine.update_available),
         on_update=engine.run_update,
+        selected_model_config=selected_model_config,
+        on_model_select=handle_model_select,
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
@@ -544,8 +660,24 @@ async def main(page: ft.Page, engine):
   page.bgcolor = ft.Colors.SURFACE
   page.window.title_bar_hidden = True
   page.theme_mode = ft.ThemeMode.LIGHT
-  page.theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.BLACK, secondary=ft.Colors.GREY, surface=ft.Colors.WHITE, secondary_container=ft.Colors.GREY_300, primary_container=ft.Colors.GREY_300))
-  page.dark_theme = ft.Theme(color_scheme=ft.ColorScheme(primary=ft.Colors.WHITE, secondary=ft.Colors.GREY, surface=ft.Colors.BLACK87, secondary_container=ft.Colors.GREY_800, primary_container=ft.Colors.GREY_800))
+  page.theme = ft.Theme(
+    color_scheme=ft.ColorScheme(
+      primary=ft.Colors.BLACK,
+      secondary=ft.Colors.GREY,
+      surface=ft.Colors.WHITE,
+      secondary_container=ft.Colors.GREY_300,
+      primary_container=ft.Colors.GREY_300
+    )
+  )
+  page.dark_theme = ft.Theme(
+    color_scheme=ft.ColorScheme(
+      primary=ft.Colors.WHITE,
+      secondary=ft.Colors.GREY,
+      surface=ft.Colors.BLACK87,
+      secondary_container=ft.Colors.GREY_800,
+      primary_container=ft.Colors.GREY_800
+    )
+  )
 
   # Could put load settings here
 
@@ -555,12 +687,21 @@ async def main(page: ft.Page, engine):
 async def start_gui(config):
   """ Starts the GUI, engine & tray """
   assets_path = str(pathlib.Path(__file__).parent.parent / "assets")
+  logger.info(f"assets_path resolved to: {assets_path}")
+  
   engine = Engine()
+  logger.info("Engine created. Starting engine...")
   await engine.start_engine(config)
+  logger.info("Engine started. Creating tray...")
 
   # Create tray and close event to stop the engine
   close = asyncio.Event()
-  tray = Tray(engine, close)
+  try:
+    tray = Tray(engine, close)
+    logger.info("Tray created.")
+  except Exception:
+    logger.error("Failed to create Tray:\n" + traceback.format_exc())
+    raise
 
   async def handle_close():
     await close.wait()
@@ -572,4 +713,10 @@ async def start_gui(config):
     tray.set_gui(page)
     await main(page, engine)
   
-  await tray.start_gui(main_wrapper, assets_path)
+  logger.info("Starting tray GUI loop (ft.run_async)...")
+  try:
+    await tray.start_gui(main_wrapper, assets_path)
+  except Exception:
+    logger.error("Exception in tray.start_gui:\n" + traceback.format_exc())
+    raise
+  logger.info("tray.start_gui returned cleanly.")
