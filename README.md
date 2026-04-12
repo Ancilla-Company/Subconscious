@@ -147,4 +147,20 @@ Subconscious is open source and community-driven! We welcome bug reports, pull r
 
 ## 📜 License
 
-This project is open-source and available to the community.
+This project is open-source and available to the community under a custom license based on BSD-3-Clause with additional branding restrictions.
+
+### Third-Party Components
+
+Subconscious bundles various third-party libraries. See `THIRD_PARTY_LICENSES.txt` for a complete list of bundled components and their licenses.
+
+### LGPL Components
+
+Subconscious includes LGPL-licensed components (notably `pystray` for system tray functionality). In compliance with LGPL requirements:
+
+- The source code for LGPL components is available at their respective upstream repositories
+- Users may modify and update these components independently
+- For questions about LGPL compliance, please contact the maintainers
+
+### Enterprise Licensing
+
+For commercial/enterprise use beyond the open-source license terms, please contact the maintainers for enterprise licensing options.

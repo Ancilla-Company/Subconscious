@@ -19,6 +19,7 @@ dependencies = [
   "pydantic-ai",
   "pytest-asyncio",
   "desktop-notifier",
+  "uvicorn[standard]",
 
   "bs4",
   "python-docx",
@@ -54,7 +55,11 @@ hidden_imports = [
   "pydantic_core"
 ]
 add_data = [
-  "src/subconscious;subconscious"
+  "src/subconscious;subconscious",
+  "LICENCE;.",
+  "THIRD_PARTY_LICENSES.txt;.",
+  "LGPL_COMPLIANCE.md;.",
+  "README.md;."
 ]
 pyinstaller_args = [
   "--collect-all=pydantic",
