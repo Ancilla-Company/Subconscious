@@ -54,6 +54,7 @@ class Thread(Base):
   __tablename__ = 'threads'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
   workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
   title = Column(String)
   description = Column(String, nullable=True)

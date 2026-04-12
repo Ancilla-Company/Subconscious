@@ -70,12 +70,16 @@ class Config:
   dev: bool = False
   tui: bool = False
   gui: bool = False
+  test: bool = False
   node_id: Optional[str] = None
   secrets: Optional[dict] = None
   data_dir: pathlib.Path = field(default_factory=get_default_data_dir)
 
   def __post_init__(self):
-    if self.dev:
+    if self.test:
+      self.data_dir = get_default_data_dir()
+      self.data_dir = self.data_dir.with_name(f"{self.data_dir.name}-test")
+    elif self.dev:
       self.data_dir = get_default_data_dir()
       self.data_dir = self.data_dir.with_name(f"{self.data_dir.name}-dev")
 

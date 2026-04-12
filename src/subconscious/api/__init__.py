@@ -4,10 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import Config
 from .chat import router as chat_router
+from .engine_instance import _engine_instance
 
 
 def create_app(config: Config) -> FastAPI:
   """Create and configure the FastAPI application."""
+  global _engine_instance
+
   app = FastAPI(
     title="Subconscious API",
     description="API for Subconscious distributed AI platform",

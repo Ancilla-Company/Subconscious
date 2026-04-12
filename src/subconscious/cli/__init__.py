@@ -8,9 +8,9 @@ import traceback
 
 from ..gui import start_gui
 from ..engine import Engine
-from ..api import create_app
 from ..tui.tui import start_tui
 from ..config import Config, LOGO
+from ..api import create_app, get_engine_instance
 
 
 def main():
@@ -21,6 +21,12 @@ def main():
     "--dev",
     action="store_true",
     help="Run in development mode"
+  )
+
+  base_parser.add_argument(
+    "--test",
+    action="store_true",
+    help="Run in test mode"
   )
 
   parser = argparse.ArgumentParser(
@@ -95,21 +101,24 @@ def main():
     print(LOGO)
     if args.command == "engine":
       loop.run_until_complete(Engine().start_engine(
-        Config(dev=args.dev, gui=False, tui=False)
+        Config(dev=args.dev, test=args.text, gui=False, tui=False)
       ))
     elif args.command == "gui":
       loop.run_until_complete(start_gui(
-        Config(dev=args.dev, gui=True, tui=False)
+        Config(dev=args.dev, test=args.text, gui=True, tui=False)
       ))
     elif args.command == "tui" or args.command is None:
       loop.run_until_complete(start_tui(
-        Config(dev=args.dev, gui=False, tui=True)
+        Config(dev=args.dev, test=args.text, gui=False, tui=True)
       ))
     elif args.command == "api":
+      config = Config(dev=args.dev, test=args.text, gui=False, tui=False)
+      loop.run_until_complete(get_engine_instance(
+        config
+      ))
+      
       uvicorn.run(
-        create_app(
-          Config(dev=args.dev, gui=False, tui=False)
-        ),
+        create_app(config),
         host=args.host,
         port=args.port
       )

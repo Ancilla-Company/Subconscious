@@ -34,6 +34,7 @@ class ChatCompletionResponse(BaseModel):
   object: str = "chat.completion"
   created: int
   model: str
+  thread_id: str
   choices: List[ChatCompletionChoice]
   usage: ChatCompletionUsage
 

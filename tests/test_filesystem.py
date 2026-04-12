@@ -11,9 +11,13 @@ import pytest_asyncio
 
 from subconscious.tools.filesystem import (
   read_file,
+  read_range,
+  search_in_file,
+  search_files,
   list_directory,
   create_file,
   get_file_info,
+  move_to_trash,
 )
 
 
@@ -61,12 +65,13 @@ async def test_read_file_outside_home_blocked(ctx, tmp_path, monkeypatch):
   assert "Access denied" in result or "outside" in result
 
 
-async def test_read_file_truncates_large_file(ctx, tmp_home_dir):
+async def test_read_file_skeleton_mode(ctx, tmp_home_dir):
   f = tmp_home_dir / "big.txt"
-  # Write 110,000 chars. The limit is 100,000 (_MAX_READ_SIZE)
-  f.write_text("A" * 110_000, encoding="utf-8")
+  # Write ~3 MB of text (3 million chars) to trigger skeleton mode
+  f.write_text("A" * 3_000_000, encoding="utf-8")
   result = await read_file(ctx, str(f))
-  assert "truncated" in result
+  assert "[SKELETON MODE" in result
+  assert "Use read_range()" in result
 
 
 # ---------------------------------------------------------------------------
@@ -216,3 +221,101 @@ async def test_get_file_info_not_found(ctx, tmp_home_dir):
   result = await get_file_info(ctx, str(tmp_home_dir / "ghost.txt"))
   # Should return a dict with an error key or a message
   assert "error" in result or "not found" in str(result).lower()
+
+
+# ---------------------------------------------------------------------------
+# read_range
+# ---------------------------------------------------------------------------
+
+async def test_read_range_success(ctx, tmp_home_dir):
+  f = tmp_home_dir / "lines.txt"
+  content = "\n".join(f"Line {i}" for i in range(1, 101))
+  f.write_text(content, encoding="utf-8")
+  result = await read_range(ctx, str(f), 5, 10)
+  assert "[Lines 5–10" in result
+  assert "Line 5" in result
+  assert "Line 10" in result
+
+
+async def test_read_range_out_of_bounds(ctx, tmp_home_dir):
+  f = tmp_home_dir / "short.txt"
+  f.write_text("Line 1\nLine 2", encoding="utf-8")
+  result = await read_range(ctx, str(f), 1, 10)
+  assert "[Lines 1–2" in result  # Should cap at total lines
+
+
+async def test_read_range_not_found(ctx, tmp_home_dir):
+  result = await read_range(ctx, str(tmp_home_dir / "missing.txt"), 1, 5)
+  assert "not found" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# search_in_file
+# ---------------------------------------------------------------------------
+
+async def test_search_in_file_success(ctx, tmp_home_dir):
+  f = tmp_home_dir / "search.txt"
+  content = "This is a test file.\nIt has multiple lines.\nTest is here.\nEnd."
+  f.write_text(content, encoding="utf-8")
+  result = await search_in_file(ctx, str(f), "test")
+  assert "match(es) for 'test'" in result
+  assert "1:" in result  # Line 1 has "test"
+
+
+async def test_search_in_file_no_matches(ctx, tmp_home_dir):
+  f = tmp_home_dir / "no_match.txt"
+  f.write_text("No matching content here.", encoding="utf-8")
+  result = await search_in_file(ctx, str(f), "xyz")
+  assert "No matches found" in result
+
+
+async def test_search_in_file_regex(ctx, tmp_home_dir):
+  f = tmp_home_dir / "regex.txt"
+  f.write_text("Line 1\nLine 2\nLine 10", encoding="utf-8")
+  result = await search_in_file(ctx, str(f), r"Line \d+")
+  assert "match(es)" in result
+  assert "1:" in result
+
+
+# ---------------------------------------------------------------------------
+# search_files
+# ---------------------------------------------------------------------------
+
+async def test_search_files_by_name(ctx, tmp_home_dir):
+  (tmp_home_dir / "file1.txt").write_text("content")
+  (tmp_home_dir / "file2.py").write_text("code")
+  result = await search_files(ctx, str(tmp_home_dir), "*.txt")
+  assert len(result) == 1
+  assert result[0]["name"] == "file1.txt"
+
+
+async def test_search_files_with_content(ctx, tmp_home_dir):
+  (tmp_home_dir / "doc1.txt").write_text("This has search term")
+  (tmp_home_dir / "doc2.txt").write_text("No term here")
+  result = await search_files(ctx, str(tmp_home_dir), "*.txt", "search term")
+  assert len(result) == 1
+  assert result[0]["name"] == "doc1.txt"
+  assert "first_match_line" in result[0]
+
+
+async def test_search_files_no_results(ctx, tmp_home_dir):
+  result = await search_files(ctx, str(tmp_home_dir), "*.xyz")
+  assert len(result) == 1
+  assert "No files found" in result[0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# move_to_trash
+# ---------------------------------------------------------------------------
+
+async def test_move_to_trash_success(ctx, tmp_home_dir):
+  f = tmp_home_dir / "to_trash.txt"
+  f.write_text("content")
+  result = await move_to_trash(ctx, str(f))
+  assert "Moved to trash" in result
+  assert not f.exists()
+
+
+async def test_move_to_trash_not_found(ctx, tmp_home_dir):
+  result = await move_to_trash(ctx, str(tmp_home_dir / "missing.txt"))
+  assert "not found" in result.lower()

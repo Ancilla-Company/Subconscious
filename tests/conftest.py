@@ -14,8 +14,8 @@ import pytest_asyncio
 from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-from subconscious.db.models import Base
 from subconscious.tools import EngineContext
+from subconscious.db.models import Base, Networks, Workspace, AppState
 
 
 # ---------------------------------------------------------------------------
@@ -27,6 +27,21 @@ async def async_engine():
   engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
   async with engine.begin() as conn:
     await conn.run_sync(Base.metadata.create_all)
+    # Insert default test data
+    await conn.execute(Networks.__table__.insert().values(
+      uuid='test-network',
+      name='Test Network',
+      default_workspace_uuid='test-workspace'
+    ))
+    await conn.execute(Workspace.__table__.insert().values(
+      uuid='test-workspace',
+      name='Test Workspace',
+      network_id=1
+    ))
+    await conn.execute(AppState.__table__.insert().values(
+      key='current_network',
+      value='test-network'
+    ))
   yield engine
   await engine.dispose()
 

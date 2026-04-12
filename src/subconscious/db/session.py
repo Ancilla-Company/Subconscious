@@ -39,6 +39,8 @@ class Database:
         await conn.execute(text("ALTER TABLE threads ADD COLUMN updated_at DATETIME"))
       if "default_model_id" not in columns:
         await conn.execute(text("ALTER TABLE threads ADD COLUMN default_model_id VARCHAR"))
+      if "uuid" not in columns:
+        await conn.execute(text("ALTER TABLE threads ADD COLUMN uuid VARCHAR"))
 
   def get_session(self) -> AsyncSession:
     """ Get a new async database session. """
