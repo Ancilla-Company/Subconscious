@@ -430,6 +430,73 @@ class Engine:
     )
     return preamble + content
 
+  async def generate_response(
+    self,
+    messages: list,
+    model: str = "default",
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+    thread_id: Optional[int] = None,
+    workspace_id: Optional[int] = None
+  ) -> str:
+    """
+    Generate a response from the AI model for API calls.
+    This is a simplified version of stream_chat that returns the full response as a string.
+    """
+    # Ensure engine is initialized
+    if not hasattr(self, 'agent_manager') or self.agent_manager is None:
+      await self.init_system()
+
+    # Convert messages to the format expected by the agent
+    from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, UserPromptPart, TextPart
+
+    history = []
+    user_content = ""
+
+    for msg in messages:
+      if msg.role == "user":
+        user_content = msg.content
+      elif msg.role == "assistant":
+        # Add to history
+        history.append(ModelResponse(parts=[TextPart(content=msg.content)]))
+      elif msg.role == "system":
+        # System messages can be handled in the prompt
+        pass
+
+    # Get model config
+    model_cfg = self.agent_manager.get_best_model_cfg()
+    if model_cfg is None:
+      raise ValueError("No model configured. Add a model in Settings → Models.")
+
+    # Override temperature and max_tokens if provided
+    if temperature is not None:
+      model_cfg = model_cfg.copy()
+      model_cfg["temperature"] = temperature
+    if max_tokens is not None:
+      model_cfg = model_cfg.copy()
+      model_cfg["max_tokens"] = max_tokens
+
+    # Get all tools
+    tools = self.tool_registry.get_tools(self.tool_registry.all_slugs())
+
+    agent = self.agent_manager.build_agent(model_cfg, tools=tools)
+
+    # Build context
+    ctx_deps = EngineContext(
+      db=self.db,
+      workspace_id=workspace_id or 0,
+      thread_id=thread_id or 0,
+      data_dir=str(self.config.data_dir),
+    )
+
+    # Collect the full response
+    response_chunks = []
+    async with agent.run_stream(user_content, message_history=history, deps=ctx_deps) as result:
+      async for chunk in result.stream_text(delta=True):
+        response_chunks.append(chunk)
+
+    return "".join(response_chunks)
+
   async def update_thread_title(self, thread_id: int, title: str) -> None:
     """Update the thread title (called after the first exchange if desired)."""
     async with self.db.get_session() as session:

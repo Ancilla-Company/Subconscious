@@ -1,5 +1,6 @@
 import os
 import sys
+import uvicorn
 import asyncio
 import logging
 import argparse
@@ -7,6 +8,7 @@ import traceback
 
 from ..gui import start_gui
 from ..engine import Engine
+from ..api import create_app
 from ..tui.tui import start_tui
 from ..config import Config, LOGO
 
@@ -49,8 +51,24 @@ def main():
     help="Starts the engine with the TUI interface (default)",
     parents=[base_parser]
   )
-  
-  # Initiate Config here to allow for accepting config arguments in the future
+
+  # Subcommand: api
+  api_parser = subparsers.add_parser(
+    "api",
+    help="Starts the API server for external integrations",
+    parents=[base_parser]
+  )
+  api_parser.add_argument(
+    "--host",
+    default="localhost",
+    help="Host to bind the API server to"
+  )
+  api_parser.add_argument(
+    "--port",
+    type=int,
+    default=8000,
+    help="Port to bind the API server to"
+  )
   args = parser.parse_args()
 
   # Logging setup
@@ -87,6 +105,14 @@ def main():
       loop.run_until_complete(start_tui(
         Config(dev=args.dev, gui=False, tui=True)
       ))
+    elif args.command == "api":
+      uvicorn.run(
+        create_app(
+          Config(dev=args.dev, gui=False, tui=False)
+        ),
+        host=args.host,
+        port=args.port
+      )
     else:
       parser.print_help()
   except KeyboardInterrupt:
