@@ -54,6 +54,7 @@ def ModelPanel(
   model_key, set_model_key = ft.use_state(model.get("model", ""))
   api_key, set_api_key     = ft.use_state(model.get("api_key", ""))
   alias, set_alias         = ft.use_state(model.get("alias", ""))
+  base_url, set_base_url   = ft.use_state(model.get("base_url", ""))
 
   # Dirty flag — True once any field differs from the persisted values
   dirty, set_dirty = ft.use_state(False)
@@ -68,6 +69,7 @@ def ModelPanel(
     set_model_key(model.get("model", ""))
     set_api_key(model.get("api_key", ""))
     set_alias(model.get("alias", ""))
+    set_base_url(model.get("base_url", ""))
     set_dirty(False)
     set_synced_id(model_id)
 
@@ -92,6 +94,10 @@ def ModelPanel(
     set_alias(e.control.value)
     set_dirty(True)
 
+  def handle_base_url_change(e):
+    set_base_url(e.control.value)
+    set_dirty(True)
+
   def handle_save(e):
     if on_save:
       asyncio.create_task(on_save({
@@ -100,6 +106,7 @@ def ModelPanel(
         "model": model_key,
         "api_key": api_key,
         "alias": alias,
+        "base_url": base_url,
       }))
     set_dirty(False)
 
@@ -135,6 +142,13 @@ def ModelPanel(
         value=api_key,
         on_change=handle_api_key_change,
         hint="Enter your API key"
+      ),
+      FormField(
+        label="Base URL",
+        value=base_url if base_url else ("http://localhost:11434/v1" if provider == "Ollama" else ""),
+        on_change=handle_base_url_change,
+        hint="http://localhost:11434/v1",
+        visible=(provider == "Ollama"),
       ),
       FormField(
         label="Alias",

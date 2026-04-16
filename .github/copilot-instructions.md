@@ -152,6 +152,7 @@ deploy/                     # Deployment artifacts
 - **Indentation**: 2 spaces (not 4)
 - **Naming**: snake_case for variables/functions, PascalCase for classes
 - **Imports**: Group imports (standard library, third-party, local)
+- **No Hidden Imports**: Avoid dynamic imports for better readability and static analysis
 
 ### Architecture Patterns
 - **Local-First**: All data stored locally, no cloud dependencies

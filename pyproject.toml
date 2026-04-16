@@ -19,7 +19,6 @@ dependencies = [
   "pydantic-ai",
   "pytest-asyncio",
   "desktop-notifier",
-  "uvicorn[standard]",
 
   "bs4",
   "python-docx",
