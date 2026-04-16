@@ -14,6 +14,11 @@ from subconscious.tools.filesystem import (
   list_directory,
   create_file,
   get_file_info,
+  move_to_trash,
+  replace_in_file,
+  run_terminal_command,
+  get_directory_tree,
+  find_symbol
 )
 
 
@@ -61,12 +66,33 @@ async def test_read_file_outside_home_blocked(ctx, tmp_path, monkeypatch):
   assert "Access denied" in result or "outside" in result
 
 
-async def test_read_file_truncates_large_file(ctx, tmp_home_dir):
-  f = tmp_home_dir / "big.txt"
-  # Write 110,000 chars. The limit is 100,000 (_MAX_READ_SIZE)
-  f.write_text("A" * 110_000, encoding="utf-8")
+async def test_read_file_skeleton_mode_for_medium_file(ctx, tmp_home_dir):
+  """
+  Verify that files between 2MB and 10MB trigger skeleton mode.
+  """
+  f = tmp_home_dir / "medium.txt"
+  # 3 MB of text
+  content = "line1\ndef function_a():\n    pass\n" + ("X" * 100 + "\n") * 30000
+  f.write_text(content, encoding="utf-8")
+  
   result = await read_file(ctx, str(f))
-  assert "truncated" in result
+  assert "SKELETON MODE" in result
+  assert "function_a" in result
+
+
+async def test_read_file_rag_mode_for_large_file(ctx, tmp_home_dir):
+  """
+  Verify that files > 10MB trigger RAG mode.
+  """
+  f = tmp_home_dir / "large.txt"
+  # Create a sparse file of 11MB
+  with open(f, "wb") as fh:
+    fh.seek(11_000_000)
+    fh.write(b"\0")
+  
+  result = await read_file(ctx, str(f))
+  assert "RAG MODE" in result
+  assert "too large" in result
 
 
 # ---------------------------------------------------------------------------
@@ -216,3 +242,93 @@ async def test_get_file_info_not_found(ctx, tmp_home_dir):
   result = await get_file_info(ctx, str(tmp_home_dir / "ghost.txt"))
   # Should return a dict with an error key or a message
   assert "error" in result or "not found" in str(result).lower()
+
+
+# ---------------------------------------------------------------------------  
+# move_to_trash
+# ---------------------------------------------------------------------------
+
+async def test_move_to_trash_file(ctx, tmp_home_dir):
+  f = tmp_home_dir / "trash_me.txt"
+  f.write_text("bye")
+  result = await move_to_trash(ctx, str(f))
+  assert "Moved to trash" in result
+  assert not f.exists()
+
+
+async def test_move_to_trash_not_found(ctx, tmp_home_dir):
+  result = await move_to_trash(ctx, str(tmp_home_dir / "missing.txt"))
+  assert "not found" in result.lower() or "error" in result.lower()
+
+
+# ---------------------------------------------------------------------------  
+# replace_in_file
+# ---------------------------------------------------------------------------
+
+async def test_replace_in_file_success(ctx, tmp_home_dir):
+  f = tmp_home_dir / "replace.txt"
+  f.write_text("Hello world")
+  result = await replace_in_file(ctx, str(f), "world", "universe")
+  assert "Successfully replaced" in result
+  assert f.read_text() == "Hello universe"
+
+
+async def test_replace_in_file_not_found(ctx, tmp_home_dir):
+  f = tmp_home_dir / "replace.txt"
+  f.write_text("Hello world")
+  result = await replace_in_file(ctx, str(f), "missing", "replacement")
+  assert "not found" in result.lower()
+
+
+# ---------------------------------------------------------------------------  
+# run_terminal_command
+# ---------------------------------------------------------------------------
+
+async def test_run_terminal_command_echo(ctx, tmp_home_dir):
+  result = await run_terminal_command(ctx, "echo hello", str(tmp_home_dir))
+  assert "hello" in result
+
+
+async def test_run_terminal_command_invalid_cwd(ctx, tmp_home_dir):
+  result = await run_terminal_command(ctx, "echo test", str(tmp_home_dir / "nonexistent"))
+  assert "error" in result.lower() or "not exist" in result.lower()
+
+
+# ---------------------------------------------------------------------------  
+# get_directory_tree
+# ---------------------------------------------------------------------------
+
+async def test_get_directory_tree_simple(ctx, tmp_home_dir):
+  (tmp_home_dir / "file1.txt").write_text("a")
+  sub = tmp_home_dir / "subdir"
+  sub.mkdir()
+  (sub / "file2.txt").write_text("b")
+  result = await get_directory_tree(ctx, str(tmp_home_dir), max_depth=2)
+  assert tmp_home_dir.name in result
+  assert "file1.txt" in result
+  assert "subdir" in result
+  assert "file2.txt" in result
+
+
+async def test_get_directory_tree_not_found(ctx, tmp_home_dir):
+  result = await get_directory_tree(ctx, str(tmp_home_dir / "missing"))
+  assert "error" in result.lower() or "not exist" in result.lower()
+
+
+# ---------------------------------------------------------------------------  
+# find_symbol
+# ---------------------------------------------------------------------------
+
+async def test_find_symbol_function(ctx, tmp_home_dir):
+  f = tmp_home_dir / "test.py"
+  f.write_text("def my_function():\n    pass\n\nclass MyClass:\n    pass")
+  result = await find_symbol(ctx, "my_function", str(tmp_home_dir))
+  assert "my_function" in result
+  assert "test.py" in result
+
+
+async def test_find_symbol_not_found(ctx, tmp_home_dir):
+  f = tmp_home_dir / "test.py"
+  f.write_text("def other():\n    pass")
+  result = await find_symbol(ctx, "missing", str(tmp_home_dir))
+  assert "No matches found" in result

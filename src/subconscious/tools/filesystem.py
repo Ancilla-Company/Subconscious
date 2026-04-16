@@ -10,13 +10,16 @@ File reading uses a tiered strategy based on file size:
                            search for relevant lines before reading a range.
 """
 import re
+import os
 import docx
 import pypdf
 import logging
 import pathlib
+import asyncio
 import datetime
 import openpyxl
 import send2trash
+import subprocess
 from pydantic_ai import RunContext
 
 from . import EngineContext
@@ -493,11 +496,13 @@ async def get_file_info(ctx: RunContext[EngineContext], path: str) -> dict:
 
 async def move_to_trash(ctx: RunContext[EngineContext], path: str) -> str:
   """
-  Move a file or folder to the system recycle bin / trash.
-  Does NOT permanently delete. Requires the 'send2trash' package.
+  Move a file or directory to the system trash/recycle bin.
 
   Args:
-    path: Path to the file or folder to trash.
+    path: Path to the file or directory to move to trash.
+
+  Returns:
+    Success message or error description.
   """
   try:
     p = _resolve_path(path)
@@ -507,6 +512,167 @@ async def move_to_trash(ctx: RunContext[EngineContext], path: str) -> str:
     return f"Moved to trash: {p}"
   except Exception as exc:
     return f"Error moving to trash: {exc}"
+
+
+async def replace_in_file(
+  ctx: RunContext[EngineContext],
+  path: str,
+  old_string: str,
+  new_string: str,
+) -> str:
+  """
+  Replace a specific string in a file with a new string.
+  Only replaces the first occurrence.
+
+  Args:
+    path: Absolute or ~ relative path to the file.
+    old_string: The exact string to replace.
+    new_string: The replacement string.
+
+  Returns:
+    Success message or error description.
+  """
+  try:
+    p = _resolve_path(path)
+    if not p.exists() or not p.is_file():
+      return f"Error: File '{path}' does not exist or is not a file."
+
+    content = p.read_text(encoding="utf-8")
+    if old_string not in content:
+      return f"Error: Old string not found in file."
+
+    new_content = content.replace(old_string, new_string, 1)
+    p.write_text(new_content, encoding="utf-8")
+    return f"Successfully replaced text in '{path}'."
+
+  except Exception as exc:
+    return f"Error replacing in file: {exc}"
+
+
+async def run_terminal_command(
+  ctx: RunContext[EngineContext],
+  command: str,
+  cwd: str = "~",
+) -> str:
+  """
+  Run a terminal command and return its output.
+
+  Args:
+    command: The shell command to execute.
+    cwd: Working directory (default home).
+
+  Returns:
+    Command output or error message.
+  """
+  try:
+    cwd_p = _resolve_path(cwd)
+    if not cwd_p.exists() or not cwd_p.is_dir():
+      return f"Error: Working directory '{cwd}' does not exist or is not a directory."
+
+    # Run command asynchronously
+    process = await asyncio.create_subprocess_shell(
+      command,
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+      cwd=str(cwd_p),
+    )
+    stdout, stderr = await process.communicate()
+    output = stdout.decode("utf-8", errors="ignore") + stderr.decode("utf-8", errors="ignore")
+    return output.strip() or "Command executed successfully (no output)."
+
+  except Exception as exc:
+    return f"Error running command: {exc}"
+
+
+async def get_directory_tree(
+  ctx: RunContext[EngineContext],
+  path: str = "~",
+  max_depth: int = 3,
+) -> str:
+  """
+  Get a tree-like structure of the directory.
+
+  Args:
+    path: Root directory path.
+    max_depth: Maximum depth to traverse.
+
+  Returns:
+    Tree structure as string.
+  """
+  try:
+    p = _resolve_path(path)
+    if not p.exists() or not p.is_dir():
+      return f"Error: Directory '{path}' does not exist or is not a directory."
+
+    def build_tree(current_path: pathlib.Path, prefix: str = "", depth: int = 0) -> str:
+      if depth > max_depth:
+        return ""
+      items = sorted(current_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+      tree_lines = []
+      for i, item in enumerate(items):
+        is_last = i == len(items) - 1
+        connector = "└── " if is_last else "├── "
+        tree_lines.append(f"{prefix}{connector}{item.name}")
+        if item.is_dir() and depth < max_depth:
+          extension = "    " if is_last else "│   "
+          tree_lines.append(build_tree(item, prefix + extension, depth + 1))
+      return "\n".join(tree_lines)
+
+    tree = f"{p.name}\n{build_tree(p)}"
+    return tree
+
+  except Exception as exc:
+    return f"Error getting directory tree: {exc}"
+
+
+async def find_symbol(
+  ctx: RunContext[EngineContext],
+  symbol_name: str,
+  directory: str = "~",
+  file_extensions: str = ".py,.js,.ts,.java,.cpp,.c,.h",
+) -> str:
+  """
+  Find definitions of a symbol (function, class, etc.) in files.
+
+  Args:
+    symbol_name: Name of the symbol to find.
+    directory: Directory to search in.
+    file_extensions: Comma-separated extensions to search.
+
+  Returns:
+    List of matches with file and line info.
+  """
+  try:
+    p = _resolve_path(directory)
+    if not p.exists() or not p.is_dir():
+      return f"Error: Directory '{directory}' does not exist or is not a directory."
+
+    extensions = [ext.strip() for ext in file_extensions.split(",")]
+    matches = []
+
+    for root, dirs, files in os.walk(p):
+      for file in files:
+        if any(file.endswith(ext) for ext in extensions):
+          filepath = pathlib.Path(root) / file
+          try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+              for line_num, line in enumerate(f, 1):
+                if re.search(rf'\b{symbol_name}\b', line):
+                  matches.append(f"{filepath.relative_to(p)}:{line_num}: {line.strip()}")
+                  if len(matches) >= 50:  # Limit results
+                    break
+          except Exception:
+            pass
+      if len(matches) >= 50:
+        break
+
+    if matches:
+      return "\n".join(matches)
+    else:
+      return f"No matches found for '{symbol_name}'."
+
+  except Exception as exc:
+    return f"Error finding symbol: {exc}"
 
 
 def _human_size(n: float) -> str:
@@ -526,4 +692,8 @@ TOOLS = [
   create_file,
   get_file_info,
   move_to_trash,
+  replace_in_file,
+  run_terminal_command,
+  get_directory_tree,
+  find_symbol
 ]
