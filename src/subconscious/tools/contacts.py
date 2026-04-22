@@ -7,11 +7,12 @@ to the active workspace.
 
 import logging
 from typing import Optional
-from pydantic_ai import RunContext
 from sqlalchemy import select
+from pydantic_ai import RunContext
 
 from . import EngineContext
 from ..db.models import Contact
+
 
 logger = logging.getLogger("subconscious")
 

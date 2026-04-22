@@ -1,7 +1,7 @@
 import flet as ft
 
 
-def FormField(label, value, on_change, hint) -> ft.Control:
+def FormField(label, value, on_change, hint, visible=True) -> ft.Control:
   """ Form field formatted to the application's style language """
   return ft.Column(
       [
@@ -42,9 +42,10 @@ def FormField(label, value, on_change, hint) -> ft.Control:
         )
       ],
       spacing=0,
+      visible=visible
     )
 
-def PasswordField(label, value, on_change, hint) -> ft.Control:
+def PasswordField(label, value, on_change, hint, visible=True) -> ft.Control:
   """ Password field formatted to the application's style language """
   return ft.Column(
       [
@@ -87,6 +88,7 @@ def PasswordField(label, value, on_change, hint) -> ft.Control:
         )
       ],
       spacing=0,
+      visible=visible
     )
 
 @ft.component
@@ -107,7 +109,6 @@ def DropdownField(label, values, on_change, hint, value=None) -> ft.Control:
             value=value,
             on_select=on_change,
             border_color=ft.Colors.TRANSPARENT,
-            # bgcolor=ft.Colors.TRANSPARENT,
             border_radius=3,
             content_padding=ft.padding.only(10, 5, 2, 2),
             hint_text=hint,
@@ -180,6 +181,14 @@ def CheckBox(label, value, on_change) -> ft.Control:
       # data=(title, key, val),
       value=value, on_change=on_change,
       shape=ft.RoundedRectangleBorder(radius=3),
-      label_style=ft.TextStyle(size=15, overflow=ft.TextOverflow.CLIP), tooltip=label, expand_loose=True
+      label_style=ft.TextStyle(
+        size=15,
+        overflow=ft.TextOverflow.CLIP
+      ),
+       tooltip=label,
+       expand_loose=True
     ),
-  ], spacing=0, wrap=True)
+  ],
+  spacing=0,
+  wrap=True
+)

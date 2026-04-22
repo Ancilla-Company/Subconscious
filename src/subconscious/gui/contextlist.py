@@ -1,22 +1,7 @@
 import flet as ft
-from datetime import datetime
 
-from .components.buttons import SvgButton, ContextItem, IconButton, PopupMenuButton
+from ..shared.buttons import SvgButton, ContextItem, IconButton, PopupMenuButton, Badge, WorkspacePopupItem
 
-
-class WorkspacePopupItem(ft.PopupMenuItem):
-  def __init__(self, name, switch_workspace, slug):
-    super().__init__()
-    self.switch_workspace = switch_workspace
-    self.name = name
-    self.content = ft.Row(
-      controls=[
-        ft.Text(name),
-      ],
-    )
-    self.data = slug
-    self.on_click = switch_workspace
-  
 
 @ft.component
 def ContextList(
@@ -37,6 +22,7 @@ def ContextList(
   on_chat_workspace_change=None,
   selected_setting=None,
   set_selected_setting=None,
+  show_about_badge: bool = False,
   show_all_threads: bool = False,
   on_toggle_all_threads=None
 ) -> ft.Control:
@@ -63,7 +49,7 @@ def ContextList(
       list_items = [
         ft.Container(
           content=ft.Text("No threads found.", size=14, color=ft.Colors.GREY_600),
-          padding=ft.padding.only(15, 0, 15, 0)
+          padding=ft.padding.only(15, 0, 13, 0)
         )
       ]
 
@@ -81,16 +67,19 @@ def ContextList(
         ] + [
           ft.PopupMenuItem(),  # divider
           ft.PopupMenuItem(
-            content=ft.Row([
-              ft.Icon(
-                ft.Icons.CHECK if show_all_threads else ft.Icons.CHECK,
-                size=16,
-                color=ft.Colors.PRIMARY if show_all_threads else ft.Colors.TRANSPARENT,
-              ),
-              ft.Text("All Workspaces"),
-            ], spacing=8),
+            content=ft.Row(
+              [
+                ft.Icon(
+                  ft.Icons.CHECK if show_all_threads else ft.Icons.CHECK,
+                  size=16,
+                  color=ft.Colors.PRIMARY if show_all_threads else ft.Colors.TRANSPARENT,
+                ),
+                ft.Text("All Workspaces"),
+              ],
+              spacing=8
+            ),
             on_click=lambda _: on_toggle_all_threads() if on_toggle_all_threads else None,
-          ),
+          )
         ]
       )
     ]
@@ -115,7 +104,7 @@ def ContextList(
       list_items = [
         ft.Container(
           content=ft.Text("No workspaces found.", size=14, color=ft.Colors.GREY_600),
-          padding=ft.padding.only(15, 0, 15, 0)
+          padding=ft.padding.only(15, 0, 13, 0)
         )
       ]
 
@@ -138,12 +127,27 @@ def ContextList(
         on_click=lambda _: set_selected_setting("models"),
         selected=selected_setting == "models"
       ),
+      # ContextItem(
+      #   key="tools",
+      #   name="Tools",
+      #   description="Configure Tools",
+      #   on_click=lambda _: set_selected_setting("tools"),
+      #   selected=selected_setting == "tools"
+      # ),
+      # ContextItem(
+      #   key="skills",
+      #   name="Skills",
+      #   description="Configure Skills",
+      #   on_click=lambda _: set_selected_setting("skills"),
+      #   selected=selected_setting == "skills"
+      # ),
       ContextItem(
         key="about",
         name="About",
         description="About Subconscious",
         on_click=lambda _: set_selected_setting("about"),
-        selected=selected_setting == "about"
+        selected=selected_setting == "about",
+        badge=Badge() if show_about_badge else None
       )
     ]
     headers = []
@@ -153,7 +157,7 @@ def ContextList(
     list_items = [
       ft.Container(
         content=ft.Text("Select an activity from the sidebar", size=14, color=ft.Colors.GREY_600),
-        padding=ft.padding.only(15, 0, 15, 0)
+        padding=ft.padding.only(15, 0, 13, 0)
       )
     ]
 
@@ -179,7 +183,7 @@ def ContextList(
           spacing=4,
           height=40
         ),
-        padding=ft.padding.only(15, 0, 15, 0)
+        padding=ft.padding.only(15, 0, 13, 0)
       ),
       
       # List container

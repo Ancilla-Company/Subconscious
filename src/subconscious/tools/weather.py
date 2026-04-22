@@ -3,9 +3,11 @@ Weather tools — current conditions and forecast via wttr.in (no API key needed
 Requires: httpx
 """
 
+import httpx
 import logging
-from pydantic_ai import RunContext
 from . import EngineContext
+from pydantic_ai import RunContext
+
 
 logger = logging.getLogger("subconscious")
 _TIMEOUT = 10
@@ -20,7 +22,6 @@ async def get_weather(ctx: RunContext[EngineContext], location: str) -> dict:
     location: City name or 'City, Country', e.g. 'London', 'Paris, FR', 'Tokyo'.
   """
   try:
-    import httpx
     encoded = location.replace(" ", "+")
     url = f"https://wttr.in/{encoded}?format=j1"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -61,7 +62,6 @@ async def get_forecast(ctx: RunContext[EngineContext], location: str, days: int 
     days: Number of days to forecast (1–3, default 3).
   """
   try:
-    import httpx
     days = max(1, min(days, 3))
     encoded = location.replace(" ", "+")
     url = f"https://wttr.in/{encoded}?format=j1"

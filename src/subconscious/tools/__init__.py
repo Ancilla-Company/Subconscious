@@ -42,7 +42,7 @@ class ToolRegistry:
   def _load_defaults(self):
     """Import every default tool module and register its TOOLS list."""
     from . import time_tools, calculator, web_tools, filesystem, terminal
-    from . import todo, memory, clipboard, weather, notes, contacts
+    from . import todo, memory, clipboard, weather, notes, contacts, images
 
     modules = {
       "time":       time_tools,
@@ -56,6 +56,7 @@ class ToolRegistry:
       "weather":    weather,
       "notes":      notes,
       "contacts":   contacts,
+      "images":     images,
     }
 
     for slug, module in modules.items():

@@ -1,13 +1,13 @@
 import os
 import logging
 from pydantic_ai import Agent
-from typing import Optional, Callable, TYPE_CHECKING
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.ollama import OllamaProvider
+from typing import Optional, Callable, TYPE_CHECKING, Any, cast
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart, ModelResponse, TextPart
 
 from .config import Config
-
-if TYPE_CHECKING:
-  from .tools import EngineContext
+from .tools import EngineContext
 
 
 # Logging setup
@@ -95,6 +95,7 @@ class AgentManager:
     provider = (model_cfg.get("provider") or "").strip()
     raw_model = (model_cfg.get("model") or "").strip()
     system_prompt = (model_cfg.get("system_prompt") or "You are a helpful assistant.").strip()
+    base_url = (model_cfg.get("base_url") or "").strip()
 
     prefix = _provider_prefix(provider)
 
@@ -108,21 +109,25 @@ class AgentManager:
 
     logger.debug(f"Building agent with model: {full_model_str}, tools: {len(tools or [])} attached")
 
+    # For Ollama, use OpenAIChatModel with OllamaProvider to allow a custom base_url
+    model_instance: Any = full_model_str
+    if provider.lower() == "ollama":
+      ollama_base_url = (base_url or "http://localhost:11434/v1").rstrip("/")
+      if not ollama_base_url.endswith("/v1"):
+        ollama_base_url += "/v1"
+      model_instance = OpenAIChatModel(raw_model, provider=OllamaProvider(base_url=ollama_base_url))
+      logger.debug(f"Ollama base_url: {ollama_base_url}")
+
     if tools:
-      # Import here to avoid a circular dependency at module load time
-      from .tools import EngineContext
-      # pydantic-ai uses overloads that Pylance cannot narrow past when
-      # deps_type is non-None; cast through Any to silence the false positive.
-      from typing import Any, cast
       agent_kwargs: Any = dict(
-        model=full_model_str,
+        model=model_instance,
         system_prompt=system_prompt,
         tools=tools,
         deps_type=EngineContext,
       )
       return cast(Agent, Agent(**agent_kwargs))
 
-    return Agent(model=full_model_str, system_prompt=system_prompt)  # type: ignore[return-value]
+    return Agent(model=model_instance, system_prompt=system_prompt)  # type: ignore[return-value]
 
   def get_best_model_cfg(self) -> Optional[dict]:
     """Return the first usable model config from encrypted storage, or None."""

@@ -242,7 +242,7 @@ class MessageBubble(ft.Row):
               ],
               clip_behavior=ft.ClipBehavior.NONE),
               clip_behavior=ft.ClipBehavior.NONE, 
-              padding=ft.padding.only(15, 0, 15, 0)
+              padding=ft.padding.only(13, 0, 15, 0)
           ),
         ],
         width=750,

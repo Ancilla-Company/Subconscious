@@ -29,6 +29,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+build_env/
 
 # SQLite
 *.sqlite3
@@ -46,3 +47,8 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# build
+src/pyproject.toml
+src/subconscious/assets/build_metadata.json
+

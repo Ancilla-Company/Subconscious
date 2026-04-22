@@ -1,17 +1,17 @@
 # Package Identifier
-PackageIdentifier: Subconscious.Subconscious
+PackageIdentifier: Ancilla.Subconscious-Chat
 PackageName: Subconscious
 PackageVersion: 0.1.0
-Publisher: Brian Branch
+Publisher: Ancilla
 Author: Brian Branch
-Description: A distributed agentic engine
+Description: A distributed agentic AI engine
 License: MIT
 ShortDescription: Distributed agentic engine for Hiveminds.
-PackageUrl: https://github.com/BrianBranch/Subconscious
+PackageUrl: https://github.com/Ancilla-Company/Subconscious
 Installers:
   - Architecture: x64
-    InstallerType: nullsoft # Or whatever installer you use once built (e.g. PyInstaller or MSI)
-    InstallerUrl: https://github.com/BrianBranch/Subconscious/releases/download/v0.1.0/subconscious-setup-x64.exe
+    InstallerType: PyInstaller
+    InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.0/subconscious-setup-x64.exe
     InstallerSha256: <SHA256_HASH>
 ManifestType: singleton
 ManifestVersion: 1.5.0

@@ -6,21 +6,29 @@ authors = [
   { name = "Brian Branch", email = "you@example.com" }
 ]
 dependencies = [
-  "pydantic-ai",
-  "ray",
-  "flet[all]",
-  "nats-py",
-  "fastapi",
-  "sqlalchemy",
-  "textual",
-  "openfga-sdk",
-  "pyyaml",
+  "httpx",
+  "bcrypt",
   "pytest",
-  "pytest-asyncio",
+  "pyyaml",
+  "pystray",
+  "fastapi",
   "keyring",
-  "aiosqlite"
+  "aiosqlite",
+  "flet[all]",
+  "sqlalchemy",
+  "pydantic-ai",
+  "pytest-asyncio",
+  "desktop-notifier",
+
+  "bs4",
+  "python-docx",
+  "pypdf",
+  "openpyxl",
+  "pyperclip",
+  "speedtest-cli",
+  "send2trash"
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [project.scripts]
 subconscious = "subconscious.cli:main"
@@ -31,3 +39,33 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.flet.app]
+module = "flet_ep.py"
+path = "src"
+
+[tool.flet]
+product = "Subconscious"
+artifact = "Subconscious"
+org = "company.ancilla"
+hidden_imports = [
+  "desktop_notifier.resources",
+  "desktop_notifier.backends.winrt",
+  "pydantic_core"
+]
+add_data = [
+  "src/subconscious;subconscious",
+  "LICENCE;.",
+  "THIRD_PARTY_LICENSES.txt;.",
+  "LGPL_COMPLIANCE.md;.",
+  "README.md;."
+]
+pyinstaller_args = [
+  "--collect-all=pydantic",
+  "--collect-all=pydantic_core",
+  "--copy-metadata=genai_prices",
+  "--copy-metadata=pydantic_ai_slim",
+  "--copy-metadata=pydantic-ai-slim",
+  "--copy-metadata=pydantic_ai",
+  "--copy-metadata=pydantic-ai"
+]

@@ -7,11 +7,14 @@ A default timeout and output size cap are enforced.
 
 import os
 import sys
+import socket
 import asyncio
 import logging
 import platform
 from pydantic_ai import RunContext
+
 from . import EngineContext
+
 
 logger = logging.getLogger("subconscious")
 
@@ -109,7 +112,6 @@ async def get_system_info(ctx: RunContext[EngineContext]) -> dict:
   Return basic information about the host system: OS, Python version, CPU count,
   hostname, and current working directory.
   """
-  import socket
   return {
     "os":           platform.system(),
     "os_version":   platform.version(),

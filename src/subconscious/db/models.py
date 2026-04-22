@@ -57,6 +57,7 @@ class Thread(Base):
   workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
   title = Column(String)
   description = Column(String, nullable=True)
+  default_model_id = Column(String, nullable=True, default="default") # NULL also means default
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
@@ -88,10 +89,6 @@ class AppState(Base):
   value = Column(String, nullable=False)
   tag = Column(String, nullable=True) # To categorize state/settings
 
-
-# ---------------------------------------------------------------------------
-# Tool-backing tables
-# ---------------------------------------------------------------------------
 
 class TodoItem(Base):
   """
@@ -157,5 +154,59 @@ class Contact(Base):
   email = Column(String, nullable=True)
   phone = Column(String, nullable=True)
   notes = Column(Text, nullable=True)
+  created_at = Column(DateTime, default=datetime.now)
+  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class SkillRegistry(Base):
+  """
+  Registry of installed skills (packages containing agent capabilities).
+  Skills are stored as packages in the config data folder under skills/<uuid>.
+  Source can be a URL (git/zip download), a local zip file, or a local folder.
+  Status values: 'pending', 'valid', 'invalid', 'error'
+  """
+  __tablename__ = 'skill_registry'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
+  name = Column(String, nullable=False)
+  alias = Column(String, nullable=True)
+  description = Column(Text, nullable=True)
+  source = Column(String, nullable=False)                         # URL, zip path, or folder path
+  source_type = Column(String, nullable=False, default='folder')  # 'url', 'zip', 'folder'
+  install_path = Column(String, nullable=True)                    # resolved path inside data_dir/skills/
+  version = Column(String, nullable=True)
+  status = Column(String, nullable=False, default='pending')      # pending, valid, invalid, error
+  required_tools = Column(Text, nullable=True)                    # JSON list of tool slugs declared in skill.json
+  metadata_json = Column(Text, nullable=True)                     # raw skill.json / manifest contents
+  created_at = Column(DateTime, default=datetime.now)
+  updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class ToolRegistry(Base):
+  """
+  Registry of configured tools (scripts, MCP servers, REST/API endpoints).
+  Tool types: 'script' (Python/JS/TS), 'mcp' (MCP server), 'api' (REST endpoint).
+  Auth types: None / 'api_key' / 'oauth'
+  API keys are stored encrypted in the keyring data file (keyed by uuid).
+  Status values: 'active', 'disabled', 'error'
+  """
+  __tablename__ = 'tool_registry'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
+  name = Column(String, nullable=False)
+  alias = Column(String, nullable=True)
+  description = Column(Text, nullable=True)
+  tool_type = Column(String, nullable=False, default='script')    # 'script', 'mcp', 'api'
+  # Script-specific
+  script_path = Column(String, nullable=True)
+  script_language = Column(String, nullable=True)                 # 'python', 'javascript', 'typescript'
+  # MCP / API endpoint
+  endpoint_url = Column(String, nullable=True)
+  # Auth
+  auth_type = Column(String, nullable=True)                       # None, 'api_key', 'oauth'
+  auth_env_var = Column(String, nullable=True)                    # env var name holding the key at runtime
+  status = Column(String, nullable=False, default='active')       # active, disabled, error
   created_at = Column(DateTime, default=datetime.now)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

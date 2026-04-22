@@ -4,8 +4,8 @@ No external dependencies beyond the standard library.
 """
 
 from . import EngineContext
+from datetime import datetime
 from pydantic_ai import RunContext
-from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 

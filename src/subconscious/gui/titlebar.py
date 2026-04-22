@@ -44,7 +44,6 @@ def TitleBar() -> ft.Control:
             ], alignment=ft.MainAxisAlignment.START, spacing=0, expand=True),
             bgcolor=ft.Colors.SURFACE,
             padding=ft.padding.only(14, 10, 10, 10),
-            # border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER))
           ),
         ),
         expand=True,
@@ -101,7 +100,6 @@ def TitleBar() -> ft.Control:
             width=40, height=40, tooltip="Close",
           ),
         ], spacing=0),
-        # border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER))
         border=None
       ),
     ]

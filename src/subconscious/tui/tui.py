@@ -4,8 +4,8 @@ import logging
 import pathlib
 import asyncio
 
-from .engine import Engine  
-from .config import Config, log_config, LOGO
+from ..engine import Engine  
+from ..config import Config, log_config, LOGO
 
 
 # Platform specific non-blocking input check

@@ -3,8 +3,11 @@ Clipboard tools — read from and write to the system clipboard.
 Requires: pyperclip  (pip install pyperclip)
 """
 
+import pyperclip
 from pydantic_ai import RunContext
+
 from . import EngineContext
+
 
 _MAX_READ_CHARS = 4000
 
@@ -16,7 +19,6 @@ async def read_clipboard(ctx: RunContext[EngineContext]) -> str:
   empty string.
   """
   try:
-    import pyperclip
     text = pyperclip.paste()
     if len(text) > _MAX_READ_CHARS:
       text = text[:_MAX_READ_CHARS] + f"\n[... clipboard truncated at {_MAX_READ_CHARS} chars]"
@@ -35,7 +37,6 @@ async def write_clipboard(ctx: RunContext[EngineContext], text: str) -> str:
     text: The text to place on the clipboard.
   """
   try:
-    import pyperclip
     pyperclip.copy(text)
     preview = text[:80] + ("…" if len(text) > 80 else "")
     return f"Clipboard updated ({len(text)} chars): {preview}"

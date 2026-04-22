@@ -3,7 +3,7 @@ from datetime import datetime
 
 
 @ft.component
-def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, selectable=True):
+def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, selectable=True, badge=None):
   is_selected = (selected_view == view_name) if selectable else False
 
   return ft.Container(
@@ -21,17 +21,33 @@ def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, s
           ft.ControlState.DEFAULT: ft.Colors.TRANSPARENT,
         }
       ),
+      badge=badge,
     ),
     clip_behavior=ft.ClipBehavior.HARD_EDGE,
   )
+
+class WorkspacePopupItem(ft.PopupMenuItem):
+  """ Popup Item for popup menu """
+  def __init__(self, name, switch_workspace, slug):
+    super().__init__()
+    self.switch_workspace = switch_workspace
+    self.name = name
+    self.content = ft.Row(
+      controls=[
+        ft.Text(name),
+      ],
+    )
+    self.data = slug
+    self.on_click = switch_workspace
 
 @ft.component
 def SvgButton(on_click, svg_path, tooltip=None) -> ft.Control:
   """ A button component that displays an SVG icon for when built in icons don't fit the use case. """
   return ft.Container(
     ft.Container(
-      content=ft.Stack([
-          ft.Image(
+      content=ft.Stack(
+        [
+          ft.Image( # Causes an error if the image is put in the TextButton
             src=svg_path,
             width=24, height=24,
             top=8, left=8,
@@ -67,7 +83,7 @@ def IconButton(on_click, icon, icon_colour=None, tooltip=None) -> ft.Control:
     style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
   )
 
-def ContextItem(key, name, description, on_click, updated_at=None, selected=False) -> ft.Control:
+def ContextItem(key, name, description, on_click, updated_at=None, selected=False, badge=None) -> ft.Control:
   
   async def handle_click(e):
     await on_click(e)
@@ -108,17 +124,24 @@ def ContextItem(key, name, description, on_click, updated_at=None, selected=Fals
         bgcolor=ft.Colors.SECONDARY_CONTAINER if selected else ft.Colors.TRANSPARENT,
       ),
       content=ft.Container(
-        ft.Column([
-          ft.Row([
-            ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
-            ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
-          ], spacing=10),
-          *second_row
-        ], spacing=5),
+        ft.Column(
+          [
+            ft.Row(
+              [
+                ft.Text(name, size=14, weight=ft.FontWeight.W_500, overflow=ft.TextOverflow.ELLIPSIS, tooltip=name, expand=True),
+                ft.Text(render_time(), size=12, weight=ft.FontWeight.W_100, text_align=ft.TextAlign.RIGHT, tooltip=render_datetime_tooltip())
+              ],
+              spacing=10
+            ),
+            *second_row
+          ],
+          spacing=5
+        ),
         padding=ft.padding.all(10)
-      )
+      ),
+      badge=badge
     ),
-    padding=ft.padding.only(15, 0, 15, 0)
+    padding=ft.padding.only(15, 0, 13, 0)
   )
 
 @ft.component
@@ -181,7 +204,7 @@ def PopupMenuButton(tooltip, menu_items, icon=None, src=None) -> ft.Control:
     )
 
 @ft.component
-def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=False) -> ft.Control:
+def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=False, badge=None) -> ft.Control:
   """ Style lanugage for Text Area type button """
   return ft.TextButton(
     content=ft.Text(
@@ -198,5 +221,56 @@ def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=F
     height=40,
     icon=icon,
     visible=visible,
-    disabled=disabled
+    disabled=disabled,
+    badge=badge
+  )
+
+def Badge() -> ft.Badge:
+  """ Returns a standard badge for buttons """
+  return ft.Badge(
+    small_size=10,
+    alignment=ft.Alignment.TOP_RIGHT
+  )
+
+# @ft.component
+def Chip(icon, label, delete, on_delete) -> ft.Container:
+  """ Creates a custom chip as the built in Chip behaves oddly """
+  return ft.Container(
+    content=ft.Row(
+      [
+        ft.Row(
+          [
+            # Leading icon
+            ft.Icon(
+              size=14,
+              icon=icon,
+              margin=ft.Margin.only(left=4)
+            ),
+            # Label
+            ft.Text(
+              size=14,
+              value=label,
+              expand=True,
+              tooltip=label,
+              overflow=ft.TextOverflow.ELLIPSIS
+            )
+          ],
+          expand=True
+        ),
+
+        # Delete Button
+        ft.IconButton(
+          icon_size=14,
+          on_click=on_delete,
+          icon=ft.Icons.CLOSE_OUTLINED,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        )
+      ],
+      spacing=4,
+      wrap=False
+    ),
+    height=40,
+    border_radius=3,
+    padding=ft.Padding.all(2),
+    bgcolor=ft.Colors.SURFACE
   )

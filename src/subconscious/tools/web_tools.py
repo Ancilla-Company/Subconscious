@@ -6,12 +6,15 @@ Optional for speed test: speedtest-cli
 
 import re
 import time
+import httpx
 import logging
 import asyncio
 import urllib.parse
-from typing import Optional
+# import speedtest as st  # speedtest-cli package
 from . import EngineContext
+from bs4 import BeautifulSoup
 from pydantic_ai import RunContext
+
 
 logger = logging.getLogger("subconscious")
 
@@ -29,12 +32,6 @@ async def fetch_page(ctx: RunContext[EngineContext], url: str) -> str:
   Args:
     url: The full URL to fetch, e.g. 'https://example.com/article'.
   """
-  try:
-    import httpx
-    from bs4 import BeautifulSoup
-  except ImportError:
-    return "Required packages missing. Install: httpx beautifulsoup4"
-
   if not url.startswith(("http://", "https://")):
     url = "https://" + url
 
@@ -74,12 +71,6 @@ async def search_web(ctx: RunContext[EngineContext], query: str, max_results: in
     query: The search query string.
     max_results: Number of results to return (1–10, default 5).
   """
-  try:
-    import httpx
-    from bs4 import BeautifulSoup
-  except ImportError:
-    return [{"error": "Required packages missing. Install: httpx beautifulsoup4"}]
-
   max_results = max(1, min(max_results, 10))
   encoded = urllib.parse.quote_plus(query)
   url = f"https://html.duckduckgo.com/html/?q={encoded}"
@@ -118,7 +109,6 @@ async def check_connectivity(ctx: RunContext[EngineContext]) -> dict:
   Returns a dict with 'connected' (bool) and 'latency_ms' (float or None).
   """
   try:
-    import httpx
     start = time.monotonic()
     async with httpx.AsyncClient(timeout=5) as client:
       await client.get("https://www.google.com")
@@ -135,7 +125,6 @@ async def speed_test(ctx: RunContext[EngineContext]) -> dict:
   Returns a dict with 'download_mbps', 'upload_mbps', and 'ping_ms'.
   """
   try:
-    import speedtest as st  # speedtest-cli package
     loop = asyncio.get_event_loop()
 
     def _run():

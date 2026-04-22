@@ -4,10 +4,10 @@ Scoped to the current workspace so memories persist across all threads.
 Backed by the WorkspaceMemory table.
 """
 
-from typing import Optional
-from sqlalchemy import select, delete
-from pydantic_ai import RunContext
 from . import EngineContext
+from pydantic_ai import RunContext
+from sqlalchemy import select, delete
+
 from ..db.models import WorkspaceMemory
 
 

@@ -4,8 +4,9 @@ Backed by the Note table. Notes are free-form text documents with optional tags.
 """
 
 from typing import Optional
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from pydantic_ai import RunContext
+
 from . import EngineContext
 from ..db.models import Note
 
