@@ -27,7 +27,7 @@ jobs:
           path: dist/
 
   publish-python:
-    needs: [build-python, build-windows]
+    needs: [build-python]
     runs-on: ubuntu-latest
     environment: release
     steps:
