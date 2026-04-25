@@ -24,7 +24,7 @@ def ResponsiveItem(item, height=40, width=750) -> ft.Control:
           # Unexpected behaviour if this Container is omitted
           ft.Container(
             item,
-            padding=ft.padding.only(15, 0, 15, 0)
+            padding=ft.padding.only(13, 0, 15, 0)
           )
         ],
         wrap=True,

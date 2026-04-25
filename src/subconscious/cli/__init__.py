@@ -7,7 +7,7 @@ import traceback
 
 from ..gui import start_gui
 from ..engine import Engine
-from ..tui.tui import start_tui
+# from ..tui.tui import start_tui
 from ..config import Config, LOGO
 
 
@@ -90,6 +90,8 @@ def main():
         Config(dev=args.dev, gui=True, tui=False)
       ))
     elif args.command == "code":
+      # Dynamic import until feature is completed
+      from ..tui.tui import start_tui
       loop.run_until_complete(start_tui(
         Config(dev=args.dev, gui=False, tui=True)
       ))

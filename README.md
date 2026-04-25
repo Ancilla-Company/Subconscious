@@ -1,19 +1,18 @@
 # Subconscious — Your Distributed AI Agent
 
 <div align="center">
-  <img alt="Subconscious Logo" src="./docs/white_banner.png" width="100%" />
+  <img alt="Subconscious Logo" src="https://raw.githubusercontent.com/Ancilla-Company/Subconscious/master/docs/white_banner.png" width="100%" />
 </div>
 
 <p align="center">
-  <em>A distributed, agentic AI platform that allows you to create AI agents running everywhere, on every device, at the same time.</em><br>
+  <em>A distributed, agentic AI platform that allows you to create AI agents running everywhere, on all your connected devices.</em><br>
   <b>An open-source alternative to ChatGPT, Claude & Grok; A packaged alternative to Open Claw & Open WebUI</b>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ancilla-Company/Subconscious/actions">
-    <img src="https://github.com/Ancilla-Company/Subconscious/actions/workflows/build.yml/badge.svg" alt="CI/CD Status">
+  <a href="https://github.com/Ancilla-Company/Subconscious/actions/workflows/release.yaml">
+    <img src="https://github.com/Ancilla-Company/Subconscious/actions/workflows/release.yaml/badge.svg" alt="Build and Release">
   </a>
-  [![Build and Release](https://github.com/Ancilla-Company/Subconscious/actions/workflows/release.yaml/badge.svg)](https://github.com/Ancilla-Company/Subconscious/actions/workflows/release.yaml)
   <a href="https://github.com/Ancilla-Company/Subconscious/stargazers">
     <img src="https://img.shields.io/github/stars/Ancilla-Company/Subconscious?style=flat&color=yellow" alt="GitHub Stars">
   </a>
@@ -26,7 +25,7 @@
 </p>
 
 <div align="center">
-  <img alt="Subconscious UI Demo" src="docs/thread.png" width="80%">
+  <img alt="Subconscious UI Demo" src="https://raw.githubusercontent.com/Ancilla-Company/Subconscious/master/docs/thread.png" width="80%">
 </div>
 
 ## ✨ Key Features
@@ -42,7 +41,7 @@
 - **⏱️ To-Dos & Scheduled Tasks**: Delegate routine chores. Let your agent maintain a to-do list or schedule tasks for exact execution times.
 
 <div align="center">
-  <img alt="Sidebar & Workspaces Screenshot" src="docs/workspaces.png" width="80%">
+  <img alt="Sidebar & Workspaces Screenshot" src="https://raw.githubusercontent.com/Ancilla-Company/Subconscious/master/docs/workspaces.png" width="80%">
 </div>
 
 ---
@@ -58,7 +57,7 @@ Subconscious is designed to be as ubiquitous as you are. Use your phone to execu
 The fastest way to install the Subconscious Desktop App natively on Windows:
 
 ```shell
-winget install subconscious-chat
+winget install Ancilla.Subconscious-Chat
 
 ```
 
@@ -90,7 +89,7 @@ pip install -e .
 ```
 
 <div align="center">
-  <img alt="Settings & Model Configuration Screenshot" src="docs/settings.png" width="80%">
+  <img alt="Settings & Model Configuration Screenshot" src="https://raw.githubusercontent.com/Ancilla-Company/Subconscious/master/docs/settings.png" width="80%">
 </div>
 
 ---

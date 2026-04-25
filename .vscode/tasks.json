@@ -1,0 +1,149 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=733558
+  // for the documentation about the tasks.json format
+  //
+  // CROSS-PLATFORM NOTES:
+  //   Windows tasks default to the conda env "subconscious" via activate.bat.
+  //   If you are not using conda, the activation step is silenced (2>nul) and
+  //   pip/python will fall back to whichever environment is active in your shell.
+  //   Mac/Linux tasks use plain pip/python — activate your env before running.
+  "version": "2.0.0",
+  "tasks": [
+    // ----------------------------------------------------------------
+    // Environment
+    // ----------------------------------------------------------------
+    {
+      "label": "Pip Install Editable",
+      "type": "shell",
+      "command": "pip install -e .",
+      "windows": {
+        "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & pip install -e .",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "problemMatcher": [],
+      "group": "build"
+    },
+
+    // ----------------------------------------------------------------
+    // Desktop Build (Windows only — requires PyInstaller + Flet)
+    // ----------------------------------------------------------------
+    {
+      "label": "Flet Pack (Windows Desktop)",
+      "type": "shell",
+      "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & flet pack desktop_ep.py --icon src/subconscious/assets/favicon.ico --name Subconscious --add-data src/subconscious;subconscious --hidden-import desktop_notifier.resources --hidden-import desktop_notifier.backends.winrt --hidden-import pydantic_core --hidden-import aiosqlite --pyinstaller-build-args=--collect-all=pydantic --pyinstaller-build-args=--collect-all=pydantic_core --pyinstaller-build-args=--copy-metadata=genai_prices --pyinstaller-build-args=--copy-metadata=pydantic_ai_slim --pyinstaller-build-args=--copy-metadata=pydantic-ai-slim --pyinstaller-build-args=--copy-metadata=pydantic_ai --pyinstaller-build-args=--copy-metadata=pydantic-ai --pyinstaller-build-args=--exclude-module=google.genai.types --pyinstaller-build-args=--console",
+      "windows": {
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "problemMatcher": [],
+      "group": "build"
+    },
+
+    // ----------------------------------------------------------------
+    // Mobile / Web Build (requires Flutter SDK + Flet)
+    // ----------------------------------------------------------------
+    {
+      "label": "Flet Build (Android Mobile)",
+      "type": "shell",
+      "command": "flet build aab -vv",
+      "windows": {
+        "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & flet build aab -vv",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "dependsOn": ["copy_pyproject.toml"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Flet Build Web",
+      "type": "shell",
+      "command": "flet build web",
+      "windows": {
+        "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & flet build web",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "dependsOn": ["copy_pyproject.toml"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": "build"
+    },
+
+    // ----------------------------------------------------------------
+    // PyPI
+    // ----------------------------------------------------------------
+    {
+      "label": "PyPi Build",
+      "type": "shell",
+      "command": "python -m build --outdir dist/${input:dist}",
+      "windows": {
+        "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & python -m build --outdir dist/${input:dist}",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "dependsOn": ["clean_dist"],
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "PyPi Publish",
+      "type": "shell",
+      "command": "twine upload --non-interactive --repository ${input:dist} dist/${input:dist}/* --verbose",
+      "windows": {
+        "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & twine upload --non-interactive --repository ${input:dist} dist/${input:dist}/* --verbose",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "problemMatcher": []
+    },
+
+    // ----------------------------------------------------------------
+    // Utilities
+    // ----------------------------------------------------------------
+    {
+      "label": "clean_dist",
+      "type": "shell",
+      "command": "rm -rf dist\\${input:dist}",
+      "windows": {
+        "command": "if exist dist rmdir /s /q dist\\${input:dist}",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "copy_pyproject.toml",
+      "type": "shell",
+      "command": "cp pyproject.toml src/pyproject.toml",
+      "windows": {
+        "command": "copy pyproject.toml src\\pyproject.toml",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "dist",
+      "description": "Select a distribution directory to publish to:",
+      "default": "testpypi",
+      "type": "pickString",
+      "options": [
+        "testpypi",
+        "pypi"
+      ]
+    }
+  ]
+}
