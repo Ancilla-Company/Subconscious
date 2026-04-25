@@ -13,6 +13,7 @@
   <a href="https://github.com/Ancilla-Company/Subconscious/actions">
     <img src="https://github.com/Ancilla-Company/Subconscious/actions/workflows/build.yml/badge.svg" alt="CI/CD Status">
   </a>
+  [![Build and Release](https://github.com/Ancilla-Company/Subconscious/actions/workflows/release.yaml/badge.svg)](https://github.com/Ancilla-Company/Subconscious/actions/workflows/release.yaml)
   <a href="https://github.com/Ancilla-Company/Subconscious/stargazers">
     <img src="https://img.shields.io/github/stars/Ancilla-Company/Subconscious?style=flat&color=yellow" alt="GitHub Stars">
   </a>
