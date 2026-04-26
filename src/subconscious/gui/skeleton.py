@@ -19,6 +19,7 @@ from ..db.models import Workspace, Thread, AppState
 from ..shared.messages import HumanMessage, AIMessage
 
 
+# Logging config
 logger = logging.getLogger("subconscious")
 
 
@@ -687,20 +688,19 @@ async def main(page: ft.Page, engine):
 async def start_gui(config):
   """ Starts the GUI, engine & tray """
   assets_path = str(pathlib.Path(__file__).parent.parent / "assets")
-  logger.info(f"assets_path resolved to: {assets_path}")
+  logger.debug(f"assets_path resolved to: {assets_path}")
   
+  logger.info("Starting engine...")
   engine = Engine()
-  logger.info("Engine created. Starting engine...")
   await engine.start_engine(config)
-  logger.info("Engine started. Creating tray...")
 
   # Create tray and close event to stop the engine
+  logger.info("Creating background service...")
   close = asyncio.Event()
   try:
     tray = Tray(engine, close)
-    logger.info("Tray created.")
   except Exception:
-    logger.error("Failed to create Tray:\n" + traceback.format_exc())
+    logger.error("Failed to create background service:\n" + traceback.format_exc())
     raise
 
   async def handle_close():
@@ -713,10 +713,10 @@ async def start_gui(config):
     tray.set_gui(page)
     await main(page, engine)
   
-  logger.info("Starting tray GUI loop (ft.run_async)...")
+  logger.info("Starting GUI...")
   try:
     await tray.start_gui(main_wrapper, assets_path)
   except Exception:
     logger.error("Exception in tray.start_gui:\n" + traceback.format_exc())
     raise
-  logger.info("tray.start_gui returned cleanly.")
+  logger.info("Shutting down...")

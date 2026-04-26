@@ -1,53 +1,110 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "subconscious"
-version = "0.1.0"
-description = "A distributed agentic engine"
+name = "subconscious-chat"
+version = "0.1.7"
+description = "A distributed, agentic AI platform — run AI agents everywhere, on every device."
+readme = "README.md"
+license = { text = "Proprietary" }
 authors = [
-  { name = "Brian Branch", email = "you@example.com" }
+  { name = "Brian Branch", email = "b.branch@ancilla.company" }
+]
+keywords = ["ai", "agent", "llm", "chat", "local-first", "multi-platform", "ollama", "openai", "anthropic"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: End Users/Desktop",
+  "Intended Audience :: Developers",
+  "License :: Other/Proprietary License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Communications :: Chat"
 ]
 dependencies = [
   "httpx",
   "bcrypt",
-  "pytest",
   "pyyaml",
-  "pystray",
   "fastapi",
   "keyring",
-  "aiosqlite",
-  "flet[all]",
-  "sqlalchemy",
-  "pydantic-ai",
-  "pytest-asyncio",
-  "desktop-notifier",
+  "pydantic-ai; sys_platform != 'android' and sys_platform != 'ios'",
+  "pydantic-ai-slim; sys_platform != 'android' and sys_platform != 'ios'",
+  "pydantic; sys_platform != 'android' and sys_platform != 'ios'",
+  "pydantic-graph; sys_platform != 'android' and sys_platform != 'ios'",
+  "genai-prices; sys_platform != 'android' and sys_platform != 'ios'",
+  "griffe; sys_platform != 'android' and sys_platform != 'ios'",
+  "opentelemetry-api; sys_platform != 'android' and sys_platform != 'ios'",
+  "typing-inspection; sys_platform != 'android' and sys_platform != 'ios'",
+  "flet[all]==0.84.0",
+  "aiosqlite; sys_platform != 'android' and sys_platform != 'ios'",
+  "sqlalchemy; sys_platform != 'android' and sys_platform != 'ios'",
 
   "bs4",
-  "python-docx",
   "pypdf",
   "openpyxl",
-  "pyperclip",
-  "speedtest-cli",
-  "send2trash"
+  "python-docx",
+  "desktop-notifier; sys_platform != 'android' and sys_platform != 'ios'",
+  "pystray; sys_platform != 'android' and sys_platform != 'ios'",
+  "pyperclip; sys_platform != 'android' and sys_platform != 'ios'",
+  "send2trash; sys_platform != 'android' and sys_platform != 'ios'",
+  "speedtest-cli; sys_platform != 'android' and sys_platform != 'ios'"
 ]
-requires-python = ">=3.12"
+
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+  "pytest-asyncio"
+]
 
 [project.scripts]
 subconscious = "subconscious.cli:main"
 
+[project.urls]
+Homepage = "https://subconscious.chat"
+Repository = "https://github.com/Ancilla-Company/Subconscious"
+"Bug Tracker" = "https://github.com/Ancilla-Company/Subconscious/issues"
+Changelog = "https://github.com/Ancilla-Company/Subconscious/blob/master/CHANGELOG.md"
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["assets/*", "assets/**/*"]
+
+[tool.flet.android]
+min_sdk_version = 24
+org = "company.ancilla"
+bundle_id = "company.ancilla.subconscious"
+
+[tool.flet.ios]
+org = "company.ancilla"
+bundle_id = "company.ancilla.subconscious"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.flet.app]
-module = "flet_ep.py"
 path = "src"
+hide_window_on_start = true
+module = "mobile_flet_ep.py"
+
+[tool.flet.deep_linking]    # or [tool.flet.<PLATFORM>.deep_linking]
+scheme = "https"
+host = "subconscious.chat"
 
 [tool.flet]
+org = "company.ancilla"
 product = "Subconscious"
 artifact = "Subconscious"
-org = "company.ancilla"
+permissions = ["location", "microphone"]
+bundle_id = "company.ancilla.subconscious"
+source_packages = []
 hidden_imports = [
   "desktop_notifier.resources",
   "desktop_notifier.backends.winrt",
@@ -56,9 +113,13 @@ hidden_imports = [
 add_data = [
   "src/subconscious;subconscious",
   "LICENCE;.",
-  "THIRD_PARTY_LICENSES.txt;.",
+  "THIRD_PARTY_LICENSES.md;.",
   "LGPL_COMPLIANCE.md;.",
-  "README.md;."
+  "README.md;.",
+  # LGPL compliance: bundled package files must be included so end-users
+  # can replace them with modified versions per LGPL §4/§6 requirements.
+  "pydantic_core",
+  "aiosqlite"
 ]
 pyinstaller_args = [
   "--collect-all=pydantic",
@@ -67,5 +128,11 @@ pyinstaller_args = [
   "--copy-metadata=pydantic_ai_slim",
   "--copy-metadata=pydantic-ai-slim",
   "--copy-metadata=pydantic_ai",
-  "--copy-metadata=pydantic-ai"
+  "--copy-metadata=pydantic-ai",
+  "--copy-metadata=pydantic",
+  "--copy-metadata=pydantic_graph",
+  "--copy-metadata=griffe",
+  "--copy-metadata=opentelemetry_api",
+  "--copy-metadata=typing_inspection",
+  "--exclude-module=google.genai.types"
 ]

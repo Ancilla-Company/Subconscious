@@ -67,6 +67,7 @@ class Engine:
           )
           
           if not exists:
+            logger.info("Creating database and configuring system settings...")
             default_value = value[0]
             new_setting = AppState(key=key, value=str(default_value), tag="system")
             session.add(new_setting)
@@ -157,7 +158,8 @@ class Engine:
     asyncio.create_task(self.check_for_updates())
 
     # start the heartbeat: DEBUG
-    self._heartbeat_task = asyncio.create_task(self.heartbeat())
+    if self.config.dev:
+      self._heartbeat_task = asyncio.create_task(self.heartbeat())
 
     # Initialize Agent Manager
     self.agent_manager = AgentManager(config)
@@ -166,7 +168,8 @@ class Engine:
     self.tool_registry = ToolRegistry()
 
     # Show ready notification: DEBUG
-    await self.show_notification("Subconscious", "Startup Complete.")
+    if self.config.dev:
+      await self.show_notification("Subconscious", "Startup Complete.")
 
   async def get_or_create_thread(
     self,
@@ -777,7 +780,7 @@ class Engine:
     # For pip: the PyPI distribution name (e.g. "subconscious")
     # For winget: the package ID (e.g. "Ancilla.Subconscious")
     # For apt-get: the apt package name (e.g. "subconscious")
-    package_name = metadata.get("package_name", "Subconscious")
+    package_name = metadata.get("package_name", "Subconscious-Chat")
 
     command_map = {
       # pip upgrades by distribution name

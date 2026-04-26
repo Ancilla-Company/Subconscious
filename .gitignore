@@ -39,8 +39,7 @@ build_env/
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
+# IDE — commit shared VS Code configs
 .idea/
 
 # Testing

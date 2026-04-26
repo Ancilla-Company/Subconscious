@@ -7,7 +7,7 @@ import traceback
 
 from ..gui import start_gui
 from ..engine import Engine
-from ..tui.tui import start_tui
+# from ..tui.tui import start_tui
 from ..config import Config, LOGO
 
 
@@ -35,7 +35,7 @@ def main():
   # Subcommand: gui
   gui_parser = subparsers.add_parser(
     "desktop",
-    help="Starts the engine with the desktop interface",
+    help="Starts the engine with the desktop interface (default)",
     parents=[base_parser]
   )
 
@@ -54,12 +54,17 @@ def main():
       help="Starts the engine with the Terminal TUI interface",
       parents=[base_parser]
     )
+
+    # Logging formatting
+    logging.basicConfig(format='[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+  else:
+    # Logging formatting
+    logging.basicConfig(format='[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
   
   # Initiate Config here to allow for accepting config arguments in the future
   args = parser.parse_args()
 
   # Logging setup
-  logging.basicConfig(format='[%(levelname)s|%(asctime)s.%(msecs)04d|%(filename)s|%(lineno)d] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
   logger = logging.getLogger('subconscious')
   if args.dev:
     logger.setLevel(logging.DEBUG)
@@ -90,6 +95,8 @@ def main():
         Config(dev=args.dev, gui=True, tui=False)
       ))
     elif args.command == "code":
+      # Dynamic import until feature is completed
+      from ..tui.tui import start_tui
       loop.run_until_complete(start_tui(
         Config(dev=args.dev, gui=False, tui=True)
       ))
