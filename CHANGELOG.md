@@ -6,9 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.1.7] — 2026-04-25
+
+### Changed
+
+- Initial and startup logging ouput dev and prod versions
+
+### Fixed
+
+- Fixed assets directory refrence bug
+
+---
+
 ## [0.1.0] — 2026-04-25
 
 ### Added
+
 - Initial public release of Subconscious
 - Local-first AI agent platform with multi-platform support (Desktop, Web, Mobile)
 - Support for 10+ AI providers: OpenAI, Anthropic, Google Gemini, Ollama, DeepSeek, Mistral, Groq, Grok, Hugging Face
