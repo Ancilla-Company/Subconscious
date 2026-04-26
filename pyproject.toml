@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subconscious-chat"
-version = "0.1.4"
+version = "0.1.7"
 description = "A distributed, agentic AI platform — run AI agents everywhere, on every device."
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -38,7 +38,7 @@ dependencies = [
   "griffe; sys_platform != 'android' and sys_platform != 'ios'",
   "opentelemetry-api; sys_platform != 'android' and sys_platform != 'ios'",
   "typing-inspection; sys_platform != 'android' and sys_platform != 'ios'",
-  "flet[all]==0.80.0",
+  "flet[all]==0.84.0",
   "aiosqlite; sys_platform != 'android' and sys_platform != 'ios'",
   "sqlalchemy; sys_platform != 'android' and sys_platform != 'ios'",
 

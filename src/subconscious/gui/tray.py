@@ -1,15 +1,19 @@
 import asyncio
 import pathlib
 import pystray
+import logging
 import flet as ft
 from PIL import Image
+
+
+# Logging config
+logger = logging.getLogger("subconscious")
 
 
 class Tray:
   """ Manages the tray icon service """
   def __init__(self, engine, close):
     """ Sets up the tray icon to allow running in the backround without stopping the engine """
-    print("Starting Tray")
     self.main = None
     self.loop = None
     self.assets = None
@@ -47,6 +51,7 @@ class Tray:
 
     # Run once on startup, then wait for reopen requests from the tray thread.
     while True:
+      logger.info("..Ready.")
       await ft.run_async(self.main, assets_dir=self.assets)
       await self._reopen_event.wait()
       self._reopen_event.clear()

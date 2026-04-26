@@ -67,6 +67,7 @@ class Engine:
           )
           
           if not exists:
+            logger.info("Creating database and configuring system settings...")
             default_value = value[0]
             new_setting = AppState(key=key, value=str(default_value), tag="system")
             session.add(new_setting)
