@@ -47,6 +47,7 @@ logger = logging.getLogger("subconscious")
 class Engine:
   """ Subconscious Engine Core """
   update_available = None
+  latest_version: Optional[str] = None
 
   async def init_settings(self):
     """ Initialize settings from settings.json to AppState if not present """
@@ -543,8 +544,10 @@ class Engine:
 
       if latest_version > current_version:
         self.update_available = True
+        self.latest_version = str(latest_version)
       else:
         self.update_available = False
+        self.latest_version = None
     except httpx.HTTPStatusError as e:
       logger.error(f"The server returned and error: {e}")
     except Exception as e:
@@ -783,8 +786,12 @@ class Engine:
     package_name = metadata.get("package_name", "Subconscious-Chat")
 
     command_map = {
-      # pip upgrades by distribution name
-      "python": [sys.executable, "-m", "pip", "install", "--upgrade", package_name],
+      # Pin to the exact version detected by check_for_updates; fall back to --upgrade if unknown
+      "python": (
+        [sys.executable, "-m", "pip", "install", f"{package_name}=={self.latest_version}"]
+        if self.latest_version else
+        [sys.executable, "-m", "pip", "install", "--upgrade", package_name]
+      ),
       # winget requires --id for exact package identifier matching
       "winget": ["winget", "upgrade", "--id", package_name, "--silent"],
       # apt-get install --only-upgrade upgrades only if already installed
