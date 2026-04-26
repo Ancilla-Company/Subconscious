@@ -47,7 +47,7 @@ class Tray:
 
     # Run once on startup, then wait for reopen requests from the tray thread.
     while True:
-      await ft.run_async(self.main, assets_dir="../assets")
+      await ft.run_async(self.main, assets_dir=self.assets)
       await self._reopen_event.wait()
       self._reopen_event.clear()
       if self._exiting:

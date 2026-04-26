@@ -98,11 +98,13 @@
       "type": "shell",
       "command": "twine upload --non-interactive --repository ${input:dist} dist/${input:dist}/* --verbose",
       "windows": {
+        // .pypirc file should be placed in C:\Users\<username>\.pypirc with credentials for testpypi and pypi as required
         "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & twine upload --non-interactive --repository ${input:dist} dist/${input:dist}/* --verbose",
         "options": {
           "shell": { "executable": "cmd.exe", "args": ["/c"] }
         }
       },
+      "dependsOn": ["PyPi Build"],
       "problemMatcher": []
     },
 
@@ -114,7 +116,7 @@
       "type": "shell",
       "command": "rm -rf dist\\${input:dist}",
       "windows": {
-        "command": "if exist dist rmdir /s /q dist\\${input:dist}",
+        "command": "if exist dist\\${input:dist} rmdir /s /q dist\\${input:dist}",
         "options": {
           "shell": { "executable": "cmd.exe", "args": ["/c"] }
         }

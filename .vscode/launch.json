@@ -37,12 +37,12 @@
       "justMyCode": true
     },
     {
-      "name": "Subconscious GUI (Dev)",
+      "name": "Subconscious Desktop (Dev)",
       "type": "debugpy",
       "request": "launch",
       "module": "subconscious.cli",
       "args": [
-        "gui",
+        "desktop",
         "--dev"
       ],
       "cwd": "${workspaceFolder}",
