@@ -235,6 +235,34 @@ def MainWindow(
         alignment=ft.Alignment.CENTER,
         expand=True
       )
+  elif current_view == "account":
+    content = ft.Container(
+      content=ft.Column(
+        [
+          ft.Icon(
+            ft.Icons.PERSON_OUTLINED,
+            size=64,
+            color=ft.Colors.GREY_400
+          ),
+          ft.Text(
+            "Account",
+            size=24,
+            weight=ft.FontWeight.W_500,
+            color=ft.Colors.GREY_500
+          ),
+          ft.Text(
+            "Login and profile management coming soon.",
+            size=14,
+            color=ft.Colors.GREY_500
+          ),
+        ],
+        spacing=12,
+        expand=True,
+        alignment=ft.MainAxisAlignment.CENTER,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+      ),
+      expand=True,
+    )
   else:
     content = default_content
 

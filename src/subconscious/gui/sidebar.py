@@ -1,7 +1,6 @@
 import flet as ft
 
-from ..shared.buttons import IconButton, SidebarButton
-
+from ..shared.buttons import IconButton, SidebarButton, Avatar
 
 @ft.component
 def Sidebar(
@@ -9,8 +8,12 @@ def Sidebar(
   on_threads_click,
   on_context_toggle,
   on_settings_click,
+  on_account_click,
   selected_view="none",
   show_settings_badge: bool = False,
+  # Seed for the identicon — pass a username or UUID once accounts exist.
+  # Defaults to a fixed string so the avatar is stable before login.
+  avatar_seed: str = "subconscious-default-user",
 ) -> ft.Control:
 
   return ft.Column(
@@ -44,7 +47,14 @@ def Sidebar(
                 selected_view,
                 on_settings_click,
                 badge=ft.Badge() if show_settings_badge else None,
-              )
+              ),
+              Avatar(
+                seed=avatar_seed,
+                tooltip="Account",
+                view_name="account",
+                selected_view=selected_view,
+                callback=on_account_click,
+              ),
             ],
             spacing=4,
           ),

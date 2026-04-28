@@ -575,6 +575,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("settings")
     set_context_visible(True)
 
+  async def switch_to_account(e=None):
+    set_current_view("account")
+    set_current_context("account")
+    set_context_visible(False)
+
   return [
     TitleBar(),
     Frame(
@@ -582,6 +587,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_workspace_click=switch_to_workspace,
         on_threads_click=switch_to_threads,
         on_settings_click=switch_to_settings,
+        on_account_click=switch_to_account,
         on_context_toggle=toggle_context,
         selected_view=current_context, # Use context to light up the sidebar icon correctly
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
