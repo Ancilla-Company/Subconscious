@@ -51,3 +51,5 @@ htmlcov/
 src/pyproject.toml
 src/subconscious/assets/build_metadata.json
 
+# Other
+continue.txt
