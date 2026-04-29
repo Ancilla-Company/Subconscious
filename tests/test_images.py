@@ -1,7 +1,7 @@
 """
 Unit tests for subconscious.tools.images
 
-Tests image conversion tools using Pillow to create test images.
+Tests image conversion and resize tools using Pillow to create test images.
 """
 
 import pathlib
@@ -12,8 +12,10 @@ from PIL import Image
 from subconscious.tools.images import (
   convert_image,
   optimize_image,
+  resize_image,
   batch_convert_image,
-  batch_optimize_images
+  batch_optimize_images,
+  batch_resize_images,
 )
 
 
@@ -79,15 +81,15 @@ def create_test_ico(path: pathlib.Path, size=(64, 64), color=(128, 128, 128)):
 async def test_optimize_image_png(ctx, tmp_dir):
   input_path = tmp_dir / "test.png"
   output_path = tmp_dir / "optimized.png"
-  create_test_png(input_path, size=(200, 200))  # Smaller image
+  create_test_png(input_path, size=(200, 200))
 
-  result = await optimize_image(ctx, str(input_path), str(output_path))
+  result = await optimize_image(ctx, str(input_path), str(output_path), max_size=100)
   assert "Successfully optimized" in result
   assert output_path.exists()
 
-  # Check it's resized to 1024x1024
+  # 200x200 scaled down so longest side == 100 → 100x100
   with Image.open(output_path) as img:
-    assert img.size == (1024, 1024)  # Always resized to 1024x1024
+    assert img.size == (100, 100)
 
 
 async def test_optimize_image_overwrite(ctx, tmp_dir):
@@ -104,13 +106,12 @@ async def test_optimize_image_jpg(ctx, tmp_dir):
   output_path = tmp_dir / "optimized.jpg"
   create_test_jpg(input_path, size=(200, 200))
 
-  result = await optimize_image(ctx, str(input_path), str(output_path))
+  result = await optimize_image(ctx, str(input_path), str(output_path), max_size=100)
   assert "Successfully optimized" in result
   assert output_path.exists()
 
-  # Check it's resized to 1024x1024
   with Image.open(output_path) as img:
-    assert img.size == (1024, 1024)
+    assert img.size == (100, 100)
 
 
 async def test_optimize_image_bmp(ctx, tmp_dir):
@@ -118,13 +119,12 @@ async def test_optimize_image_bmp(ctx, tmp_dir):
   output_path = tmp_dir / "optimized.bmp"
   create_test_bmp(input_path, size=(200, 200))
 
-  result = await optimize_image(ctx, str(input_path), str(output_path))
+  result = await optimize_image(ctx, str(input_path), str(output_path), max_size=100)
   assert "Successfully optimized" in result
   assert output_path.exists()
 
-  # Check it's resized to 1024x1024
   with Image.open(output_path) as img:
-    assert img.size == (1024, 1024)
+    assert img.size == (100, 100)
 
 
 async def test_optimize_image_tiff(ctx, tmp_dir):
@@ -132,13 +132,12 @@ async def test_optimize_image_tiff(ctx, tmp_dir):
   output_path = tmp_dir / "optimized.tiff"
   create_test_tiff(input_path, size=(200, 200))
 
-  result = await optimize_image(ctx, str(input_path), str(output_path))
+  result = await optimize_image(ctx, str(input_path), str(output_path), max_size=100)
   assert "Successfully optimized" in result
   assert output_path.exists()
 
-  # Check it's resized to 1024x1024
   with Image.open(output_path) as img:
-    assert img.size == (1024, 1024)
+    assert img.size == (100, 100)
 
 
 async def test_optimize_image_gif(ctx, tmp_dir):
@@ -146,13 +145,12 @@ async def test_optimize_image_gif(ctx, tmp_dir):
   output_path = tmp_dir / "optimized.gif"
   create_test_gif(input_path, size=(200, 200))
 
-  result = await optimize_image(ctx, str(input_path), str(output_path))
+  result = await optimize_image(ctx, str(input_path), str(output_path), max_size=100)
   assert "Successfully optimized" in result
   assert output_path.exists()
 
-  # Check it's resized to 1024x1024
   with Image.open(output_path) as img:
-    assert img.size == (1024, 1024)
+    assert img.size == (100, 100)
 
 
 async def test_optimize_image_webp(ctx, tmp_dir):
@@ -160,13 +158,12 @@ async def test_optimize_image_webp(ctx, tmp_dir):
   output_path = tmp_dir / "optimized.webp"
   create_test_webp(input_path, size=(200, 200))
 
-  result = await optimize_image(ctx, str(input_path), str(output_path))
+  result = await optimize_image(ctx, str(input_path), str(output_path), max_size=100)
   assert "Successfully optimized" in result
   assert output_path.exists()
 
-  # Check it's resized to 1024x1024
   with Image.open(output_path) as img:
-    assert img.size == (1024, 1024)
+    assert img.size == (100, 100)
 
 
 async def test_optimize_image_ico(ctx, tmp_dir):
@@ -174,13 +171,13 @@ async def test_optimize_image_ico(ctx, tmp_dir):
   output_path = tmp_dir / "optimized.ico"
   create_test_ico(input_path, size=(64, 64))
 
-  result = await optimize_image(ctx, str(input_path), str(output_path))
+  result = await optimize_image(ctx, str(input_path), str(output_path), max_size=32)
   assert "Successfully optimized" in result
   assert output_path.exists()
 
-  # Check it's resized to 256x256 (ICO size limit)
+  # ICO is capped at min(new_size, 256)
   with Image.open(output_path) as img:
-    assert img.size == (256, 256)
+    assert img.size == (32, 32)
 
 
 # ---------------------------------------------------------------------------
@@ -395,3 +392,190 @@ async def test_batch_convert_image_empty_directory(ctx, tmp_dir):
 
   result = await batch_convert_image(ctx, str(src_dir), str(dest_dir), 'JPG')
   assert "Converted 0 images to JPG" in result
+
+
+# ---------------------------------------------------------------------------
+# optimize_image — additional behaviour tests
+# ---------------------------------------------------------------------------
+
+async def test_optimize_image_no_upscale(ctx, tmp_dir):
+  """Images smaller than max_size must not be upscaled."""
+  input_path = tmp_dir / "small.png"
+  output_path = tmp_dir / "out.png"
+  create_test_png(input_path, size=(50, 50))
+
+  await optimize_image(ctx, str(input_path), str(output_path), max_size=200)
+
+  with Image.open(output_path) as img:
+    assert img.size == (50, 50)  # unchanged
+
+
+async def test_optimize_image_aspect_ratio_preserved(ctx, tmp_dir):
+  """Non-square images must keep their aspect ratio after optimization."""
+  input_path = tmp_dir / "wide.png"
+  output_path = tmp_dir / "out.png"
+  # 400×200 with max_size=200 → longest side (400) → 200×100
+  img = Image.new('RGB', (400, 200), (0, 128, 255))
+  img.save(input_path, 'PNG')
+
+  await optimize_image(ctx, str(input_path), str(output_path), max_size=200)
+
+  with Image.open(output_path) as img_out:
+    assert img_out.size == (200, 100)
+
+
+# ---------------------------------------------------------------------------
+# resize_image
+# ---------------------------------------------------------------------------
+
+async def test_resize_image_explicit_dimensions(ctx, tmp_dir):
+  input_path = tmp_dir / "test.png"
+  output_path = tmp_dir / "resized.png"
+  create_test_png(input_path, size=(400, 400))
+
+  result = await resize_image(ctx, str(input_path), 200, 200, str(output_path))
+  assert "Successfully resized" in result
+  assert "200×200" in result
+  with Image.open(output_path) as img:
+    assert img.size == (200, 200)
+
+
+async def test_resize_image_maintain_aspect_ratio(ctx, tmp_dir):
+  """400×200 image resized into a 200×200 box with AR → 200×100."""
+  input_path = tmp_dir / "wide.png"
+  output_path = tmp_dir / "resized.png"
+  img = Image.new('RGB', (400, 200), (0, 0, 0))
+  img.save(input_path, 'PNG')
+
+  result = await resize_image(ctx, str(input_path), 200, 200, str(output_path),
+                              maintain_aspect_ratio=True)
+  assert "Successfully resized" in result
+  with Image.open(output_path) as img_out:
+    assert img_out.size == (200, 100)
+
+
+async def test_resize_image_no_aspect_ratio(ctx, tmp_dir):
+  """Without AR preservation the image is stretched to exact dimensions."""
+  input_path = tmp_dir / "wide.png"
+  output_path = tmp_dir / "resized.png"
+  img = Image.new('RGB', (400, 200), (0, 0, 0))
+  img.save(input_path, 'PNG')
+
+  result = await resize_image(ctx, str(input_path), 150, 100, str(output_path),
+                              maintain_aspect_ratio=False)
+  assert "Successfully resized" in result
+  with Image.open(output_path) as img_out:
+    assert img_out.size == (150, 100)
+
+
+async def test_resize_image_derive_width_from_height(ctx, tmp_dir):
+  """width=0 → derived from height to preserve aspect ratio."""
+  input_path = tmp_dir / "test.png"
+  output_path = tmp_dir / "resized.png"
+  create_test_png(input_path, size=(400, 200))
+
+  result = await resize_image(ctx, str(input_path), 0, 100, str(output_path))
+  assert "Successfully resized" in result
+  with Image.open(output_path) as img:
+    assert img.size == (200, 100)  # width proportionally halved
+
+
+async def test_resize_image_derive_height_from_width(ctx, tmp_dir):
+  """height=0 → derived from width."""
+  input_path = tmp_dir / "test.png"
+  output_path = tmp_dir / "resized.png"
+  create_test_png(input_path, size=(400, 200))
+
+  result = await resize_image(ctx, str(input_path), 200, 0, str(output_path))
+  assert "Successfully resized" in result
+  with Image.open(output_path) as img:
+    assert img.size == (200, 100)
+
+
+async def test_resize_image_rejects_upscale(ctx, tmp_dir):
+  """Requesting dimensions larger than the original must be rejected."""
+  input_path = tmp_dir / "small.png"
+  create_test_png(input_path, size=(100, 100))
+
+  result = await resize_image(ctx, str(input_path), 500, 500)
+  assert "Upscaling is not supported" in result
+
+
+async def test_resize_image_overwrites_input(ctx, tmp_dir):
+  """output_path=None should overwrite the original file."""
+  input_path = tmp_dir / "test.png"
+  create_test_png(input_path, size=(200, 200))
+
+  result = await resize_image(ctx, str(input_path), 100, 100)
+  assert "Successfully resized" in result
+  with Image.open(input_path) as img:
+    assert img.size == (100, 100)
+
+
+async def test_resize_image_invalid_path(ctx, tmp_dir):
+  result = await resize_image(ctx, str(tmp_dir / "missing.png"), 100, 100)
+  assert "not exist" in result.lower()
+
+
+async def test_resize_image_both_zero(ctx, tmp_dir):
+  input_path = tmp_dir / "test.png"
+  create_test_png(input_path, size=(200, 200))
+  result = await resize_image(ctx, str(input_path), 0, 0)
+  assert "at least one" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# batch_resize_images
+# ---------------------------------------------------------------------------
+
+async def test_batch_resize_images(ctx, tmp_dir):
+  src_dir = tmp_dir / "src"
+  dest_dir = tmp_dir / "dest"
+  src_dir.mkdir()
+  create_test_png(src_dir / "a.png", size=(300, 300))
+  create_test_jpg(src_dir / "b.jpg", size=(300, 300))
+
+  result = await batch_resize_images(ctx, str(src_dir), str(dest_dir),
+                                     width=150, height=150)
+  assert "Resized 2 images" in result
+  for name in ("a.png", "b.jpg"):
+    with Image.open(dest_dir / name) as img:
+      assert img.size == (150, 150)
+
+
+async def test_batch_resize_images_aspect_ratio(ctx, tmp_dir):
+  src_dir = tmp_dir / "src"
+  dest_dir = tmp_dir / "dest"
+  src_dir.mkdir()
+  # 400×200 → fit into 200×200 box with AR → 200×100
+  img = Image.new('RGB', (400, 200), (0, 0, 0))
+  img.save(src_dir / "wide.png", 'PNG')
+
+  result = await batch_resize_images(ctx, str(src_dir), str(dest_dir),
+                                     width=200, height=200,
+                                     maintain_aspect_ratio=True)
+  assert "Resized 1 images" in result
+  with Image.open(dest_dir / "wide.png") as img_out:
+    assert img_out.size == (200, 100)
+
+
+async def test_batch_resize_images_skips_upscale(ctx, tmp_dir):
+  """Files that would require upscaling should appear in the errors list."""
+  src_dir = tmp_dir / "src"
+  dest_dir = tmp_dir / "dest"
+  src_dir.mkdir()
+  create_test_png(src_dir / "tiny.png", size=(50, 50))
+
+  result = await batch_resize_images(ctx, str(src_dir), str(dest_dir),
+                                     width=200, height=200)
+  assert "Resized 0 images" in result
+  assert "Errors" in result
+
+
+async def test_batch_resize_images_empty_directory(ctx, tmp_dir):
+  src_dir = tmp_dir / "src"
+  dest_dir = tmp_dir / "dest"
+  src_dir.mkdir()
+
+  result = await batch_resize_images(ctx, str(src_dir), str(dest_dir), width=100, height=100)
+  assert "Resized 0 images" in result
