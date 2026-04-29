@@ -590,7 +590,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_context_visible(False)
 
   return [
-    TitleBar(),
+    TitleBar(dev=engine.config.dev),
     Frame(
       sidebar=Sidebar(
         on_workspace_click=switch_to_workspace,
