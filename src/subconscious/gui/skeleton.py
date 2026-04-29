@@ -85,26 +85,46 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   tool_configs, set_tool_configs = ft.use_state([])
   tool_expanded_indices, set_tool_expanded_indices = ft.use_state(set())
 
+  _MODE_MAP = {
+    "light": ft.ThemeMode.LIGHT,
+    "dark": ft.ThemeMode.DARK,
+    "auto": ft.ThemeMode.SYSTEM,
+  }
+
+  async def apply_setting_to_ui(key: str, value: str, _tag: str = "system"):
+    """
+    UI-only: apply an already-persisted setting to the live Flet page and
+    local state.  Called by the engine callback registry when a tool (or any
+    other non-UI code) changes a setting so the change is visible immediately
+    without a restart.
+    """
+    if key == "mode":
+      page.theme_mode = _MODE_MAP.get(value, ft.ThemeMode.SYSTEM)
+      page.update()
+    new_settings = {**settings, key: str(value)}
+    set_settings(new_settings)
+
   async def load_settings():
+    # Register the UI-only callback so tool-driven setting changes are
+    # reflected in real-time.  We do NOT register handle_setting_change here
+    # because that function also calls engine.update_setting, which would
+    # trigger the callback again and cause infinite recursion.
+    engine.register_setting_callback("mode", apply_setting_to_ui)
+
     async with engine.db.get_session() as session:
       stmt = select(AppState).where(AppState.tag.in_(["system", "general"]))
       result = await session.scalars(stmt)
       db_settings = {s.key: s.value for s in result.all()}
       set_settings(db_settings)
-      
+
       # Apply some settings immediately if needed
-      mode_mapping = {
-        "light": ft.ThemeMode.LIGHT,
-        "dark": ft.ThemeMode.DARK,
-        "auto": ft.ThemeMode.SYSTEM
-      }
       if "mode" in db_settings:
-        page.theme_mode = mode_mapping.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
+        page.theme_mode = _MODE_MAP.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
 
     # Load model configs from encrypted storage
     engine.config.read_keyring()
     raw_models = engine.config.secrets.get("models", {})
-    
+
     # secrets["models"] is stored as {uuid: {...fields}} – convert to list
     loaded = [{"id": k, **v} for k, v in raw_models.items()]
     set_model_configs(loaded)
@@ -120,21 +140,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_tool_configs(loaded_tools)
 
   async def handle_setting_change(key, value, tag):
-    """Save a setting to the database and update local state."""
+    """UI-driven: persist a setting to the database then apply it to the UI."""
     await engine.update_setting(key, str(value), tag)
-    
-    # Update current page settings if relevant
-    if key == "mode":
-      mode_mapping = {
-        "light": ft.ThemeMode.LIGHT,
-        "dark": ft.ThemeMode.DARK,
-        "auto": ft.ThemeMode.SYSTEM
-      }
-      page.theme_mode = mode_mapping.get(value, ft.ThemeMode.SYSTEM)
-    
-    # Refresh local settings dict
-    new_settings = {**settings, key: str(value)}
-    set_settings(new_settings)
+    # engine.update_setting fires apply_setting_to_ui via the callback registry,
+    # so we do NOT call apply_setting_to_ui manually here to avoid double-updates.
 
   async def handle_save_model(model_dict: dict):
     """Persist a model config (add or update) to the encrypted secrets file."""

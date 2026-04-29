@@ -17,6 +17,7 @@ class EngineContext:
   db: Any                  # Database instance (db.session.Database)
   workspace_id: int
   thread_id: int
+  engine: Any = None       # Subconscious Engine instance
   data_dir: str = ""
 
 
@@ -42,7 +43,7 @@ class ToolRegistry:
   def _load_defaults(self):
     """Import every default tool module and register its TOOLS list."""
     from . import time_tools, calculator, web_tools, filesystem, terminal
-    from . import todo, memory, clipboard, weather, notes, contacts, images
+    from . import todo, memory, clipboard, weather, notes, contacts, images, settings
 
     modules = {
       "time":       time_tools,
@@ -57,6 +58,7 @@ class ToolRegistry:
       "notes":      notes,
       "contacts":   contacts,
       "images":     images,
+      "settings":   settings,
     }
 
     for slug, module in modules.items():

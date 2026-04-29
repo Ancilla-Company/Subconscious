@@ -49,6 +49,23 @@ class Engine:
   update_available = None
   latest_version: Optional[str] = None
 
+  def __init__(self):
+    # Callbacks registered by the UI layer to react to setting changes in real-time.
+    # key → list of async callables(key, value, tag)
+    self._setting_callbacks: dict[str, list] = {}
+
+  def register_setting_callback(self, key: str, callback) -> None:
+    """Register an async callback to be invoked when *key* is updated via update_setting."""
+    self._setting_callbacks.setdefault(key, []).append(callback)
+
+  def unregister_setting_callback(self, key: str, callback) -> None:
+    """Remove a previously registered callback."""
+    if key in self._setting_callbacks:
+      try:
+        self._setting_callbacks[key].remove(callback)
+      except ValueError:
+        pass
+
   async def init_settings(self):
     """ Initialize settings from settings.json to AppState if not present """
     try:
@@ -295,6 +312,7 @@ class Engine:
       db=self.db,
       workspace_id=workspace_id or 0,
       thread_id=thread_id,
+      engine=self,
       data_dir=str(self.config.data_dir),
     )
 
@@ -378,11 +396,11 @@ class Engine:
             lines = text.splitlines()
             total = len(lines)
             if ext == ".py":
-              pat = _re.compile(r"^\s*(class |def |async def |@|\bimport |\bfrom )")
+              pat = re.compile(r"^\s*(class |def |async def |@|\bimport |\bfrom )")
             elif ext in (".md", ".markdown", ".rst"):
-              pat = _re.compile(r"^(#{1,6} |={3,}|-{3,})")
+              pat = re.compile(r"^(#{1,6} |={3,}|-{3,})")
             else:
-              pat = _re.compile(r"^\s*(class |def |function |public |private |export |import |from )")
+              pat = re.compile(r"^\s*(class |def |function |public |private |export |import |from )")
 
             skeleton = [f"{i+1:>6}: {l}" for i, l in enumerate(lines) if pat.match(l)]
             head = [f"{i+1:>6}: {lines[i]}" for i in range(min(20, total))]
@@ -510,7 +528,7 @@ class Engine:
       print(f"Notification error: {e}")
 
   async def update_setting(self, key: str, value: str, tag: str = "system"):
-    """Update a setting in the database."""
+    """Update a setting in the database and notify any registered UI callbacks."""
     async with self.db.get_session() as session:
       stmt = sql_update(AppState).where(
         AppState.key == key,
@@ -519,6 +537,13 @@ class Engine:
       await session.execute(stmt)
       await session.commit()
       logger.debug(f"Updated setting: {key}={value} (tag={tag})")
+
+    # Notify registered UI callbacks so changes are reflected in real-time
+    for cb in self._setting_callbacks.get(key, []):
+      try:
+        await cb(key, value, tag)
+      except Exception as exc:
+        logger.warning(f"Setting callback error for key '{key}': {exc}")
 
   async def get_setting(self, key: str, tag: str = "system") -> Optional[str]:
     """Get a setting from the database."""
