@@ -17,7 +17,6 @@ from sqlalchemy import select
 from packaging.version import Version
 from typing import AsyncIterator, Optional
 from sqlalchemy import update as sql_update
-from desktop_notifier import DesktopNotifier, Icon
 from pydantic_ai.messages import (
   ModelMessage, ModelRequest, ModelResponse,
   UserPromptPart, TextPart,
@@ -27,18 +26,12 @@ from .config import Config
 from .constants import VERSION
 from .agent import AgentManager
 from .db.session import Database
-from .tools import ToolRegistry, EngineContext
+from .desktop_tools import ToolRegistry, EngineContext
 from .db.models import (
   Workspace, Thread, Message, AppState, Networks,
   SkillRegistry, ToolRegistry as ToolRegistryModel,
 )
 
-
-_icon_path = pathlib.Path(__file__).parent / "assets" / "icon_sm.png"
-notifier = DesktopNotifier(
-  app_name="Subconscious",
-  app_icon=Icon(path=_icon_path),
-)
 
 # Logging setup
 logger = logging.getLogger("subconscious")
@@ -518,14 +511,12 @@ class Engine:
     except asyncio.CancelledError:
       pass
   
-  async def show_notification(self, title, message):
-    try:
-      await notifier.send(
-        title=title,
-        message=message
-      )
-    except Exception as e:
-      print(f"Notification error: {e}")
+  async def show_notification(self, title: str, message: str) -> None:
+    """ Display a notification to the user.
+        Base implementation logs only — platform-specific engines (DesktopEngine,
+        etc.) override this to send OS/push notifications.
+    """
+    logger.info(f"[notification] {title}: {message}")
 
   async def update_setting(self, key: str, value: str, tag: str = "system"):
     """Update a setting in the database and notify any registered UI callbacks."""

@@ -1,4 +1,13 @@
-""" Desktop version of Subconscious skeleton - desktop layout with titlebar & contextlist """
+""" Web version of Subconscious skeleton - desktop layout with web-optimised titlebar & contextlist.
+
+Differences from the desktop skeleton:
+  - No TitleBar (browser provides its own chrome)
+  - No system tray / close-event handling
+  - No file-attachment picker (browser file API via Flet FilePicker where available)
+  - Uses the base Engine (not DesktopEngine) to avoid desktop_notifier dependency
+  - No subprocess-based auto-update (update badge still shown, but action is a page reload hint)
+  - model_cfg selection and skill/tool management are fully supported
+"""
 import uuid
 import asyncio
 import pathlib
@@ -8,53 +17,38 @@ import flet as ft
 from sqlalchemy import select
 from datetime import datetime, timezone
 
-from ..gui.tray import *
 from ..engine import Engine
-from ..gui.frame import Frame
-from ..gui.sidebar import Sidebar
-from ..gui.titlebar import TitleBar
-from ..gui.mainwindow import MainWindow
-from ..gui.contextlist import ContextList
+from ..shared.forms import *
+from ..shared.layout import *
+from ..shared.buttons import *
+from ..shared.messages import *
+from ..desktop.frame import Frame
+from ..config import Config, LOGO
+from ..desktop.sidebar import Sidebar
+from ..desktop.mainwindow import MainWindow
+from ..desktop.contextlist import ContextList
 from ..db.models import Workspace, Thread, AppState
-from ..shared.messages import HumanMessage, AIMessage
 
 
-# Logging config
 logger = logging.getLogger("subconscious")
 
 
 @ft.component
-def splash_screen(self):
-  """ Show the splash screen """
-  return ft.Container(
-    content=ft.Row([
-      ft.Column([
-        ft.Image(src="/logo.png", width=100, height=100, color=ft.Colors.PRIMARY),
-        ft.Text("Subconscious", size=25, color=ft.Colors.PRIMARY),
-      ], alignment="center", horizontal_alignment="center", spacing=0, expand=True),
-    ], alignment="center", vertical_alignment="center", spacing=0, expand=True),
-    bgcolor=ft.Colors.SURFACE
-  )
-
-
-@ft.component
 def AppView(page: ft.Page, engine) -> list[ft.Control]:
-  """ Main application view - manages layout and global state """
-  # TODO: Maybe splash screen can go here while engine is loading, then switch to main view once ready
-  # Perhaps log the config to the splash screen
+  """ Main application view for web - same as desktop but without TitleBar / tray """
 
   # Layout state
   context_width, set_context_width = ft.use_state(380)
   current_view, set_current_view = ft.use_state("none")
   context_visible, set_context_visible = ft.use_state(False)
   current_context, set_current_context = ft.use_state("none")
-  
+
   # Workspace Management State
   workspaces, set_workspaces = ft.use_state(list())
-  editing_workspace, set_editing_workspace = ft.use_state(None) # For the "Workspaces" view
-  active_chat_workspace, set_active_chat_workspace = ft.use_state(None) # For the "Threads" view
-  workspace_mode, set_workspace_mode = ft.use_state("view") # view, create, edit
-  
+  editing_workspace, set_editing_workspace = ft.use_state(None)
+  active_chat_workspace, set_active_chat_workspace = ft.use_state(None)
+  workspace_mode, set_workspace_mode = ft.use_state("view")  # view, create, edit
+
   # Thread Management State
   threads, set_threads = ft.use_state(list())
   selected_thread, set_selected_thread = ft.use_state(None)
@@ -106,9 +100,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   async def load_settings():
     # Register the UI-only callback so tool-driven setting changes are
-    # reflected in real-time.  We do NOT register handle_setting_change here
-    # because that function also calls engine.update_setting, which would
-    # trigger the callback again and cause infinite recursion.
+    # reflected in real-time.
     engine.register_setting_callback("mode", apply_setting_to_ui)
 
     async with engine.db.get_session() as session:
@@ -117,7 +109,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       db_settings = {s.key: s.value for s in result.all()}
       set_settings(db_settings)
 
-      # Apply some settings immediately if needed
       if "mode" in db_settings:
         page.theme_mode = _MODE_MAP.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
 
@@ -142,20 +133,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   async def handle_setting_change(key, value, tag):
     """UI-driven: persist a setting to the database then apply it to the UI."""
     await engine.update_setting(key, str(value), tag)
-    # engine.update_setting fires apply_setting_to_ui via the callback registry,
-    # so we do NOT call apply_setting_to_ui manually here to avoid double-updates.
+    # engine.update_setting fires apply_setting_to_ui via the callback registry
 
   async def handle_save_model(model_dict: dict):
     """Persist a model config (add or update) to the encrypted secrets file."""
     engine.config.read_keyring()
     models_store = engine.config.secrets.get("models", {})
     model_id = model_dict["id"]
-    # Store only the real fields (strip the internal id key)
     _ui_keys = {"id"}
     models_store[model_id] = {k: v for k, v in model_dict.items() if k not in _ui_keys}
     engine.config.secrets["models"] = models_store
     await engine.config.write_keyring()
-    # Refresh local state
     loaded = [{"id": k, **v} for k, v in models_store.items()]
     set_model_configs(loaded)
 
@@ -286,20 +274,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_workspaces(result.all())
 
   async def load_threads(workspace_id=None):
-    from sqlalchemy import func, case
+    from sqlalchemy import func
     async with engine.db.get_session() as session:
-      # Sort by updated_at when available, fall back to created_at for older rows
       recency = func.coalesce(Thread.updated_at, Thread.created_at).desc()
       if workspace_id:
         stmt = select(Thread).where(Thread.workspace_id == workspace_id).order_by(recency)
       else:
         stmt = select(Thread).order_by(recency)
-      
       result = await session.scalars(stmt)
       set_threads(result.all())
 
   def on_workspace_change():
-    # Restore the previously selected thread for this workspace (if any)
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     restored = thread_by_workspace.get(ws_key)
     if restored:
@@ -314,7 +299,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       asyncio.create_task(load_threads(active_chat_workspace.id))
     else:
       asyncio.create_task(load_threads())
-  
+
   ft.use_effect(on_workspace_change, [active_chat_workspace])
 
   def on_show_all_threads_change():
@@ -343,7 +328,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     asyncio.create_task(load_workspaces())
     asyncio.create_task(load_threads())
     asyncio.create_task(load_settings())
-  
+
   ft.use_effect(on_mount, [])
 
   async def handle_new_workspace(e):
@@ -357,7 +342,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_workspace_mode("edit")
     set_current_view("workspaces")
     set_current_context("workspaces")
-  
+
   async def handle_settings_click(setting):
     if setting == "about":
       set_about_badge_dismissed(True)
@@ -368,16 +353,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_messages([])
     set_current_view("threads")
     set_current_context("threads")
-  
+
   async def handle_thread_click(thread):
     set_selected_thread(thread)
     set_current_view("threads")
-    # Remember which thread was selected for this workspace so we can restore it later
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
 
-    # Restore the persisted model config for this thread:
-    # Look up the DB-stored model_id; 'default'/NULL both resolve to the first config.
+    # Restore the persisted model config for this thread
     db_model_id = await engine.get_thread_model_id(thread.id)
     if db_model_id and db_model_id != "default" and model_configs:
       persisted = next((c for c in model_configs if c.get("id") == db_model_id), None)
@@ -387,7 +370,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       persisted = None
     set_selected_model_config(persisted)
 
-    # Load messages from DB and convert to UI message objects
     db_msgs = await engine.load_thread_messages(thread.id)
     ui_msgs = []
     for m in db_msgs:
@@ -402,8 +384,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     """Persist the selected model config for the current thread and update state."""
     set_selected_model_config(model_cfg)
     if selected_thread:
-      # Store 'default' when the first config is chosen so the thread isn't
-      # locked to a specific UUID if the model list changes later.
       is_default = model_configs and model_cfg.get("id") == model_configs[0].get("id")
       model_id_to_store = "default" if is_default else model_cfg.get("id", "default")
       asyncio.create_task(engine.set_thread_model_id(selected_thread.id, model_id_to_store))
@@ -417,6 +397,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     4. Create an empty AI bubble and stream tokens into it live.
     5. Persist the completed AI message to the DB.
     6. Refresh the threads list (title may have been updated).
+
+    Note: attachments on web use Flet's FilePicker API.
+    The attachment dicts follow the same {path, type, name} format as desktop
+    but the path refers to a server-side temp file written by Flet.
     """
     if not content.strip():
       return
@@ -452,12 +436,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       timestamp=user_db_msg.created_at.replace(tzinfo=timezone.utc)
         if user_db_msg.created_at else datetime.now(timezone.utc),
     )
-    # If we just created a new thread, set it as selected so the UI shows the header
     if is_new_thread:
       set_selected_thread(thread)
       set_current_view("threads")
-      # Seed the model for the new thread: always 'default' so it tracks the
-      # first model config rather than being pinned to a specific UUID.
       asyncio.create_task(engine.set_thread_model_id(thread.id, "default"))
 
     new_messages = list(messages) + [user_ui_msg]
@@ -468,7 +449,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     streaming_messages = new_messages + [ai_ui_msg]
     set_messages(streaming_messages)
 
-    # --- 6. Stream from the LLM, accumulate, update bubble in-place ---
+    # --- 6. Stream from the LLM ---
     full_response = ""
     try:
       async for chunk in engine.stream_chat(
@@ -480,7 +461,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       ):
         full_response += chunk
         ai_ui_msg.content = full_response
-        # Reassign list so Flet detects state change and re-renders the bubble
         set_messages(list(streaming_messages))
     except Exception as exc:
       logger.error(f"LLM stream error: {exc}")
@@ -493,9 +473,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
     # --- 8. Refresh thread list so new/renamed threads appear ---
     await load_threads(workspace_id)
-    # Re-select the thread so the context list highlights it correctly
     set_selected_thread(thread)
-    # Keep workspace→thread map up-to-date
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
     set_is_streaming(False)
@@ -508,7 +486,12 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           ws.name = name
           ws.description = description
       else:
-        ws = Workspace(name=name, description=description, network_id=engine.current_network.value, uuid=str(uuid.uuid4()))
+        ws = Workspace(
+          name=name,
+          description=description,
+          network_id=engine.current_network.value,
+          uuid=str(uuid.uuid4()),
+        )
         session.add(ws)
       await session.commit()
       await session.refresh(ws)
@@ -557,7 +540,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   def toggle_context(e=None):
     set_context_visible(not context_visible)
-    
+
   def handle_context_width_change(delta_x):
     new_width = context_width + delta_x
     if 200 <= new_width <= 700:
@@ -574,7 +557,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_context_visible(True)
 
   def handle_chat_workspace_change(workspace):
-    """Switch the active chat workspace and reset the all-threads view."""
     set_show_all_threads(False)
     set_active_chat_workspace(workspace)
 
@@ -584,21 +566,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("settings")
     set_context_visible(True)
 
-  async def switch_to_account(e=None):
-    set_current_view("account")
-    set_current_context("account")
-    set_context_visible(False)
-
   return [
-    TitleBar(dev=engine.config.dev),
     Frame(
       sidebar=Sidebar(
         on_workspace_click=switch_to_workspace,
         on_threads_click=switch_to_threads,
         on_settings_click=switch_to_settings,
-        on_account_click=switch_to_account,
         on_context_toggle=toggle_context,
-        selected_view=current_context, # Use context to light up the sidebar icon correctly
+        selected_view=current_context,
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
       ),
       contextlist=ContextList(
@@ -662,19 +637,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     )
   ]
 
+
 async def main(page: ft.Page, engine):
-  """ Application window config """
+  """ Application window config for web """
   page.padding = 0
   page.spacing = 0
-  page.window.width = 800
-  page.window.height = 800
   page.title = "Subconscious"
-  page.window.min_width = 506
-  page.window.min_height = 300
-  page.window.frameless = False
-  page.window.icon = "favicon.ico" # Windows only
   page.bgcolor = ft.Colors.SURFACE
-  page.window.title_bar_hidden = True
+  page.window.icon = "favicon.ico"
   page.theme_mode = ft.ThemeMode.LIGHT
   page.theme = ft.Theme(
     color_scheme=ft.ColorScheme(
@@ -695,43 +665,35 @@ async def main(page: ft.Page, engine):
     )
   )
 
-  # Could put load settings here
-
-  # Start rendering Subconscious
   return page.render(lambda: AppView(page, engine))
 
-async def start_gui(config):
-  """ Starts the GUI, engine & tray """
+
+async def start_web(config):
+  """ Starts the web GUI with engine """
   assets_path = str(pathlib.Path(__file__).parent.parent / "assets")
-  logger.debug(f"assets_path resolved to: {assets_path}")
-  
-  logger.info("Starting engine...")
+  logger.info(f"assets_path resolved to: {assets_path}")
+
   engine = Engine()
+  logger.info("Engine created. Starting engine...")
   await engine.start_engine(config)
+  logger.info("Engine started. Starting web GUI...")
 
-  # Create tray and close event to stop the engine
-  logger.info("Creating background service...")
-  close = asyncio.Event()
   try:
-    tray = Tray(engine, close)
-  except Exception:
-    logger.error("Failed to create background service:\n" + traceback.format_exc())
-    raise
+    async def main_wrapper(page: ft.Page):
+      await main(page, engine)
 
-  async def handle_close():
-    await close.wait()
+    logger.info("Running web app...")
+    await ft.run_async(
+      main_wrapper,
+      name="Subconscious",
+      port=60000,
+      assets_dir=assets_path,
+      view=ft.AppView.WEB_BROWSER
+    )
+  except Exception:
+    logger.error("Exception in web app:\n" + traceback.format_exc())
+    raise
+  finally:
     await engine.stop_engine()
+    logger.info("Web app closed.")
 
-  asyncio.create_task(handle_close())
-  
-  async def main_wrapper(page: ft.Page):
-    tray.set_gui(page)
-    await main(page, engine)
-  
-  logger.info("Starting GUI...")
-  try:
-    await tray.start_gui(main_wrapper, assets_path)
-  except Exception:
-    logger.error("Exception in tray.start_gui:\n" + traceback.format_exc())
-    raise
-  logger.info("Shutting down...")

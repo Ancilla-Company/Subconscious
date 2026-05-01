@@ -1,7 +1,7 @@
-# Default built-in tools for Subconscious.
-# Each module registers its callables via TOOLS = [...] at module level.
-# The ToolRegistry collects them by slug so the engine can attach the right
-# set to any Agent at runtime.
+# Base cross-platform tool registry for Subconscious.
+# Contains tools that work on all platforms (desktop, web, mobile, server).
+# Platform-specific registries (desktop_tools, mobile_tools, server_tools)
+# extend this by importing and adding their additional tools.
 
 from typing import Callable, Any
 from dataclasses import dataclass
@@ -22,43 +22,41 @@ class EngineContext:
 
 
 # ---------------------------------------------------------------------------
-# Registry
+# Base Registry
 # ---------------------------------------------------------------------------
 
-class ToolRegistry:
+class BaseToolRegistry:
   """
   Maps tool slugs to lists of pydantic-ai compatible tool callables.
+  Contains only cross-platform tools safe to use on all platforms.
+
+  Platform-specific registries subclass this and call super().__init__()
+  then add their own tools.
 
   Usage
   -----
-  registry = ToolRegistry()
-  tools = registry.get_tools(["time", "calculator", "web"])
+  registry = BaseToolRegistry()
+  tools = registry.get_tools(["time", "calculator"])
   agent = Agent(model=..., tools=tools, deps_type=EngineContext)
   """
 
   def __init__(self):
     self._registry: dict[str, list[Callable]] = {}
-    self._load_defaults()
+    self._load_base_tools()
 
-  def _load_defaults(self):
-    """Import every default tool module and register its TOOLS list."""
-    from . import time_tools, calculator, web_tools, filesystem, terminal
-    from . import todo, memory, clipboard, weather, notes, contacts, images, settings
+  def _load_base_tools(self):
+    """Load tools that are safe on every platform (no OS/desktop APIs)."""
+    from . import time_tools, calculator, weather
+    from . import todo, memory, notes, contacts
 
     modules = {
       "time":       time_tools,
       "calculator": calculator,
-      "web":        web_tools,
-      "filesystem": filesystem,
-      "terminal":   terminal,
+      "weather":    weather,
       "todo":       todo,
       "memory":     memory,
-      "clipboard":  clipboard,
-      "weather":    weather,
       "notes":      notes,
       "contacts":   contacts,
-      "images":     images,
-      "settings":   settings,
     }
 
     for slug, module in modules.items():
@@ -79,5 +77,8 @@ class ToolRegistry:
     return list(self._registry.keys())
 
 
-# Singleton used by the engine
-registry = ToolRegistry()
+# Convenience alias — the base registry is also usable as ToolRegistry
+ToolRegistry = BaseToolRegistry
+
+# Module-level singleton for convenience
+registry = BaseToolRegistry()

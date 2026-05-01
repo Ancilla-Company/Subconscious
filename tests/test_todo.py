@@ -3,7 +3,7 @@ Unit tests for subconscious.tools.todo
 """
 
 import pytest
-from subconscious.tools.todo import (
+from subconscious.desktop_tools.todo import (
   add_todo,
   list_todos,
   update_todo,

@@ -3,7 +3,7 @@ Unit tests for subconscious.tools.notes
 """
 
 import pytest
-from subconscious.tools.notes import save_note, list_notes, get_note, delete_note
+from subconscious.desktop_tools.notes import save_note, list_notes, get_note, delete_note
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import re
 import pytest
 from datetime import datetime
 
-from subconscious.tools.time_tools import (
+from subconscious.desktop_tools.time_tools import (
   get_current_time,
   get_current_date,
   convert_timezone,

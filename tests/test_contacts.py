@@ -3,7 +3,7 @@ Unit tests for subconscious.tools.contacts
 """
 
 import pytest
-from subconscious.tools.contacts import (
+from subconscious.desktop_tools.contacts import (
   add_contact,
   list_contacts,
   find_contact,
@@ -137,7 +137,7 @@ async def test_update_contact_partial_fields(ctx):
 
 async def test_delete_contact_removes_it(ctx, engine_ctx):
   from tests.conftest import FakeRunContext
-  from subconscious.tools import EngineContext
+  from subconscious.desktop_tools import EngineContext
 
   # Use an isolated workspace to avoid other tests' contacts appearing in list
   ctx_iso = FakeRunContext(deps=EngineContext(db=engine_ctx.db, workspace_id=300, thread_id=1))
@@ -162,7 +162,7 @@ async def test_delete_contact_not_found(ctx):
 
 async def test_contacts_workspace_isolated(ctx, engine_ctx):
   from tests.conftest import FakeRunContext
-  from subconscious.tools import EngineContext
+  from subconscious.desktop_tools import EngineContext
 
   ctx2 = FakeRunContext(deps=EngineContext(
     db=engine_ctx.db, workspace_id=200, thread_id=1

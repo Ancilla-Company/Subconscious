@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from subconscious.db.models import Base
-from subconscious.tools import EngineContext
+from subconscious.desktop_tools import EngineContext
 
 
 # ---------------------------------------------------------------------------

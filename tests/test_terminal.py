@@ -6,7 +6,7 @@ import os
 import sys
 import pytest
 
-from subconscious.tools.terminal import run_command, get_env_var, get_system_info
+from subconscious.desktop_tools.terminal import run_command, get_env_var, get_system_info
 
 
 # ---------------------------------------------------------------------------

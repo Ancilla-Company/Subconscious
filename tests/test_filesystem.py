@@ -9,7 +9,7 @@ import pathlib
 import pytest
 import pytest_asyncio
 
-from subconscious.tools.filesystem import (
+from subconscious.desktop_tools.filesystem import (
   read_file,
   list_directory,
   create_file,

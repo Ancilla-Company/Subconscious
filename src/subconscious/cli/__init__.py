@@ -5,8 +5,9 @@ import logging
 import argparse
 import traceback
 
-from ..gui import start_gui
+from ..web import start_web
 from ..engine import Engine
+from ..desktop import start_gui
 # from ..tui.tui import start_tui
 from ..config import Config, LOGO
 
@@ -32,10 +33,17 @@ def main():
   
   subparsers = parser.add_subparsers(dest="command")
   
-  # Subcommand: gui
+  # Subcommand: desktop
   gui_parser = subparsers.add_parser(
     "desktop",
     help="Starts the engine with the desktop interface (default)",
+    parents=[base_parser]
+  )
+
+  # Subcommand: web
+  web_parser = subparsers.add_parser(
+    "web",
+    help="Starts the engine with the web interface",
     parents=[base_parser]
   )
 
@@ -93,6 +101,10 @@ def main():
     elif args.command == "desktop" or args.command is None:
       loop.run_until_complete(start_gui(
         Config(dev=args.dev, gui=True, tui=False)
+      ))
+    elif args.command == "web":
+      loop.run_until_complete(start_web(
+        Config(dev=args.dev, gui=False, tui=False)
       ))
     elif args.command == "code":
       # Dynamic import until feature is completed

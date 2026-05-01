@@ -9,7 +9,7 @@ import pytest
 import pytest_asyncio
 from PIL import Image
 
-from subconscious.tools.images import (
+from subconscious.desktop_tools.images import (
   convert_image,
   optimize_image,
   resize_image,

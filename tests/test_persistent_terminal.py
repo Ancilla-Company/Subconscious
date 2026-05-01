@@ -4,7 +4,7 @@ Unit tests for persistent terminal sessions in subconscious.tools.terminal
 
 import pytest
 import asyncio
-from subconscious.tools.terminal import open_terminal_session, run_in_session, close_terminal_session
+from subconscious.desktop_tools.terminal import open_terminal_session, run_in_session, close_terminal_session
 
 @pytest.mark.async_io
 async def test_terminal_session_lifecycle(ctx):

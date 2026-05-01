@@ -4,7 +4,7 @@ Unit tests for subconscious.tools.settings
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, call
-from subconscious.tools.settings import get_app_setting, update_app_setting, set_theme_mode
+from subconscious.desktop_tools.settings import get_app_setting, update_app_setting, set_theme_mode
 
 @pytest.fixture
 def mock_engine():

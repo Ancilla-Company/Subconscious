@@ -3,7 +3,7 @@ Unit tests for subconscious.tools.ToolRegistry
 """
 
 import pytest
-from subconscious.tools import ToolRegistry, EngineContext
+from subconscious.desktop_tools import ToolRegistry, EngineContext
 
 
 # ---------------------------------------------------------------------------
@@ -110,5 +110,5 @@ def test_engine_context_with_data_dir():
 # ---------------------------------------------------------------------------
 
 def test_singleton_registry_is_populated():
-  from subconscious.tools import registry
+  from subconscious.desktop_tools import registry
   assert len(registry.all_slugs()) >= 11

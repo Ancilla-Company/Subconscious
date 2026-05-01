@@ -3,7 +3,7 @@ Unit tests for subconscious.tools.memory
 """
 
 import pytest
-from subconscious.tools.memory import (
+from subconscious.desktop_tools.memory import (
   remember,
   recall,
   list_memories,
@@ -44,7 +44,7 @@ async def test_remember_overwrites_existing(ctx):
 async def test_workspace_isolation(ctx, engine_ctx):
   """Memories stored for workspace 1 must not appear for workspace 2."""
   from tests.conftest import FakeRunContext
-  from subconscious.tools import EngineContext
+  from subconscious.desktop_tools import EngineContext
 
   ctx2 = FakeRunContext(deps=EngineContext(
     db=engine_ctx.db, workspace_id=2, thread_id=1
@@ -68,7 +68,7 @@ async def test_list_memories_returns_list(ctx):
 
 async def test_list_memories_empty_workspace(ctx, engine_ctx):
   from tests.conftest import FakeRunContext
-  from subconscious.tools import EngineContext
+  from subconscious.desktop_tools import EngineContext
 
   ctx_empty = FakeRunContext(deps=EngineContext(
     db=engine_ctx.db, workspace_id=999, thread_id=1
@@ -103,7 +103,7 @@ async def test_forget_nonexistent_key(ctx):
 
 async def test_forget_all_clears_workspace(ctx, engine_ctx):
   from tests.conftest import FakeRunContext
-  from subconscious.tools import EngineContext
+  from subconscious.desktop_tools import EngineContext
 
   # Use workspace 50 to avoid polluting the shared workspace 1
   ctx_50 = FakeRunContext(deps=EngineContext(
