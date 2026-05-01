@@ -1145,6 +1145,7 @@ def About(update_available: bool = False, on_update=None) -> ft.Control:
                     color=ft.Colors.GREY,
                   )
                 ],
+                width=750,
                 margin=ft.margin.only(13, 0, 15, 40),
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER
               ),
