@@ -1061,101 +1061,106 @@ def About(update_available: bool = False, on_update=None) -> ft.Control:
           ),
         ),
         ft.Container(
-        ft.Column(
-          [
-            ft.Container(
-              ft.Row(
+          ft.Column(
+            [
+              ft.Container(
+                ft.Row(
+                  [
+                    ft.Column(
+                      [
+                        ft.Image(
+                          src="./logo.svg",
+                          width=100,
+                          height=100,
+                          color=ft.Colors.PRIMARY
+                        ),
+                        ft.Text(
+                          "Subconscious",
+                          size=20,
+                          weight=ft.FontWeight.BOLD
+                        )
+                      ],
+                      expand=True,
+                      horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                    )
+                  ],
+                  alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                margin=ft.margin.only(0, 40, 0, 40)
+              ),
+              ft.Column(
                 [
-                  ft.Column(
-                    [
-                      ft.Image(
-                        src="./logo.svg",
-                        width=100,
-                        height=100,
-                        color=ft.Colors.PRIMARY
-                      ),
-                      ft.Text(
-                        "Subconscious",
-                        size=20,
-                        weight=ft.FontWeight.BOLD
+                  ft.Text(
+                    "Subconscious is a distributed agentic AI app, that allows you to create AI agents that run everywhere on every device at the same time.",
+                    size=15,
+                    color=ft.Colors.GREY,
+                    text_align=ft.TextAlign.CENTER
+                  ),
+                  ft.Text(
+                    spans=[
+                      ft.TextSpan("Visit us at: "),
+                      ft.TextSpan(
+                        "Subconscious.chat",
+                        ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
+                        url="https://subconscious.chat/",
                       )
                     ],
-                    expand=True,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                    size=15
+                  ),
+                  ft.Text(
+                    spans=[
+                      ft.TextSpan(
+                        "View License",
+                        ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
+                        url="https://github.com/Ancilla-Company/Subconscious/blob/main/LICENSE",
+                      )
+                    ],
+                    size=15
+                  ),
+                  ft.Text(
+                    spans=[
+                      ft.TextSpan(
+                        "Report an Issue",
+                        ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
+                        url="https://github.com/Ancilla-Company/Subconscious/issues",
+                      )
+                    ],
+                    size=15
+                  ),
+                  ft.Text(
+                    f"Version: {VERSION}",
+                    size=15,
+                    color=ft.Colors.GREY
+                  ),
+                  TextButton(
+                    on_click=handle_update,
+                    text="Install Update",
+                    icon=ft.Icons.SYSTEM_UPDATE_ALT,
+                    visible=update_available,
+                    badge=Badge()
+                  ),
+                  ft.Text(
+                    "© 2026 Subconscious",
+                    size=15,
+                    color=ft.Colors.GREY,
                   )
                 ],
-                alignment=ft.MainAxisAlignment.CENTER,
+                margin=ft.margin.only(13, 0, 15, 40),
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER
               ),
-              margin=ft.margin.only(0, 0, 0, 60)
-            ),
-            ft.Text(
-              "Subconscious is a distributed agentic AI app, that allows you to create AI agents that run everywhere on every device at the same time.",
-              size=15,
-              color=ft.Colors.GREY,
-              text_align=ft.TextAlign.CENTER
-            ),
-            ft.Text(
-              spans=[
-                ft.TextSpan("Visit us at: "),
-                ft.TextSpan(
-                  "Subconscious.chat",
-                  ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
-                  url="https://subconscious.chat/",
-                )
-              ],
-              size=15
-            ),
-            ft.Text(
-              spans=[
-                ft.TextSpan(
-                  "View License",
-                  ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
-                  url="https://github.com/Ancilla-Company/Subconscious/blob/main/LICENSE",
-                )
-              ],
-              size=15
-            ),
-            ft.Text(
-              spans=[
-                ft.TextSpan(
-                  "Report an Issue",
-                  ft.TextStyle(decoration=ft.TextDecoration.UNDERLINE),
-                  url="https://github.com/Ancilla-Company/Subconscious/issues",
-                )
-              ],
-              size=15
-            ),
-            ft.Text(
-              f"Version: {VERSION}",
-              size=15,
-              color=ft.Colors.GREY
-            ),
-            TextButton(
-              on_click=handle_update,
-              text="Install Update",
-              icon=ft.Icons.SYSTEM_UPDATE_ALT,
-              visible=update_available,
-              badge=Badge()
-            ),
-            ft.Text(
-              "© 2026 Subconscious",
-              size=15,
-              color=ft.Colors.GREY,
-            )    
-          ],
-          spacing=10,
+            ],
+            spacing=10,
+            expand=True,
+            scroll=ft.ScrollMode.ADAPTIVE,
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+          ),
           expand=True,
-          scroll=ft.ScrollMode.ADAPTIVE,
-          alignment=ft.MainAxisAlignment.CENTER,
-          horizontal_alignment=ft.CrossAxisAlignment.CENTER
-        ),
-        expand=True,
-        alignment=ft.Alignment.CENTER
+          alignment=ft.Alignment.CENTER
         )
       ],
       spacing=4,
       expand=True
     ),
     expand=True,
-    padding=ft.padding.only(15, 4, 15, 4)
   )

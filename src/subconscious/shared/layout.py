@@ -15,7 +15,7 @@ def ResponsiveParent(items) -> ft.Control:
     alignment=ft.Alignment.TOP_CENTER
   )
 
-def ResponsiveItem(item, height=40, width=750) -> ft.Control:
+def ResponsiveItem(item, width=750) -> ft.Control:
   """ Facilitates the Responsive item """
   return ft.Row(
     [
@@ -28,8 +28,8 @@ def ResponsiveItem(item, height=40, width=750) -> ft.Control:
           )
         ],
         wrap=True,
-        width=750,
         spacing=0,
+        width=width,
         expand_loose=True
       )
     ],
