@@ -289,9 +289,17 @@ class MessageBubble(ft.Row):
       if drain:
         temp = self.buffer
       else:
-        temp, self.buffer = self.buffer[:self.buffer.rfind(' ')], self.buffer[self.buffer.rfind(' '):]
+        last_space = self.buffer.rfind(' ')
+        if last_space != -1:
+          temp, self.buffer = self.buffer[:last_space], self.buffer[last_space:]
+        else:
+          # If no space, just take the whole buffer and clear it
+          temp, self.buffer = self.buffer, ""
 
       while True:
+        if not temp:
+          break
+          
         if self.part == 'text':
           # In a text part, search for code block start
           if search := re.search(start_pattern, temp):

@@ -178,6 +178,8 @@ class ToolMenu(ft.Container):
 def ChatWindow(
   thread=None,
   messages=None,
+  streaming_text: str = "",
+  on_list_mounted=None,
   on_send_message=None,
   is_streaming=False,
   model_configs=None,
@@ -255,14 +257,30 @@ def ChatWindow(
     padding=ft.padding.only(10, 4, 4, 4)
   )
 
-  # Message display logic — rebuild the list whenever messages changes so streaming updates render
+  # Message display logic — ChatWindow is a @ft.component so this entire function
+  # re-runs whenever any prop changes, including streaming_text on every token.
+  # While streaming, override the last (empty) AI message with the live text.
+  display_messages = list(messages or [])
+  if is_streaming and streaming_text and display_messages and display_messages[-1].type == 'ai':
+    # Shallow-copy the last message with the current streamed content so the
+    # original message object in state is not mutated.
+    last = display_messages[-1]
+    live = AIMessage(content=streaming_text, timestamp=last.timestamp)
+    display_messages = display_messages[:-1] + [live]
+
+  _bubbles = [MessageBubble(m) for m in display_messages]
+
   message_list = ft.ListView(
-    controls=[MessageBubble(m) for m in (messages or [])],
+    controls=_bubbles,
     spacing=15,
     auto_scroll=True,
     expand=True,
     padding=ft.padding.only(0, 0, 0, 15)
   )
+
+  # Notify the parent so it can hold a ref for imperative scroll_to calls.
+  if on_list_mounted:
+    on_list_mounted(message_list)
 
   def grid_change(e):
     """ Adjusts height and limits max height to 4 rows """
