@@ -714,10 +714,10 @@ async def main(page: ft.Page, engine):
   page.dark_theme = ft.Theme(
     color_scheme=ft.ColorScheme(
       primary=ft.Colors.WHITE,
-      secondary=ft.Colors.GREY,
-      surface=ft.Colors.BLACK87,
+      secondary=ft.Colors.GREY_400,
+      surface=ft.Colors.GREY_900,
       secondary_container=ft.Colors.GREY_800,
-      primary_container=ft.Colors.GREY_800
+      primary_container=ft.Colors.GREY_700
     )
   )
 
