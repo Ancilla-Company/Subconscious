@@ -56,7 +56,9 @@ Section "Install" SecInstall
   SetOutPath "$INSTDIR"
 
   ; Copy all files produced by PyInstaller / flet pack
-  File /r "..\..\dist\Subconscious\*.*"
+  ; Handle both onedir output (dist\Subconscious\*.*) and onefile output (dist\Subconscious.exe)
+  File /nonfatal /r "..\..\dist\Subconscious\*.*"
+  File /nonfatal "..\..\dist\Subconscious.exe"
 
   ; Write uninstaller
   WriteUninstaller "$INSTDIR\Uninstall.exe"
