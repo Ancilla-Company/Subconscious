@@ -622,6 +622,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_account_click=switch_to_account,
         on_context_toggle=toggle_context,
         selected_view=current_context, # Use context to light up the sidebar icon correctly
+        config=engine.config,
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
       ),
       contextlist=ContextList(
