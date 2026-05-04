@@ -46,6 +46,22 @@
     // Mobile / Web Build (requires Flutter SDK + Flet)
     // ----------------------------------------------------------------
     {
+      // Prefer flet pack - build has an issue where a blank screen is shown before actual UI loads
+      "label": "Flet Build (Windows Desktop)",
+      "type": "shell",
+      "command": "flet build windows -vv",
+      "windows": {
+        "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & flet build windows -vv",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "dependsOn": ["copy_pyproject.toml"],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
       "label": "Flet Build (Android Mobile)",
       "type": "shell",
       "command": "flet build aab -vv",
@@ -111,6 +127,18 @@
     // ----------------------------------------------------------------
     // Utilities
     // ----------------------------------------------------------------
+    {
+      "label": "Generate License Report",
+      "type": "shell",
+      "command": "pip install pip-licenses 2>nul & pip-licenses --format=markdown --with-urls --with-description --output-file=THIRD_PARTY_LICENSES.md && echo Done. THIRD_PARTY_LICENSES.md updated.",
+      "windows": {
+        "command": "call %USERPROFILE%\\miniconda3\\Scripts\\activate.bat subconscious 2>nul & pip install pip-licenses 2>nul & pip-licenses --format=markdown --with-urls --with-description --output-file=TMP_LICENSES.md && echo Done. TMP_LICENSES.md updated.",
+        "options": {
+          "shell": { "executable": "cmd.exe", "args": ["/c"] }
+        }
+      },
+      "problemMatcher": []
+    },
     {
       "label": "clean_dist",
       "type": "shell",

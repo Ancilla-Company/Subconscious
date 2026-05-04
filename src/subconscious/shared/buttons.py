@@ -1,6 +1,8 @@
 import flet as ft
 from datetime import datetime
 
+from .identicon import identicon
+
 
 @ft.component
 def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, selectable=True, badge=None):
@@ -25,6 +27,34 @@ def SidebarButton(icon, tooltip, view_name, selected_view, callback, key=None, s
     ),
     clip_behavior=ft.ClipBehavior.HARD_EDGE,
   )
+
+
+@ft.component
+def Avatar(seed: str, tooltip: str, view_name: str, selected_view: str, callback):
+  """ A SidebarButton variant that displays a GitHub-style identicon avatar
+      instead of an icon. The identicon is generated deterministically from
+      ``seed`` (e.g. a username or UUID) so it is stable across sessions.
+  """
+  is_selected = selected_view == view_name
+
+  return ft.Container(
+    content=ft.Image(
+      src=identicon(seed, size=40),
+      tooltip=tooltip,
+      height=40,
+      width=40,
+    ),
+    ink=True,
+    width=40,
+    height=40,
+    # bg_color=ft.Colors.SURFACE_CONTAINER,
+    border_radius=3,
+    tooltip=tooltip,
+    on_click=callback,
+    clip_behavior=ft.ClipBehavior.HARD_EDGE,
+    bgcolor=ft.Colors.SECONDARY_CONTAINER if is_selected else ft.Colors.SURFACE_CONTAINER,
+  )
+
 
 class WorkspacePopupItem(ft.PopupMenuItem):
   """ Popup Item for popup menu """

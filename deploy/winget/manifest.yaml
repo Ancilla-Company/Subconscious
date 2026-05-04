@@ -1,17 +1,41 @@
-# Package Identifier
 PackageIdentifier: Ancilla.Subconscious-Chat
-PackageName: Subconscious
-PackageVersion: 0.1.0
+PackageVersion: 0.1.8
+PackageLocale: en-US
 Publisher: Ancilla
+PublisherUrl: https://ancilla.company
+PublisherSupportUrl: https://github.com/Ancilla-Company/Subconscious/issues
 Author: Brian Branch
-Description: A distributed agentic AI engine
-License: MIT
-ShortDescription: Distributed agentic engine for Hiveminds.
-PackageUrl: https://github.com/Ancilla-Company/Subconscious
+PackageName: Subconscious
+PackageUrl: https://subconscious.chat
+License: Proprietary
+Copyright: Copyright (c) 2026 Brian Branch
+ShortDescription: A distributed agentic AI platform — run AI agents everywhere, on every device.
+Description: |-
+  Subconscious is an open-source alternative to ChatGPT and Claude with a local-first architecture.
+  It enables users to create AI agents that run everywhere, on every device, simultaneously.
+  Features include multi-platform support (Desktop, Web, Terminal), extensible tools,
+  workspaces & threads, BYOK (Bring Your Own Keys) for 20+ AI providers, and auto-updates.
+Moniker: subconscious
+Tags:
+  - ai
+  - agent
+  - llm
+  - chat
+  - local-first
+  - ollama
+  - openai
+  - anthropic
+  - huggingface
+ReleaseNotesUrl: https://github.com/Ancilla-Company/Subconscious/blob/master/CHANGELOG.md
 Installers:
   - Architecture: x64
-    InstallerType: PyInstaller
-    InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.0/subconscious-setup-x64.exe
+    InstallerType: exe
+    InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.7/subconscious-setup-x64.exe
     InstallerSha256: <SHA256_HASH>
+    InstallModes:
+      - silent
+      - silentWithProgress
+      - interactive
+    UpgradeBehavior: install
 ManifestType: singleton
 ManifestVersion: 1.5.0

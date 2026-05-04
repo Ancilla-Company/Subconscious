@@ -1,1 +1,6 @@
-VERSION = "v0.1.0"
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+  VERSION = "v" + version("subconscious-chat")
+except PackageNotFoundError:
+  VERSION = "v0.0.0"

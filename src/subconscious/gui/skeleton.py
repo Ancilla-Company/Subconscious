@@ -60,6 +60,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   selected_thread, set_selected_thread = ft.use_state(None)
   messages, set_messages = ft.use_state(list())
   is_streaming, set_is_streaming = ft.use_state(False)
+  # Mutable ref holder for the chat ListView so we can call scroll_to() imperatively.
+  # Stored as a single-element list so mutations don't trigger re-renders.
+  chat_scroll_ref, _ = ft.use_state([None])
+
+  def on_list_mounted(list_view):
+    """Called by ChatWindow each render to keep our ref up-to-date."""
+    chat_scroll_ref[0] = list_view
+
+  # Holds the live streaming text for the current AI response so each token
+  # triggers a guaranteed re-render via a dedicated scalar state change.
+  streaming_text, set_streaming_text = ft.use_state("")
   # Persists the last-selected thread per workspace so it's restored on switch-back
   thread_by_workspace, set_thread_by_workspace = ft.use_state(dict())
   # When True the threads list shows threads across all workspaces
@@ -85,26 +96,46 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   tool_configs, set_tool_configs = ft.use_state([])
   tool_expanded_indices, set_tool_expanded_indices = ft.use_state(set())
 
+  _MODE_MAP = {
+    "light": ft.ThemeMode.LIGHT,
+    "dark": ft.ThemeMode.DARK,
+    "auto": ft.ThemeMode.SYSTEM,
+  }
+
+  async def apply_setting_to_ui(key: str, value: str, _tag: str = "system"):
+    """
+    UI-only: apply an already-persisted setting to the live Flet page and
+    local state.  Called by the engine callback registry when a tool (or any
+    other non-UI code) changes a setting so the change is visible immediately
+    without a restart.
+    """
+    if key == "mode":
+      page.theme_mode = _MODE_MAP.get(value, ft.ThemeMode.SYSTEM)
+      page.update()
+    new_settings = {**settings, key: str(value)}
+    set_settings(new_settings)
+
   async def load_settings():
+    # Register the UI-only callback so tool-driven setting changes are
+    # reflected in real-time.  We do NOT register handle_setting_change here
+    # because that function also calls engine.update_setting, which would
+    # trigger the callback again and cause infinite recursion.
+    engine.register_setting_callback("mode", apply_setting_to_ui)
+
     async with engine.db.get_session() as session:
       stmt = select(AppState).where(AppState.tag.in_(["system", "general"]))
       result = await session.scalars(stmt)
       db_settings = {s.key: s.value for s in result.all()}
       set_settings(db_settings)
-      
+
       # Apply some settings immediately if needed
-      mode_mapping = {
-        "light": ft.ThemeMode.LIGHT,
-        "dark": ft.ThemeMode.DARK,
-        "auto": ft.ThemeMode.SYSTEM
-      }
       if "mode" in db_settings:
-        page.theme_mode = mode_mapping.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
+        page.theme_mode = _MODE_MAP.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
 
     # Load model configs from encrypted storage
     engine.config.read_keyring()
     raw_models = engine.config.secrets.get("models", {})
-    
+
     # secrets["models"] is stored as {uuid: {...fields}} – convert to list
     loaded = [{"id": k, **v} for k, v in raw_models.items()]
     set_model_configs(loaded)
@@ -120,21 +151,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_tool_configs(loaded_tools)
 
   async def handle_setting_change(key, value, tag):
-    """Save a setting to the database and update local state."""
+    """UI-driven: persist a setting to the database then apply it to the UI."""
     await engine.update_setting(key, str(value), tag)
-    
-    # Update current page settings if relevant
-    if key == "mode":
-      mode_mapping = {
-        "light": ft.ThemeMode.LIGHT,
-        "dark": ft.ThemeMode.DARK,
-        "auto": ft.ThemeMode.SYSTEM
-      }
-      page.theme_mode = mode_mapping.get(value, ft.ThemeMode.SYSTEM)
-    
-    # Refresh local settings dict
-    new_settings = {**settings, key: str(value)}
-    set_settings(new_settings)
+    # engine.update_setting fires apply_setting_to_ui via the callback registry,
+    # so we do NOT call apply_setting_to_ui manually here to avoid double-updates.
 
   async def handle_save_model(model_dict: dict):
     """Persist a model config (add or update) to the encrypted secrets file."""
@@ -459,8 +479,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     streaming_messages = new_messages + [ai_ui_msg]
     set_messages(streaming_messages)
 
-    # --- 6. Stream from the LLM, accumulate, update bubble in-place ---
+    # --- 6. Stream from the LLM, drive re-renders via streaming_text state ---
     full_response = ""
+    set_streaming_text("")  # Reset before starting
     try:
       async for chunk in engine.stream_chat(
         content=content,
@@ -469,14 +490,25 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         attachments=attachments or [],
         model_cfg=selected_model_config or (model_configs[0] if model_configs else None),
       ):
+        logger.debug(f"AI Chunk: {chunk}")
         full_response += chunk
-        ai_ui_msg.content = full_response
-        # Reassign list so Flet detects state change and re-renders the bubble
-        set_messages(list(streaming_messages))
+        # Updating a dedicated scalar state guarantees Flet detects the change
+        # and re-renders ChatWindow with the new streaming_text on every token.
+        set_streaming_text(full_response)
+
     except Exception as exc:
       logger.error(f"LLM stream error: {exc}")
-      ai_ui_msg.content = f"⚠ Error reaching the model: {exc}"
-      set_messages(list(streaming_messages))
+      full_response = f"⚠ Error reaching the model: {exc}"
+      set_streaming_text(full_response)
+
+    # Commit the final text into the messages list and clear the streaming slot.
+    ai_ui_msg.content = full_response
+    set_messages(list(streaming_messages))
+    set_streaming_text("")
+
+    # Scroll the chat list to the bottom now that the full response is visible.
+    if chat_scroll_ref[0] is not None:
+      await chat_scroll_ref[0].scroll_to(offset=-1, duration=300)
 
     # --- 7. Persist the final AI message ---
     if full_response:
@@ -575,15 +607,22 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("settings")
     set_context_visible(True)
 
+  async def switch_to_account(e=None):
+    set_current_view("account")
+    set_current_context("account")
+    set_context_visible(False)
+
   return [
-    TitleBar(),
+    TitleBar(dev=engine.config.dev),
     Frame(
       sidebar=Sidebar(
         on_workspace_click=switch_to_workspace,
         on_threads_click=switch_to_threads,
         on_settings_click=switch_to_settings,
+        on_account_click=switch_to_account,
         on_context_toggle=toggle_context,
         selected_view=current_context, # Use context to light up the sidebar icon correctly
+        config=engine.config,
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
       ),
       contextlist=ContextList(
@@ -617,6 +656,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_delete_workspace=handle_delete_workspace,
         thread=selected_thread,
         messages=messages,
+        streaming_text=streaming_text,
+        on_list_mounted=on_list_mounted,
         on_send_message=handle_send_message,
         is_streaming=is_streaming,
         settings=settings,

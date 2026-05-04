@@ -18,6 +18,8 @@ def MainWindow(
   on_delete_workspace=None,
   thread=None,
   messages=None,
+  streaming_text: str = "",
+  on_list_mounted=None,
   on_send_message=None,
   is_streaming=False,
   settings=None,
@@ -69,6 +71,8 @@ def MainWindow(
       content=ChatWindow(
         thread=thread,
         messages=messages,
+        streaming_text=streaming_text,
+        on_list_mounted=on_list_mounted,
         on_send_message=on_send_message,
         is_streaming=is_streaming,
         model_configs=model_configs,
@@ -235,6 +239,34 @@ def MainWindow(
         alignment=ft.Alignment.CENTER,
         expand=True
       )
+  elif current_view == "account":
+    content = ft.Container(
+      content=ft.Column(
+        [
+          ft.Icon(
+            ft.Icons.PERSON_OUTLINED,
+            size=64,
+            color=ft.Colors.GREY_400
+          ),
+          ft.Text(
+            "Account",
+            size=24,
+            weight=ft.FontWeight.W_500,
+            color=ft.Colors.GREY_500
+          ),
+          ft.Text(
+            "Login and profile management coming soon.",
+            size=14,
+            color=ft.Colors.GREY_500
+          ),
+        ],
+        spacing=12,
+        expand=True,
+        alignment=ft.MainAxisAlignment.CENTER,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+      ),
+      expand=True,
+    )
   else:
     content = default_content
 

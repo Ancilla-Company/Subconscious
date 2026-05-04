@@ -1,222 +1,260 @@
-import sys
-import cmd
 import logging
-import pathlib
-import asyncio
+import collections
+from typing import Optional
+from blessed import Terminal
+from blessed import Terminal
+from blessed.keyboard import Keystroke
+from blessed.line_editor import LineEditor
 
-from ..engine import Engine  
-from ..config import Config, log_config, LOGO
-
-
-# Platform specific non-blocking input check
-if sys.platform == 'win32':
-  try:
-    import msvcrt
-  except ImportError:
-    msvcrt = None # type: ignore
-  select = None # type: ignore
-  termios = None # type: ignore
-  tty = None # type: ignore
-else:
-  msvcrt = None # type: ignore
-  try:
-    import select
-    import termios
-    import tty
-  except ImportError:
-    select = None # type: ignore
-    termios = None # type: ignore
-    tty = None # type: ignore
+from ..engine import Engine
+from .commands import CommandParser
+from ..config import Config, log_config
 
 
-# Logging setup
 logger = logging.getLogger("subconscious")
 
 
-class SubconsciousCLI(cmd.Cmd):
-  """Command processor for Subconscious."""
-  intro = "Welcome to Subconscious! Type 'help' or '?' to list commands.\nPress any key to interrupt streaming output."
-  prompt = "\n[You] "
 
-  def __init__(self, config: Config):
-    super().__init__()
-    self.config = config
-    self.should_exit = False
-    self.last_chat_input = None
-
-  def do_quit(self, arg):
-    """Quit the application."""
-    self.should_exit = True
-    return True
-
-  def do_exit(self, arg):
-    """Exit the application."""
-    self.should_exit = True
-    return True
-
-  def do_add_key(self, arg):
-    """Add an API key. Usage: add_key <provider> <nickname> <key>"""
-    args = arg.split()
-    if len(args) != 3:
-      print("Usage: add_key <provider> <nickname> <key>")
-      return
-    
-    provider, nickname, key = args
-    identifier = f"{provider}:{nickname}"
-
-  def do_set_model(self, arg):
-    """Set the current model. Usage: set_model <provider> <model_name>"""
-    args = arg.split()
-    if len(args) != 2:
-      print("Usage: set_model <provider> <model_name>")
-      return
-    
-    self.config.model_provider, self.config.model_name = args
-    self.config.save()
-    print(f"Model updated to {self.config.model_provider} using {self.config.model_name}. Please restart the application (or types 'reload') to apply changes.")
-
-  def default(self, line):
-    """Handle default behavior (chat input)."""
-    if line == 'EOF':
-      self.should_exit = True
-      return True
-    # Capture the input line for async processing
-    self.last_chat_input = line
-
-  def emptyline(self):
-    """Do nothing on empty input."""
-    pass
-
-  async def stream_output(self, stream_iter):
-    """Stream output from an async iterator, allowing interruption."""
-    print("\n[Subconscious]", end=" ", flush=True)
-
-    fd = sys.stdin.fileno()
-    old_settings = None
-    if termios and tty:
-      try:
-        old_settings = termios.tcgetattr(fd)
-        tty.setcbreak(fd)
-      except Exception:
-        pass # Not a TTY
-
-    try:
-      async for chunk in stream_iter:
-        # Pydantic-ai stream chunks might be objects or strings 
-        # based on how it's used. For simple text, it's usually the delta.
-        text_chunk = str(chunk) 
-        
-        for char in text_chunk:
-          interrupted = False
-          
-          if msvcrt:
-            if msvcrt.kbhit():
-              interrupted = True
-              while msvcrt.kbhit():
-                msvcrt.getch()
-          elif old_settings and select:
-            dr, _, _ = select.select([sys.stdin], [], [], 0)
-            if dr:
-              interrupted = True
-              # Flush
-              sys.stdin.read(1)
-              while True:
-                dr, _, _ = select.select([sys.stdin], [], [], 0)
-                if not dr: break
-                sys.stdin.read(1)
-
-          if interrupted:
-            if old_settings and termios:
-              termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-              old_settings = None
-            print("\n[Output interrupted]")
-            return
-
-          print(char, end="", flush=True)
-          await asyncio.sleep(0.01)
-
-    except Exception as e:
-      print(f"\n[Error during streaming: {e}]")
-    finally:
-      if old_settings and termios:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        
-    print() # Newline at end
+def echo(text):
+  """Display ``text`` and flush output."""
+  print(text, end='', flush=True)
 
 
-async def setup_flow(config: Config):
-  """Prompt the user for the data directory."""
-  print(LOGO)
-  print("Welcome to Subconscious!")
-  print("\nSetup Required:")
-  print(f"Please confirm or edit the data directory location.")
-  print(f"Default: {config.data_dir}")
-  print("\nPress Enter to use default or type a new path:")
+def input_filter(keystroke):
+  """
+  For given keystroke, return whether it should be allowed as input.
 
-  loop = asyncio.get_running_loop()
-  # Use standard input in executor to avoid blocking async loop
-  user_input = await loop.run_in_executor(None, input)
-  
-  path_str = user_input.strip()
-  path = pathlib.Path(path_str) if path_str else config.data_dir
-  config.data_dir = path
-  config.save()
-  
-  print(f"\nConfig saved to: {path / 'config.yaml'}")
+  This somewhat requires that the interface use special application keys to perform functions, as
+  alphanumeric input intended for persisting could otherwise be interpreted as a command sequence.
+  """
+  if keystroke.is_sequence:
+    # Namely, deny multi-byte sequences (such as '\x1b[A'),
+    return False
+  if ord(keystroke) < ord(' '):
+    # or control characters (such as ^L),
+    return False
+  return True
 
-async def main_loop(config: Config, engine: Engine):
-  cli = SubconsciousCLI(config)
-  
-  # Print CLI intro
-  print(cli.intro)
-  print("-" * 40)
-  
-  if not config.model_provider or not config.model_name:
-    print("\n[System] No AI model configured. Chat functionality will be limited.")
-    print("[System] Use 'set_model <provider> <model_name>' and 'add_key <provider> <nickname> <key>' to get started.")
-    print("[System] Example: set_model openai gpt-4o")
 
-  loop = asyncio.get_running_loop()
-  
-  while not cli.should_exit:
-    # Display prompt
-    sys.stdout.write(cli.prompt)
-    sys.stdout.flush()
-    
-    try:
-      # Read input in a separate thread so the event loop isn't blocked
-      line = await loop.run_in_executor(None, sys.stdin.readline)
-    except asyncio.CancelledError:
-      break
+def echo_yx(cursor, text):
+  """Move to ``cursor`` and display ``text``."""
+  echo(cursor.term.move_yx(cursor.y, cursor.x) + text)
 
-    if not line: # EOF
-      break
-      
-    line = line.strip()
-    
-    # Process command using cmd logic
-    cli.onecmd(line)
-    
-    # If user entered chat text, process it asynchronously
-    if cli.last_chat_input:
-      message = cli.last_chat_input
-      cli.last_chat_input = None # Reset
-      
-      # Process via Engine's agent
-      try:
-        stream = engine.run_agent_stream(message)
-        await cli.stream_output(stream)
-      except Exception as e:
-        print(f"Error: {e}")
 
-  print("\nGoodbye!")
+Cursor = collections.namedtuple('Cursor', ('y', 'x', 'term'))
+
+
+def readline(term, width=20):
+    """Read a line of input using :class:`~blessed.line_editor.LineEditor`."""
+    col = term.get_location()[1]
+    editor = LineEditor(limit=width, max_width=width)
+    while True:
+        inp = term.inkey()
+        result = editor.feed_key(inp)
+        if result.line is not None:
+            return result.line
+        if result.eof or result.interrupt:
+            return None
+        if result.changed:
+            ds = editor.display
+            echo(term.move_x(col) + term.clear_eol + ds.text
+                 + term.move_x(col + ds.cursor))
+
+
+def save(screen, fname):
+    """Save screen contents to file."""
+    if not fname:
+        return
+    with open(fname, 'w') as fout:
+        cur_row = cur_col = 0
+        for (row, col) in sorted(screen):
+            char = screen[(row, col)]
+            while row != cur_row:
+                cur_row += 1
+                cur_col = 0
+                fout.write('\n')
+            while col > cur_col:
+                cur_col += 1
+                fout.write(' ')
+            fout.write(char)
+            cur_col += 1
+        fout.write('\n')
+
+
+def redraw(term, screen, start=None, end=None):
+    """Redraw the screen."""
+    if start is None and end is None:
+        echo(term.clear)
+        start, end = (Cursor(y=min(y for (y, x) in screen or [(0, 0)]),
+                             x=min(x for (y, x) in screen or [(0, 0)]),
+                             term=term),
+                      Cursor(y=max(y for (y, x) in screen or [(0, 0)]),
+                             x=max(x for (y, x) in screen or [(0, 0)]),
+                             term=term))
+    lastcol, lastrow = -1, -1
+    for row, col in sorted(screen):
+        if start.y <= row <= end.y and start.x <= col <= end.x:
+            if col >= term.width or row >= term.height:
+                # out of bounds
+                continue
+            if row != lastrow or col != lastcol + 1:
+                # use cursor movement
+                echo_yx(Cursor(row, col, term), screen[row, col])
+            else:
+                # just write past last one
+                echo(screen[row, col])
+
+
+async def run(config, engine):
+  """Program entry point."""
+  def above(csr, offset):
+    return Cursor(y=max(0, csr.y - offset),
+                  x=csr.x,
+                  term=csr.term)
+
+  def below(csr, offset):
+      return Cursor(y=min(csr.term.height - 1, csr.y + offset),
+                    x=csr.x,
+                    term=csr.term)
+
+  def right_of(csr, offset):
+      return Cursor(y=csr.y,
+                    x=min(csr.term.width - 1, csr.x + offset),
+                    term=csr.term)
+
+  def left_of(csr, offset):
+      return Cursor(y=csr.y,
+                    x=max(0, csr.x - offset),
+                    term=csr.term)
+
+  def home(csr):
+      return Cursor(y=csr.y,
+                    x=0,
+                    term=csr.term)
+
+  def end(csr):
+      return Cursor(y=csr.y,
+                    x=csr.term.width - 1,
+                    term=csr.term)
+
+  def bottom(csr):
+      return Cursor(y=csr.term.height - 1,
+                    x=csr.x,
+                    term=csr.term)
+
+  def center(csr):
+      return Cursor(csr.term.height // 2,
+                    csr.term.width // 2,
+                    csr.term)
+
+  def lookup_move(inp_code, csr):
+      return {
+          # arrows, including angled directionals
+          csr.term.KEY_END: below(left_of(csr, 1), 1),
+          csr.term.KEY_KP_1: below(left_of(csr, 1), 1),
+
+          csr.term.KEY_DOWN: below(csr, 1),
+          csr.term.KEY_KP_2: below(csr, 1),
+
+          csr.term.KEY_PGDOWN: below(right_of(csr, 1), 1),
+          csr.term.KEY_LR: below(right_of(csr, 1), 1),
+          csr.term.KEY_KP_3: below(right_of(csr, 1), 1),
+
+          csr.term.KEY_LEFT: left_of(csr, 1),
+          csr.term.KEY_KP_4: left_of(csr, 1),
+
+          csr.term.KEY_CENTER: center(csr),
+          csr.term.KEY_KP_5: center(csr),
+
+          csr.term.KEY_RIGHT: right_of(csr, 1),
+          csr.term.KEY_KP_6: right_of(csr, 1),
+
+          csr.term.KEY_HOME: above(left_of(csr, 1), 1),
+          csr.term.KEY_KP_7: above(left_of(csr, 1), 1),
+
+          csr.term.KEY_UP: above(csr, 1),
+          csr.term.KEY_KP_8: above(csr, 1),
+
+          csr.term.KEY_PGUP: above(right_of(csr, 1), 1),
+          csr.term.KEY_KP_9: above(right_of(csr, 1), 1),
+
+          # shift + arrows
+          csr.term.KEY_SLEFT: left_of(csr, 10),
+          csr.term.KEY_SRIGHT: right_of(csr, 10),
+          csr.term.KEY_SDOWN: below(csr, 10),
+          csr.term.KEY_SUP: above(csr, 10),
+
+          # carriage return
+          csr.term.KEY_ENTER: home(below(csr, 1)),
+      }.get(inp_code, csr)
+
+  term = Terminal()
+  csr = Cursor(0, 0, term)
+  screen = {}
+  with term.hidden_cursor(), \
+          term.cbreak(), \
+          term.location(), \
+          term.fullscreen(), \
+          term.keypad(), \
+          term.mouse_enabled():
+      print(term.home + term.clear, end='')
+      print(term.reverse(term.center("Scroll region demo")), end='')
+      inp = None
+      while True:
+          echo_yx(csr, term.reverse(screen.get((csr.y, csr.x), ' ')))
+          inp = term.inkey()
+
+          if inp.name == 'KEY_F2':
+              break
+
+          elif inp.name == 'KEY_F1':
+              # ^s saves
+              echo_yx(home(bottom(csr)),
+                      term.ljust(term.bold_white('Filename: ')))
+              echo_yx(right_of(home(bottom(csr)), len('Filename: ')), '')
+              save(screen, readline(term))
+              echo_yx(home(bottom(csr)), term.clear_eol)
+              redraw(term=term, screen=screen,
+                      start=home(bottom(csr)),
+                      end=end(bottom(csr)))
+              continue
+
+          elif inp == chr(12):
+              # ^l refreshes
+              redraw(term=term, screen=screen)
+
+          elif inp.is_mouse_left():
+              # Handle left mouse button press
+              csr = Cursor(inp.mouse_xy[1], inp.mouse_xy[0], term)
+              continue
+
+          else:
+              n_csr = lookup_move(inp.code, csr)
+
+          if n_csr != csr:
+              # erase old cursor,
+              echo_yx(csr, screen.get((csr.y, csr.x), ' '))
+              csr = n_csr
+
+          elif input_filter(inp):
+              echo_yx(csr, inp)
+              screen[(csr.y, csr.x)] = inp.__str__()
+              n_csr = right_of(csr, 1)
+              if n_csr == csr:
+                  # wrap around margin
+                  n_csr = home(below(csr, 1))
+              csr = n_csr
+
+# async def main(config: Config, engine: Engine):
+#   await run(config, engine)
 
 async def start_tui(config: Config):
-  """ CLI startup logic """
-  engine = Engine()
+  # engine = Engine()
   try:
-    await engine.start_engine(config)
-    log_config(config)
-    await main_loop(config, engine)
+    # await engine.start_engine(config)
+    # log_config(config)
+    # await main(config, engine)
+    await run(config, None)
   finally:
-    await engine.stop_engine()
+      pass
+    # await engine.stop_engine()

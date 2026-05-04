@@ -1,7 +1,6 @@
 import flet as ft
 
-from ..shared.buttons import IconButton, SidebarButton
-
+from ..shared.buttons import IconButton, SidebarButton, Avatar
 
 @ft.component
 def Sidebar(
@@ -9,10 +8,37 @@ def Sidebar(
   on_threads_click,
   on_context_toggle,
   on_settings_click,
+  on_account_click,
+  config,
   selected_view="none",
   show_settings_badge: bool = False,
+  # Seed for the identicon — pass a username or UUID once accounts exist.
+  # Defaults to a fixed string so the avatar is stable before login.
+  avatar_seed: str = "subconscious-default-user",
 ) -> ft.Control:
+  # Set personal icons
+  personal_list = [
+    SidebarButton(
+      ft.Icons.SETTINGS_OUTLINED,
+      "Settings",
+      "settings",
+      selected_view,
+      on_settings_click,
+      badge=ft.Badge() if show_settings_badge else None,
+    ),
+  ]
 
+  if config.dev:
+    personal_list.append(
+      Avatar(
+        seed=avatar_seed,
+        tooltip="Account",
+        view_name="account",
+        selected_view=selected_view,
+        callback=on_account_click,
+      )
+    )
+  
   return ft.Column(
     width=48,
     spacing=0,
@@ -36,16 +62,7 @@ def Sidebar(
         border=ft.border.only(right=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER)),
         content=ft.Container(
           ft.Column(
-            [
-              SidebarButton(
-                ft.Icons.SETTINGS_OUTLINED,
-                "Settings",
-                "settings",
-                selected_view,
-                on_settings_click,
-                badge=ft.Badge() if show_settings_badge else None,
-              )
-            ],
+            personal_list,
             spacing=4,
           ),
           border=ft.border.only(top=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER)),

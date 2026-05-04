@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subconscious-chat"
-version = "0.1.7"
+# Unreleased
+version = "0.1.8"
 description = "A distributed, agentic AI platform — run AI agents everywhere, on every device."
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -30,6 +31,7 @@ dependencies = [
   "pyyaml",
   "fastapi",
   "keyring",
+  "flet_lottie",
   "pydantic-ai; sys_platform != 'android' and sys_platform != 'ios'",
   "pydantic-ai-slim; sys_platform != 'android' and sys_platform != 'ios'",
   "pydantic; sys_platform != 'android' and sys_platform != 'ios'",
@@ -38,7 +40,7 @@ dependencies = [
   "griffe; sys_platform != 'android' and sys_platform != 'ios'",
   "opentelemetry-api; sys_platform != 'android' and sys_platform != 'ios'",
   "typing-inspection; sys_platform != 'android' and sys_platform != 'ios'",
-  "flet[all]==0.84.0",
+  "flet==0.84.0",
   "aiosqlite; sys_platform != 'android' and sys_platform != 'ios'",
   "sqlalchemy; sys_platform != 'android' and sys_platform != 'ios'",
 
@@ -89,6 +91,11 @@ bundle_id = "company.ancilla.subconscious"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.flet.windows.app]
+path = "src"
+hide_window_on_start = true
+module = "desktop_ep.py"
+
 [tool.flet.app]
 path = "src"
 hide_window_on_start = true
@@ -116,10 +123,6 @@ add_data = [
   "THIRD_PARTY_LICENSES.md;.",
   "LGPL_COMPLIANCE.md;.",
   "README.md;.",
-  # LGPL compliance: bundled package files must be included so end-users
-  # can replace them with modified versions per LGPL §4/§6 requirements.
-  "pydantic_core",
-  "aiosqlite"
 ]
 pyinstaller_args = [
   "--collect-all=pydantic",
@@ -136,3 +139,9 @@ pyinstaller_args = [
   "--copy-metadata=typing_inspection",
   "--exclude-module=google.genai.types"
 ]
+
+[tool.flet.app.boot_screen]
+show = false
+
+[tool.flet.app.startup_screen]
+show = false
