@@ -1,5 +1,5 @@
 PackageIdentifier: Ancilla.Subconscious-Chat
-PackageVersion: 0.1.8
+PackageVersion: 0.1.9
 PackageLocale: en-US
 Publisher: Ancilla
 PublisherUrl: https://ancilla.company
@@ -30,8 +30,11 @@ ReleaseNotesUrl: https://github.com/Ancilla-Company/Subconscious/blob/master/CHA
 Installers:
   - Architecture: x64
     InstallerType: exe
-    InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.7/subconscious-setup-x64.exe
-    InstallerSha256: <SHA256_HASH>
+    InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.9/subconscious-setup-x64.exe
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
     InstallModes:
       - silent
       - silentWithProgress
