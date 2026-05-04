@@ -31,7 +31,7 @@ Installers:
   - Architecture: x64
     InstallerType: exe
     InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.9/subconscious-setup-x64.exe
-    InstallerSha256: 15ED29C9FC37336A7A72FCE77913F007FA34D534EC93CE7D559C739F57D0B05C
+    InstallerSha256: 700B71D796F33628AA78B335957504CE5103F03EC65351B22A9724DCA5B7F48B
     InstallerSwitches:
       Silent: /S
       SilentWithProgress: /S
