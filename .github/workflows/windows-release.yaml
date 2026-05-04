@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -63,7 +67,7 @@ jobs:
       # Patch the version number into the NSIS script, then build the installer
       - name: Get release version
         id: get_version
-        run: echo "VERSION=${{ github.event.release.tag_name }}" | Out-File -FilePath $Env:GITHUB_ENV -Append
+        run: echo "VERSION=${{ github.event.inputs.tag || github.event.release.tag_name }}" | Out-File -FilePath $Env:GITHUB_ENV -Append
         shell: pwsh
       - name: Install NSIS
         run: choco install nsis --no-progress -y
@@ -92,6 +96,7 @@ jobs:
       - name: Attach Windows installer to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag || github.event.release.tag_name }}
           files: dist/windows/subconscious-setup-x64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -109,7 +114,7 @@ jobs:
           path: dist/windows/
       - name: Update winget manifest version/url/sha
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || '' }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || '' }}
         run: |
           if [ -n "$RELEASE_TAG" ]; then
             VERSION="${RELEASE_TAG#v}"
