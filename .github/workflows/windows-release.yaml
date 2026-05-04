@@ -1,4 +1,4 @@
-name: Build and Release
+name: Windows Release
 
 on:
   release:
@@ -13,23 +13,6 @@ permissions:
   id-token: write
 
 jobs:
-  build-python:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Build package
-        run: |
-          pip install build twine
-          python -m build
-          twine check dist/*
-      - uses: actions/upload-artifact@v4
-        with:
-          name: python-dist
-          path: dist/
-  
   build-windows:
     runs-on: windows-latest
     steps:
@@ -39,6 +22,8 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -e .
+      - name: Install PyInstaller
+        run: pip install pyinstaller
 
       # Stamp build_metadata.json so the running app knows it was installed via winget/NSIS
       - name: Stamp build metadata (winget)
@@ -46,7 +31,34 @@ jobs:
         shell: pwsh
 
       - name: Build Windows executable (flet pack / PyInstaller)
-        run: flet pack src/subconscious/desktop_ep.py --icon src/subconscious/assets/favicon.ico --name Subconscious --add-data src/subconscious;subconscious --add-data LICENCE;. --add-data THIRD_PARTY_LICENSES.md;. --add-data LGPL_COMPLIANCE.md;. --add-data README.md;. --hidden-import desktop_notifier.resources --hidden-import desktop_notifier.backends.winrt --hidden-import pydantic_core --hidden-import aiosqlite --pyinstaller-build-args=--collect-all=pydantic --pyinstaller-build-args=--collect-all=pydantic_core --pyinstaller-build-args=--copy-metadata=genai_prices --pyinstaller-build-args=--copy-metadata=pydantic_ai_slim --pyinstaller-build-args=--copy-metadata=pydantic-ai-slim --pyinstaller-build-args=--copy-metadata=pydantic_ai --pyinstaller-build-args=--copy-metadata=pydantic-ai --pyinstaller-build-args=--copy-metadata=pydantic --pyinstaller-build-args=--copy-metadata=pydantic_graph --pyinstaller-build-args=--copy-metadata=griffe --pyinstaller-build-args=--copy-metadata=opentelemetry_api --pyinstaller-build-args=--copy-metadata=typing_inspection --pyinstaller-build-args=--exclude-module=google.genai.types --pyinstaller-build-args=--noconsole
+        run: |
+          flet pack src/subconscious/desktop_ep.py `
+            --icon src/subconscious/assets/favicon.ico `
+            --name Subconscious `
+            --add-data "src/subconscious;subconscious" `
+            --add-data "LICENCE;." `
+            --add-data "THIRD_PARTY_LICENSES.md;." `
+            --add-data "LGPL_COMPLIANCE.md;." `
+            --add-data "README.md;." `
+            --hidden-import desktop_notifier.resources `
+            --hidden-import desktop_notifier.backends.winrt `
+            --hidden-import pydantic_core `
+            --hidden-import aiosqlite `
+            --pyinstaller-build-args=--collect-all=pydantic `
+            --pyinstaller-build-args=--collect-all=pydantic_core `
+            --pyinstaller-build-args=--copy-metadata=genai_prices `
+            --pyinstaller-build-args=--copy-metadata=pydantic_ai_slim `
+            --pyinstaller-build-args=--copy-metadata=pydantic-ai-slim `
+            --pyinstaller-build-args=--copy-metadata=pydantic_ai `
+            --pyinstaller-build-args=--copy-metadata=pydantic-ai `
+            --pyinstaller-build-args=--copy-metadata=pydantic `
+            --pyinstaller-build-args=--copy-metadata=pydantic_graph `
+            --pyinstaller-build-args=--copy-metadata=griffe `
+            --pyinstaller-build-args=--copy-metadata=opentelemetry_api `
+            --pyinstaller-build-args=--copy-metadata=typing_inspection `
+            --pyinstaller-build-args=--exclude-module=google.genai.types `
+            --pyinstaller-build-args=--noconsole
+        shell: pwsh
 
       # Patch the version number into the NSIS script, then build the installer
       - name: Get release version
@@ -68,26 +80,6 @@ jobs:
         with:
           name: windows-dist
           path: dist/windows/subconscious-setup-x64.exe
-
-  publish-python:
-    needs: [build-python]
-    runs-on: ubuntu-latest
-    environment: pypi
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: python-dist
-          path: dist/
-      - name: Upload to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
-      - name: Attach Python artifacts to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   attach-windows-release:
     needs: [build-windows]
