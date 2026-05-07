@@ -2,6 +2,7 @@ import re
 import json
 import flet as ft
 from math import pi
+import flet_lottie as ftl
 from datetime import datetime, timezone
 
 
@@ -58,6 +59,14 @@ class MessageBubble(ft.Row):
     self.alignment = ft.MainAxisAlignment.CENTER
     self.parts = self.split_markdown_sections(self.message.content)
     self.message_content = ft.Text(self.message.content, size=14, color=ft.Colors.PRIMARY)
+
+    # Animated waiting ellipses (Lottie animation, to be fixed)
+    # self.elipses = self.waiting_animation()
+    self.elipses = ft.Text(
+      ". . . ",
+      size=13,
+      weight=ft.FontWeight.BOLD
+    )
 
     # For streaming tokens
     self.buffer = '' # A buffer to hold the incoming token stream from LLMs
@@ -184,7 +193,7 @@ class MessageBubble(ft.Row):
     
     self.bubble_content = ft.Column(
       [
-        *self.content,
+        *(self.content if self.message.content else [self.elipses]),
 
         # Message Bubble - timestamp and copy button
         *[
@@ -280,9 +289,17 @@ class MessageBubble(ft.Row):
       if drain:
         temp = self.buffer
       else:
-        temp, self.buffer = self.buffer[:self.buffer.rfind(' ')], self.buffer[self.buffer.rfind(' '):]
+        last_space = self.buffer.rfind(' ')
+        if last_space != -1:
+          temp, self.buffer = self.buffer[:last_space], self.buffer[last_space:]
+        else:
+          # If no space, just take the whole buffer and clear it
+          temp, self.buffer = self.buffer, ""
 
       while True:
+        if not temp:
+          break
+          
         if self.part == 'text':
           # In a text part, search for code block start
           if search := re.search(start_pattern, temp):
@@ -509,3 +526,136 @@ class MessageBubble(ft.Row):
     ]
 
     return Colors_lookup[hash(user_name) % len(Colors_lookup)]
+  
+  def waiting_animation(self):
+    """ Lottie bouncing-dots animation to indicate waiting on a response """
+    animation = {
+      "v": "4.8.0",
+      "fr": 24,
+      "ip": 0,
+      "op": 60,
+      "w": 80,
+      "h": 30,
+      "ddd": 0,
+      "assets": [],
+      "layers": [
+        {
+          "ddd": 0, "ty": 4, "sr": 1, 
+          "ks": {
+            "o": {"a": 0, "k": 100}, "r": {"a": 0, "k": 0}, 
+            "p": {
+              "a": 1, "k": [
+                {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 20, "s": [65, 22]},
+                {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 30, "s": [65, 8]},
+                {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 40, "s": [65, 22]},
+                {"t": 60, "s": [65, 22]}
+              ]
+            }, 
+            "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}
+          },
+              "shapes": [{
+                  "ty": "gr", "it": [
+                      {
+                          "ty": "sh", 
+                          "ks": {
+                              "a": 0, 
+                              "k": {
+                                  "i": [[0, -1.6], [1.6, 0], [0, 1.6], [-1.6, 0]], 
+                                  "o": [[0, 1.6], [-1.6, 0], [0, -1.6], [1.6, 0]], 
+                                  "v": [[3, 0], [0, 3], [-3, 0], [0, -3]], 
+                                  "c": True
+                              }
+                          }
+                      },
+                      {"ty": "fl", "c": {"a": 0, "k": [0.55, 0.55, 0.55, 1]}, "o": {"a": 0, "k": 100}},
+                      {"ty": "tr", "p": {"a": 0, "k": [0, 0]}, "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}, "r": {"a": 0, "k": 0}, "o": {"a": 0, "k": 100}}
+                  ]
+              }],
+              "ip": 0, "op": 60, "st": 0
+          },
+          {
+              "ddd": 0, "ty": 4, "sr": 1, 
+              "ks": {
+                  "o": {"a": 0, "k": 100}, "r": {"a": 0, "k": 0}, 
+                  "p": {
+                      "a": 1, "k": [
+                          {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 10, "s": [40, 22]},
+                          {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 20, "s": [40, 8]},
+                          {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 30, "s": [40, 22]},
+                          {"t": 60, "s": [40, 22]}
+                      ]
+                  }, 
+                  "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}
+              },
+              "shapes": [{
+                  "ty": "gr", "it": [
+                      {
+                          "ty": "sh", 
+                          "ks": {
+                              "a": 0, 
+                              "k": {
+                                  "i": [[0, -1.6], [1.6, 0], [0, 1.6], [-1.6, 0]], 
+                                  "o": [[0, 1.6], [-1.6, 0], [0, -1.6], [1.6, 0]], 
+                                  "v": [[3, 0], [0, 3], [-3, 0], [0, -3]], 
+                                  "c": True
+                              }
+                          }
+                      },
+                      {"ty": "fl", "c": {"a": 0, "k": [0.55, 0.55, 0.55, 1]}, "o": {"a": 0, "k": 100}},
+                      {"ty": "tr", "p": {"a": 0, "k": [0, 0]}, "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}, "r": {"a": 0, "k": 0}, "o": {"a": 0, "k": 100}}
+                  ]
+              }],
+              "ip": 0, "op": 60, "st": 0
+          },
+          {
+              "ddd": 0, "ty": 4, "sr": 1, 
+              "ks": {
+                  "o": {"a": 0, "k": 100}, "r": {"a": 0, "k": 0}, 
+                  "p": {
+                      "a": 1, "k": [
+                          {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 0, "s": [15, 22]},
+                          {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 10, "s": [15, 8]},
+                          {"i": {"x": 0.42, "y": 1}, "o": {"x": 0.58, "y": 0}, "t": 20, "s": [15, 22]},
+                          {"t": 60, "s": [15, 22]}
+                      ]
+                  }, 
+                  "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}
+              },
+              "shapes": [{
+                  "ty": "gr", "it": [
+                      {
+                          "ty": "sh", 
+                          "ks": {
+                              "a": 0, 
+                              "k": {
+                                  "i": [[0, -1.6], [1.6, 0], [0, 1.6], [-1.6, 0]], 
+                                  "o": [[0, 1.6], [-1.6, 0], [0, -1.6], [1.6, 0]], 
+                                  "v": [[3, 0], [0, 3], [-3, 0], [0, -3]], 
+                                  "c": True
+                              }
+                          }
+                      },
+                      {"ty": "fl", "c": {"a": 0, "k": [0.55, 0.55, 0.55, 1]}, "o": {"a": 0, "k": 100}},
+                      {"ty": "tr", "p": {"a": 0, "k": [0, 0]}, "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]}, "r": {"a": 0, "k": 0}, "o": {"a": 0, "k": 100}}
+                  ]
+              }],
+              "ip": 0, "op": 60, "st": 0
+          }
+      ]
+    }
+
+    return ft.SafeArea(
+      ft.Container(
+        ftl.Lottie(
+          width=80,
+          height=30,
+          repeat=True,
+          animate=True,
+          enable_merge_paths=True,
+          enable_layers_opacity=True,
+          src=json.dumps(animation).encode("utf-8"),
+          error_content=ft.Placeholder(ft.Text(". . .")),
+          on_error=lambda e: print(f"Error loading Lottie: {e.data}")
+        )
+      )
+    )

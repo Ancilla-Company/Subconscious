@@ -29,8 +29,8 @@ def TitleBar(dev: bool = False) -> ft.Control:
     ),
     ft.Container(
       content=ft.Text(
-        "Subconscious",
         size=13,
+        value="Subconscious",
         color=ft.Colors.PRIMARY
       ),
       padding=ft.padding.only(14, -4, 0, 0)

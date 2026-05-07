@@ -1,0 +1,101 @@
+name: Build and Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Stamp build metadata (python/pip)
+        run: cp deploy/build_metadata/python.json src/subconscious/assets/build_metadata.json
+      - name: Build package
+        run: |
+          pip install build twine
+          python -m build --outdir dist/
+          twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e .
+
+      # Stamp build_metadata.json so the running app knows it was installed via winget/NSIS
+      - name: Stamp build metadata (winget)
+        run: Copy-Item deploy\build_metadata\winget.json src\subconscious\assets\build_metadata.json
+        shell: pwsh
+
+      - name: Build Windows executable (flet pack / PyInstaller)
+        run: flet pack desktop_ep.py --out-dir dist --icon src/subconscious/assets/favicon.ico --name Subconscious --add-data src/subconscious;subconscious --hidden-import desktop_notifier.resources --hidden-import desktop_notifier.backends.winrt --hidden-import pydantic_core --hidden-import aiosqlite --pyinstaller-build-args=--collect-all=pydantic --pyinstaller-build-args=--collect-all=pydantic_core --pyinstaller-build-args=--copy-metadata=genai_prices --pyinstaller-build-args=--copy-metadata=pydantic_ai_slim --pyinstaller-build-args=--copy-metadata=pydantic-ai-slim --pyinstaller-build-args=--copy-metadata=pydantic_ai --pyinstaller-build-args=--copy-metadata=pydantic-ai --pyinstaller-build-args=--exclude-module=google.genai.types --pyinstaller-build-args=--console
+
+      # Patch the version number into the NSIS script, then build the installer
+      - name: Get release version
+        id: get_version
+        run: echo "VERSION=${{ github.event.release.tag_name }}" | Out-File -FilePath $Env:GITHUB_ENV -Append
+        shell: pwsh
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+      - name: Build NSIS installer
+        run: |
+          $version = "${{ github.event.release.tag_name }}".TrimStart('v')
+          (Get-Content deploy\windows\installer.nsi) -replace '!define APP_VERSION\s+"[^"]+"', "!define APP_VERSION `"$version`"" | Set-Content deploy\windows\installer.nsi
+          New-Item -ItemType Directory -Force -Path dist\windows
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /V3 deploy\windows\installer.nsi
+        shell: pwsh
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: dist/windows/subconscious-setup-x64.exe
+
+  publish-python:
+    needs: [build-python, build-windows]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-dist
+          path: dist/
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-winget:
+    needs: [publish-python]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: Ancilla.Subconscious-Chat
+          token: ${{ secrets.GITHUB_TOKEN }}

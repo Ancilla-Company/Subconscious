@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subconscious-chat"
-version = "0.1.7"
+# Unreleased
+version = "0.1.9"
 description = "A distributed, agentic AI platform — run AI agents everywhere, on every device."
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -30,6 +31,7 @@ dependencies = [
   "pyyaml",
   "fastapi",
   "keyring",
+  "flet_lottie",
   "pydantic-ai; sys_platform != 'android' and sys_platform != 'ios'",
   "pydantic-ai-slim; sys_platform != 'android' and sys_platform != 'ios'",
   "pydantic; sys_platform != 'android' and sys_platform != 'ios'",
@@ -113,7 +115,8 @@ source_packages = []
 hidden_imports = [
   "desktop_notifier.resources",
   "desktop_notifier.backends.winrt",
-  "pydantic_core"
+  "pydantic_core",
+  "aiosqlite"
 ]
 add_data = [
   "src/subconscious;subconscious",

@@ -60,6 +60,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   selected_thread, set_selected_thread = ft.use_state(None)
   messages, set_messages = ft.use_state(list())
   is_streaming, set_is_streaming = ft.use_state(False)
+  # Mutable ref holder for the chat ListView so we can call scroll_to() imperatively.
+  # Stored as a single-element list so mutations don't trigger re-renders.
+  chat_scroll_ref, _ = ft.use_state([None])
+
+  def on_list_mounted(list_view):
+    """Called by ChatWindow each render to keep our ref up-to-date."""
+    chat_scroll_ref[0] = list_view
+
+  # Holds the live streaming text for the current AI response so each token
+  # triggers a guaranteed re-render via a dedicated scalar state change.
+  streaming_text, set_streaming_text = ft.use_state("")
   # Persists the last-selected thread per workspace so it's restored on switch-back
   thread_by_workspace, set_thread_by_workspace = ft.use_state(dict())
   # When True the threads list shows threads across all workspaces
@@ -468,8 +479,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     streaming_messages = new_messages + [ai_ui_msg]
     set_messages(streaming_messages)
 
-    # --- 6. Stream from the LLM, accumulate, update bubble in-place ---
+    # --- 6. Stream from the LLM, drive re-renders via streaming_text state ---
     full_response = ""
+    set_streaming_text("")  # Reset before starting
     try:
       async for chunk in engine.stream_chat(
         content=content,
@@ -478,14 +490,25 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         attachments=attachments or [],
         model_cfg=selected_model_config or (model_configs[0] if model_configs else None),
       ):
+        logger.debug(f"AI Chunk: {chunk}")
         full_response += chunk
-        ai_ui_msg.content = full_response
-        # Reassign list so Flet detects state change and re-renders the bubble
-        set_messages(list(streaming_messages))
+        # Updating a dedicated scalar state guarantees Flet detects the change
+        # and re-renders ChatWindow with the new streaming_text on every token.
+        set_streaming_text(full_response)
+
     except Exception as exc:
       logger.error(f"LLM stream error: {exc}")
-      ai_ui_msg.content = f"⚠ Error reaching the model: {exc}"
-      set_messages(list(streaming_messages))
+      full_response = f"⚠ Error reaching the model: {exc}"
+      set_streaming_text(full_response)
+
+    # Commit the final text into the messages list and clear the streaming slot.
+    ai_ui_msg.content = full_response
+    set_messages(list(streaming_messages))
+    set_streaming_text("")
+
+    # Scroll the chat list to the bottom now that the full response is visible.
+    if chat_scroll_ref[0] is not None:
+      await chat_scroll_ref[0].scroll_to(offset=-1, duration=300)
 
     # --- 7. Persist the final AI message ---
     if full_response:
@@ -599,6 +622,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_account_click=switch_to_account,
         on_context_toggle=toggle_context,
         selected_view=current_context, # Use context to light up the sidebar icon correctly
+        config=engine.config,
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
       ),
       contextlist=ContextList(
@@ -632,6 +656,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_delete_workspace=handle_delete_workspace,
         thread=selected_thread,
         messages=messages,
+        streaming_text=streaming_text,
+        on_list_mounted=on_list_mounted,
         on_send_message=handle_send_message,
         is_streaming=is_streaming,
         settings=settings,
@@ -688,10 +714,10 @@ async def main(page: ft.Page, engine):
   page.dark_theme = ft.Theme(
     color_scheme=ft.ColorScheme(
       primary=ft.Colors.WHITE,
-      secondary=ft.Colors.GREY,
-      surface=ft.Colors.BLACK87,
+      secondary=ft.Colors.GREY_400,
+      surface=ft.Colors.GREY_900,
       secondary_container=ft.Colors.GREY_800,
-      primary_container=ft.Colors.GREY_800
+      primary_container=ft.Colors.GREY_700
     )
   )
 

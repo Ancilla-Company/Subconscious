@@ -1,8 +1,50 @@
 # Changelog
 
+<!-- markdownlint-disable MD024 -->
+
 All notable changes to Subconscious will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+---
+
+## [Unreleased]
+
+### Added (Unreleased)
+
+- _Nothing yet._
+
+### Changed (Unreleased)
+
+- _Nothing yet._
+
+### Fixed (Unreleased)
+
+- _Nothing yet._
+
+---
+
+## [0.1.9] - 2025-05-04
+
+### Added
+
+- Windows version distributed via winget
+
+---
+
+## [0.1.8] — 2026-05-04
+
+### Changed
+
+- Streaming LLM response updates
+- Typing placeholder & animation (currently broken)
+- Image resize tool
+- Terminal session tool
+- Dev mode tag in titlebar
+
+### Fixed
+
+- Self update for python distro
 
 ---
 
@@ -40,3 +82,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ---
 
 [0.1.0]: https://github.com/Ancilla-Company/Subconscious/releases/tag/v0.1.0
+
+<!-- markdownlint-enable MD024 -->

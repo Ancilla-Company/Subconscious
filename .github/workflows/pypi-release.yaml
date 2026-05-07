@@ -1,4 +1,4 @@
-name: Build and Release
+name: PyPi Release
 
 on:
   release:
@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Stamp build metadata (python)
+        run: cp deploy/build_metadata/python.json src/subconscious/assets/build_metadata.json
       - name: Build package
         run: |
           pip install build twine
@@ -29,7 +31,7 @@ jobs:
         with:
           name: python-dist
           path: dist/
-
+  
   publish-python:
     needs: [build-python]
     runs-on: ubuntu-latest
@@ -43,7 +45,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-      - name: Attach to GitHub Release
+      - name: Attach Python artifacts to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*

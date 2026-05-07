@@ -18,6 +18,8 @@ def MainWindow(
   on_delete_workspace=None,
   thread=None,
   messages=None,
+  streaming_text: str = "",
+  on_list_mounted=None,
   on_send_message=None,
   is_streaming=False,
   settings=None,
@@ -69,6 +71,8 @@ def MainWindow(
       content=ChatWindow(
         thread=thread,
         messages=messages,
+        streaming_text=streaming_text,
+        on_list_mounted=on_list_mounted,
         on_send_message=on_send_message,
         is_streaming=is_streaming,
         model_configs=model_configs,

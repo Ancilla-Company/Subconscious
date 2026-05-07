@@ -52,8 +52,8 @@ except Exception:
 
 if __name__ == "__main__":
   try:
-    if "gui" not in sys.argv:
-      sys.argv.insert(1, "gui")
+    if "desktop" not in sys.argv:
+      sys.argv.insert(1, "desktop")
     _log("Starting Subconscious...")
     main()
   except Exception:
