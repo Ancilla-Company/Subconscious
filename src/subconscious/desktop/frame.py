@@ -31,39 +31,29 @@ def Frame(
   return ft.Container(
     expand=True,
     bgcolor=ft.Colors.SURFACE,
-    content=ft.Row([
-      sidebar,
-      ft.Container(
-        expand=True,
-        content=ft.Column([
-          # Main region
-          ft.Row([
-            contextlist,
-            divider,
-            mainwindow
-          ], spacing=0, expand=True),
-          
-          # Footer - Status Bar
-          # ft.Row(
-          #   [
-          #     ft.Container(
-          #       expand=True,
-          #       height=20,
-          #       bgcolor=ft.Colors.SURFACE,
-          #       alignment=ft.Alignment.CENTER_RIGHT,
-          #       padding=ft.padding.only(5, 0, 5, 0),
-          #       border=ft.border.only(top=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER)),
-          #       content=ft.Row([
-          #         ft.Text(f"Workspace: {workspace_name}", size=10, color=ft.Colors.GREY_600),
-          #         ft.VerticalDivider(width=1, color=ft.Colors.SECONDARY_CONTAINER),
-          #         ft.Text(f"Version {VERSION}  ", size=10, color=ft.Colors.GREY_600),
-          #       ], alignment=ft.MainAxisAlignment.END, spacing=10),
-          #     ),
-          #   ],
-          #   spacing=0,
-          #   height=20
-          # )
-        ], spacing=0, expand=True),
-      )
-    ], spacing=0)
+    content=ft.Row(
+      [
+        sidebar,
+        ft.Container(
+          expand=True,
+          content=ft.Column(
+            [
+              # Main region
+              ft.Row(
+                [
+                  contextlist,
+                  divider,
+                  mainwindow
+                ],
+                spacing=0,
+                expand=True
+              )
+            ],
+            spacing=0,
+            expand=True
+          )
+        )
+      ],
+      spacing=0
+    )
   )
