@@ -506,9 +506,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_messages(list(streaming_messages))
     set_streaming_text("")
 
-    # Scroll the chat list to the bottom now that the full response is visible.
-    if chat_scroll_ref[0] is not None:
-      await chat_scroll_ref[0].scroll_to(offset=-1, duration=300)
+    # # Scroll the chat list to the bottom now that the full response is visible.
+    # if chat_scroll_ref[0] is not None:
+    #   await chat_scroll_ref[0].scroll_to(offset=-1, duration=300)
 
     # --- 7. Persist the final AI message ---
     if full_response:
@@ -522,6 +522,18 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
     set_is_streaming(False)
+
+    # Scroll the chat list to the bottom now that the full response is visible.
+    # asyncio.create_task(scroll_to_end(chat_scroll_ref[0]))
+  
+  async def scroll_to_end(msgs):
+    """ Scrolls to bottom of chat after new message """
+    while not msgs.did_mount():
+      await asyncio.sleep(1)
+
+    if msgs is not None:
+      await msgs.scroll_to(offset=-1, duration=300)
+
 
   async def handle_save_workspace(name, description, ws_id=None):
     async with engine.db.get_session() as session:
