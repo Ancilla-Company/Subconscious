@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -117,6 +118,8 @@ class AgentManager:
         ollama_base_url += "/v1"
       model_instance = OpenAIChatModel(raw_model, provider=OllamaProvider(base_url=ollama_base_url))
       logger.debug(f"Ollama base_url: {ollama_base_url}")
+    elif provider.lower() == "subconscious" and raw_model == "echo":
+      return EchoProvider()
 
     if tools:
       agent_kwargs: Any = dict(
@@ -138,3 +141,26 @@ class AgentManager:
       if cfg.get("model") and cfg.get("provider"):
         return {"id": model_id, **cfg}
     return None
+
+
+class EchoProvider(Agent):
+  """ Simple echo agent for dev testing with Pydantic AI
+      Inherits the Agent class to silence typing errors
+  """
+  text: str = ""
+
+  async def __aenter__(self, *args, **kwargs):
+    return self
+  
+  async def __aexit__(self, *args, **kwargs):
+    return
+  
+  def run_stream(self, prompt, *args, **kwargs):
+    self.text = prompt
+    return self
+
+  async def stream_text(self, *args, **kwargs):
+    """ Fake agent generator """
+    for chunk in self.text:
+      yield chunk
+      await asyncio.sleep(0.02)

@@ -138,6 +138,19 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
     # secrets["models"] is stored as {uuid: {...fields}} – convert to list
     loaded = [{"id": k, **v} for k, v in raw_models.items()]
+
+    # IF in dev mode, append simple echo agent for fast testing
+    if engine.config.dev:
+      loaded.append(
+        {
+          'id': 'echo',
+          'provider': 'Subconscious',
+          'model': 'echo',
+          'api_key': '',
+          'alias': 'Subconscious:Echo'
+        }
+      )
+
     set_model_configs(loaded)
 
     # Default to the first model config if none is currently selected
