@@ -16,6 +16,9 @@ from subconscious.desktop_tools.images import (
   batch_convert_image,
   batch_optimize_images,
   batch_resize_images,
+  _SCOUR_AVAILABLE,
+  _CAIROSVG_AVAILABLE,
+  _VTRACER_AVAILABLE,
 )
 
 
@@ -579,3 +582,334 @@ async def test_batch_resize_images_empty_directory(ctx, tmp_dir):
 
   result = await batch_resize_images(ctx, str(src_dir), str(dest_dir), width=100, height=100)
   assert "Resized 0 images" in result
+
+
+# ---------------------------------------------------------------------------
+# SVG helper
+# ---------------------------------------------------------------------------
+
+def create_test_svg(path: pathlib.Path, width: int = 100, height: int = 100) -> None:
+  """Write a minimal, valid SVG file."""
+  svg = (
+    f'<?xml version="1.0" encoding="UTF-8"?>\n'
+    f'<svg xmlns="http://www.w3.org/2000/svg" '
+    f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n'
+    f'  <!-- test comment -->\n'
+    f'  <rect width="{width}" height="{height}" fill="red"/>\n'
+    f'</svg>\n'
+  )
+  path.write_text(svg, encoding="utf-8")
+
+
+def create_test_svg_no_dimensions(path: pathlib.Path, vb_w: int = 200, vb_h: int = 100) -> None:
+  """SVG with only a viewBox and no explicit width/height."""
+  svg = (
+    f'<?xml version="1.0" encoding="UTF-8"?>\n'
+    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}">\n'
+    f'  <rect width="{vb_w}" height="{vb_h}" fill="blue"/>\n'
+    f'</svg>\n'
+  )
+  path.write_text(svg, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# optimize_image — SVG
+# ---------------------------------------------------------------------------
+
+async def test_optimize_svg_basic(ctx, tmp_dir):
+  """Optimizing an SVG should succeed and produce a smaller/equal file."""
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "optimized.svg"
+  create_test_svg(input_path)
+
+  result = await optimize_image(ctx, str(input_path), str(output_path))
+  assert "Successfully optimized" in result
+  assert output_path.exists()
+  content = output_path.read_text()
+  assert "<svg" in content
+
+
+async def test_optimize_svg_strips_comments(ctx, tmp_dir):
+  """Comments should be removed from the optimized SVG."""
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "optimized.svg"
+  create_test_svg(input_path)
+
+  await optimize_image(ctx, str(input_path), str(output_path))
+  content = output_path.read_text()
+  assert "<!-- test comment -->" not in content
+
+
+async def test_optimize_svg_overwrite(ctx, tmp_dir):
+  """No output_path → overwrite input."""
+  input_path = tmp_dir / "test.svg"
+  create_test_svg(input_path)
+
+  result = await optimize_image(ctx, str(input_path))
+  assert "Successfully optimized" in result
+  assert input_path.exists()
+
+
+async def test_optimize_svg_invalid_path(ctx, tmp_dir):
+  result = await optimize_image(ctx, str(tmp_dir / "missing.svg"))
+  assert "not exist" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# resize_image — SVG
+# ---------------------------------------------------------------------------
+
+async def test_resize_svg_explicit_dimensions(ctx, tmp_dir):
+  """SVG resize to explicit width×height should update XML attributes."""
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "resized.svg"
+  create_test_svg(input_path, width=100, height=100)
+
+  result = await resize_image(ctx, str(input_path), 200, 200, str(output_path))
+  assert "Successfully resized" in result
+  assert "200×200" in result
+  content = output_path.read_text()
+  assert 'width="200"' in content
+  assert 'height="200"' in content
+
+
+async def test_resize_svg_allows_upscale(ctx, tmp_dir):
+  """SVG resize must allow upscaling (unlike raster)."""
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "resized.svg"
+  create_test_svg(input_path, width=50, height=50)
+
+  result = await resize_image(ctx, str(input_path), 400, 400, str(output_path))
+  assert "Successfully resized" in result
+  assert "Upscaling" not in result
+
+
+async def test_resize_svg_maintain_aspect_ratio(ctx, tmp_dir):
+  """200×100 SVG into a 200×200 box with AR → 200×100."""
+  input_path = tmp_dir / "wide.svg"
+  output_path = tmp_dir / "resized.svg"
+  create_test_svg(input_path, width=200, height=100)
+
+  result = await resize_image(ctx, str(input_path), 200, 200, str(output_path),
+                              maintain_aspect_ratio=True)
+  assert "Successfully resized" in result
+  content = output_path.read_text()
+  assert 'width="200"' in content
+  assert 'height="100"' in content
+
+
+async def test_resize_svg_derive_width_from_height(ctx, tmp_dir):
+  """width=0 → derived from height for SVG."""
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "resized.svg"
+  create_test_svg(input_path, width=200, height=100)
+
+  result = await resize_image(ctx, str(input_path), 0, 50, str(output_path))
+  assert "Successfully resized" in result
+  content = output_path.read_text()
+  assert 'height="50"' in content
+  assert 'width="100"' in content
+
+
+async def test_resize_svg_preserves_viewbox(ctx, tmp_dir):
+  """Resizing an SVG that already has a viewBox should keep the viewBox intact."""
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "resized.svg"
+  create_test_svg(input_path, width=100, height=100)
+
+  await resize_image(ctx, str(input_path), 50, 50, str(output_path))
+  content = output_path.read_text()
+  assert "viewBox" in content
+
+
+async def test_resize_svg_adds_viewbox_when_missing(ctx, tmp_dir):
+  """An SVG with no viewBox should have one added when resized."""
+  input_path = tmp_dir / "no_vb.svg"
+  output_path = tmp_dir / "resized.svg"
+  create_test_svg_no_dimensions(input_path, vb_w=200, vb_h=100)
+
+  result = await resize_image(ctx, str(input_path), 100, 50, str(output_path))
+  assert "Successfully resized" in result
+  content = output_path.read_text()
+  assert "viewBox" in content
+
+
+# ---------------------------------------------------------------------------
+# convert_image — SVG input
+# ---------------------------------------------------------------------------
+
+async def test_convert_svg_to_svg_copy(ctx, tmp_dir):
+  """SVG → SVG should produce a copy at the output path."""
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "copy.svg"
+  create_test_svg(input_path)
+
+  result = await convert_image(ctx, str(input_path), "SVG", str(output_path))
+  assert "Successfully converted" in result
+  assert output_path.exists()
+  assert "<svg" in output_path.read_text()
+
+
+@pytest.mark.skipif(not _CAIROSVG_AVAILABLE, reason="cairosvg not installed")
+async def test_convert_svg_to_png(ctx, tmp_dir):
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "out.png"
+  create_test_svg(input_path)
+
+  result = await convert_image(ctx, str(input_path), "PNG", str(output_path))
+  assert "Successfully converted" in result
+  assert output_path.exists()
+  with Image.open(output_path) as img:
+    assert img.format == "PNG"
+
+
+@pytest.mark.skipif(not _CAIROSVG_AVAILABLE, reason="cairosvg not installed")
+async def test_convert_svg_to_jpg(ctx, tmp_dir):
+  input_path = tmp_dir / "test.svg"
+  output_path = tmp_dir / "out.jpg"
+  create_test_svg(input_path)
+
+  result = await convert_image(ctx, str(input_path), "JPG", str(output_path))
+  assert "Successfully converted" in result
+  assert output_path.exists()
+
+
+async def test_convert_svg_to_raster_without_cairosvg(ctx, tmp_dir, monkeypatch):
+  """Without cairosvg, conversion should return a helpful error."""
+  import subconscious.desktop_tools.images as img_module
+  monkeypatch.setattr(img_module, "_CAIROSVG_AVAILABLE", False)
+
+  input_path = tmp_dir / "test.svg"
+  create_test_svg(input_path)
+
+  result = await convert_image(ctx, str(input_path), "PNG", str(tmp_dir / "out.png"))
+  assert "cairosvg" in result.lower()
+
+
+async def test_convert_raster_to_svg_without_vtracer(ctx, tmp_dir, monkeypatch):
+  """Without vtracer, conversion should return a helpful install hint."""
+  import subconscious.desktop_tools.images as img_module
+  monkeypatch.setattr(img_module, "_VTRACER_AVAILABLE", False)
+
+  input_path = tmp_dir / "test.png"
+  create_test_png(input_path)
+
+  result = await convert_image(ctx, str(input_path), "SVG", str(tmp_dir / "out.svg"))
+  assert "vtracer" in result.lower()
+
+
+@pytest.mark.skipif(not _VTRACER_AVAILABLE, reason="vtracer not installed")
+async def test_convert_png_to_svg(ctx, tmp_dir):
+  """PNG → SVG should produce a valid SVG file."""
+  input_path = tmp_dir / "test.png"
+  output_path = tmp_dir / "out.svg"
+  create_test_png(input_path, size=(64, 64))
+
+  result = await convert_image(ctx, str(input_path), "SVG", str(output_path))
+  assert "Successfully converted" in result
+  assert output_path.exists()
+  content = output_path.read_text()
+  assert "<svg" in content
+
+
+@pytest.mark.skipif(not _VTRACER_AVAILABLE, reason="vtracer not installed")
+async def test_convert_jpg_to_svg(ctx, tmp_dir):
+  """JPG → SVG should produce a valid SVG file."""
+  input_path = tmp_dir / "test.jpg"
+  output_path = tmp_dir / "out.svg"
+  create_test_jpg(input_path, size=(64, 64))
+
+  result = await convert_image(ctx, str(input_path), "SVG", str(output_path))
+  assert "Successfully converted" in result
+  assert output_path.exists()
+  assert "<svg" in output_path.read_text()
+
+
+@pytest.mark.skipif(not _VTRACER_AVAILABLE, reason="vtracer not installed")
+async def test_convert_bmp_to_svg(ctx, tmp_dir):
+  """BMP → SVG should produce a valid SVG file."""
+  input_path = tmp_dir / "test.bmp"
+  output_path = tmp_dir / "out.svg"
+  create_test_bmp(input_path, size=(64, 64))
+
+  result = await convert_image(ctx, str(input_path), "SVG", str(output_path))
+  assert "Successfully converted" in result
+  assert output_path.exists()
+  assert "<svg" in output_path.read_text()
+
+
+@pytest.mark.skipif(not _VTRACER_AVAILABLE, reason="vtracer not installed")
+async def test_convert_to_svg_auto_output_path(ctx, tmp_dir):
+  """output_path=None should use input stem + .svg extension."""
+  input_path = tmp_dir / "test.png"
+  create_test_png(input_path, size=(32, 32))
+
+  result = await convert_image(ctx, str(input_path), "SVG")
+  expected = input_path.with_suffix(".svg")
+  assert "Successfully converted" in result
+  assert expected.exists()
+  assert "<svg" in expected.read_text()
+
+
+@pytest.mark.skipif(not _VTRACER_AVAILABLE, reason="vtracer not installed")
+async def test_batch_convert_to_svg(ctx, tmp_dir):
+  """Batch convert should produce SVG files for all raster inputs."""
+  src_dir = tmp_dir / "src"
+  dest_dir = tmp_dir / "dest"
+  src_dir.mkdir()
+  create_test_png(src_dir / "a.png", size=(32, 32))
+  create_test_jpg(src_dir / "b.jpg", size=(32, 32))
+
+  result = await batch_convert_image(ctx, str(src_dir), str(dest_dir), "SVG")
+  assert "Converted 2 images to SVG" in result
+  assert (dest_dir / "a.svg").exists()
+  assert (dest_dir / "b.svg").exists()
+  assert "<svg" in (dest_dir / "a.svg").read_text()
+
+
+async def test_convert_svg_unsupported_target(ctx, tmp_dir):
+  """SVG → ICO/TIFF/GIF should return a clear error (not in SVG raster set)."""
+  input_path = tmp_dir / "test.svg"
+  create_test_svg(input_path)
+
+  result = await convert_image(ctx, str(input_path), "ICO", str(tmp_dir / "out.ico"))
+  assert "Cannot convert SVG" in result
+
+
+# ---------------------------------------------------------------------------
+# batch_optimize_images — SVG
+# ---------------------------------------------------------------------------
+
+async def test_batch_optimize_includes_svg(ctx, tmp_dir):
+  """Batch optimize should process SVG files alongside raster images."""
+  src_dir = tmp_dir / "src"
+  dest_dir = tmp_dir / "dest"
+  src_dir.mkdir()
+
+  create_test_png(src_dir / "img.png")
+  create_test_svg(src_dir / "icon.svg")
+
+  result = await batch_optimize_images(ctx, str(src_dir), str(dest_dir))
+  assert "Processed 2 images" in result
+  assert (dest_dir / "img.png").exists()
+  assert (dest_dir / "icon.svg").exists()
+
+
+# ---------------------------------------------------------------------------
+# batch_resize_images — SVG
+# ---------------------------------------------------------------------------
+
+async def test_batch_resize_includes_svg(ctx, tmp_dir):
+  """Batch resize should resize SVG files alongside raster images."""
+  src_dir = tmp_dir / "src"
+  dest_dir = tmp_dir / "dest"
+  src_dir.mkdir()
+
+  create_test_png(src_dir / "img.png", size=(300, 300))
+  create_test_svg(src_dir / "icon.svg", width=300, height=300)
+
+  result = await batch_resize_images(ctx, str(src_dir), str(dest_dir), width=150, height=150)
+  assert "Resized 2 images" in result
+  assert (dest_dir / "icon.svg").exists()
+  content = (dest_dir / "icon.svg").read_text()
+  assert 'width="150"' in content
