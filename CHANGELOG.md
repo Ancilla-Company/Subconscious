@@ -1,6 +1,5 @@
 # Changelog
 
-<!-- markdownlint-disable MD024 -->
 
 All notable changes to Subconscious will be documented in this file.
 
@@ -8,19 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [0.1.10]
 
 ### Added (Unreleased)
 
-- _Nothing yet._
+- Internet connectivity tool
+- File search tool
+- Echo agent for dev mode testing
 
 ### Changed (Unreleased)
 
-- _Nothing yet._
+- Updated image tools to accept vector files like svg
 
 ### Fixed (Unreleased)
 
-- _Nothing yet._
+- Self update bug
 
 ---
 
@@ -83,4 +84,3 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [0.1.0]: https://github.com/Ancilla-Company/Subconscious/releases/tag/v0.1.0
 
-<!-- markdownlint-enable MD024 -->
