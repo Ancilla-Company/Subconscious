@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed (Unreleased)
 
 - Self update bug
+- Manifest format update for winget
 
 ---
 
