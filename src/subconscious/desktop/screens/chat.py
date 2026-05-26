@@ -197,9 +197,12 @@ def ChatWindow(
   # Attachments: list of dicts  {"path": str, "type": "file"|"folder", "name": str}
   attachments, set_attachments = ft.use_state([])
 
-  # Dummy state and logic to resolve rendering errors from older version
-  def llm_configured(): return True
-  def focus_message_form(e): pass
+  # Determine whether an LLM/model is configured for the UI
+  def llm_configured():
+    return bool(model_configs and len(model_configs) > 0)
+
+  def focus_message_form(e):
+    pass
 
   # ── Attachment helpers ───────────────────────────────────────────────────
   def remove_attachment(path: str):
@@ -319,8 +322,22 @@ def ChatWindow(
     [
       # Chat thread messages
       ft.Container(
-        content=ft.ShaderMask(
-          content=ft.SelectionArea(content=message_list) if llm_configured() else ft.Text("Configure LLM"),
+          content=ft.ShaderMask(
+          content=ft.SelectionArea(content=message_list) if llm_configured() else ft.Container(
+            content=ft.Column(
+              [
+                ft.Icon(ft.Icons.WARNING_AMBER_OUTLINED, size=48, color=ft.Colors.GREY_600),
+                ft.Text("No models configured", size=16, weight=ft.FontWeight.W_600, color=ft.Colors.PRIMARY),
+                ft.Text("Connect a model in Settings → Models to start chatting.", size=16, color=ft.Colors.GREY_600),
+              ],
+              alignment=ft.MainAxisAlignment.CENTER,
+              horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+              spacing=8
+            ),
+            expand=True,
+            alignment=ft.Alignment.CENTER,
+            margin=ft.margin.only(left=13, right=15),
+          ),
           blend_mode=ft.BlendMode.DST_IN,
           # border_radius=10, # No effect
           shader=ft.LinearGradient(
@@ -335,7 +352,7 @@ def ChatWindow(
         alignment=ft.Alignment.TOP_CENTER
       ),
 
-      # Message form / Chatbox
+      # Message form / Chatbox (hidden until an LLM/model is configured)
       ft.Row(
         [
           ft.Stack(
@@ -511,7 +528,7 @@ def ChatWindow(
         spacing=0,
         expand=True,
         alignment=ft.MainAxisAlignment.CENTER
-      ),
+      ) if llm_configured() else ft.Container(),
       # Chat thread header
       chatwindow_header if llm_configured() else ft.Container(),
     ]
