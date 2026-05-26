@@ -119,18 +119,18 @@ jobs:
           if [ -n "$RELEASE_TAG" ]; then
             VERSION="${RELEASE_TAG#v}"
           else
-            VERSION=$(python -c "import re; from pathlib import Path; text=Path('deploy/winget/manifest.yaml').read_text(encoding='utf-8'); m=re.search(r'^PackageVersion:\\s*([^\\n]+)$', text, flags=re.M); print(m.group(1).strip() if m else '0.0.0')")
+            VERSION=$(python -c "import re; from pathlib import Path; text=Path('deploy/winget/Ancilla.Subconscious-Chat.installer.yaml').read_text(encoding='utf-8'); m=re.search(r'^PackageVersion:\\s*([^\\n]+)$', text, flags=re.M); print(m.group(1).strip() if m else '0.0.0')")
           fi
 
           SHA=$(sha256sum dist/windows/subconscious-setup-x64.exe | awk '{print toupper($1)}')
           URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/subconscious-setup-x64.exe"
 
-          VERSION="$VERSION" URL="$URL" SHA="$SHA" python -c "import os,re; from pathlib import Path; manifest=Path('deploy/winget/manifest.yaml'); text=manifest.read_text(encoding='utf-8'); version=os.environ['VERSION']; url=os.environ['URL']; sha=os.environ['SHA']; text=re.sub(r'^PackageVersion:\\s*.*$', f'PackageVersion: {version}', text, flags=re.M); text=re.sub(r'^(\\s+InstallerUrl:)\\s*.*$', rf'\\1 {url}', text, flags=re.M); text=re.sub(r'^(\\s+InstallerSha256:)\\s*.*$', rf'\\1 {sha}', text, flags=re.M); manifest.write_text(text, encoding='utf-8')"
+          VERSION="$VERSION" URL="$URL" SHA="$SHA" python -c "import os,re; from pathlib import Path; manifest=Path('deploy/winget/Ancilla.Subconscious-Chat.installer.yaml'); text=manifest.read_text(encoding='utf-8'); version=os.environ['VERSION']; url=os.environ['URL']; sha=os.environ['SHA']; text=re.sub(r'^PackageVersion:\\s*.*$', f'PackageVersion: {version}', text, flags=re.M); text=re.sub(r'^(\\s+InstallerUrl:)\\s*.*$', rf'\\1 {url}', text, flags=re.M); text=re.sub(r'^(\\s+InstallerSha256:)\\s*.*$', rf'\\1 {sha}', text, flags=re.M); manifest.write_text(text, encoding='utf-8')"
       - name: Commit updated winget manifest
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deploy/winget/manifest.yaml
+          git add deploy/winget/Ancilla.Subconscious-Chat.installer.yaml
           git diff --staged --quiet || git commit -m "chore(winget): update manifest sha/url/version for release"
           git push
 
