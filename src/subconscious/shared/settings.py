@@ -161,7 +161,7 @@ def ModelPanel(
         hint="Enter your API key"
       ),
       FormField(
-        label="Base URL",
+        label="Base URL (Assumes OpenAI type API)" if show_url(provider) else "Base URL",
         value=base_url if base_url else (local_endpoint(provider) if show_url(provider) else ""),
         on_change=handle_base_url_change,
         hint=local_endpoint(provider),

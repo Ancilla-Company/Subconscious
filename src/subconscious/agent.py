@@ -37,11 +37,24 @@ _PROVIDER_MAP = {
   "github models":                    ("openai",      "GITHUB_TOKEN"),
   "litellm":                          ("openai",      "LITELLM_API_KEY"),
   "nebius ai studio":                 ("openai",      "NEBIUS_API_KEY"),
-  "ollama":                           ("ollama",      None),             # no API key needed for local
+  "ollama":                           ("ollama",      None),              # no API key needed for local
+  "lm studio":                        ("openai",      None),              # no API key needed for local
+  "custom":                           ("openai",      None),              # no API key needed for local
   "perplexity":                       ("openai",      "PERPLEXITY_API_KEY"),
   "sambanova":                        ("openai",      "SAMBANOVA_API_KEY"),
   "together ai":                      ("openai",      "TOGETHER_API_KEY"),
 }
+
+
+def custom_endpoints(provider: str) -> str:
+  """ Returns to assumed local endpoint for the passed in provider.
+      Ofcourse, users can edit it for different or remote endpoints
+  """
+  endpoints = {
+    "ollama": "http://localhost:11434/v1",
+    "lm studio": "http://127.0.0.1:1234/v1"
+  }
+  return endpoints.get(provider, "")
 
 
 def _provider_prefix(provider: str) -> str:
@@ -112,12 +125,12 @@ class AgentManager:
 
     # For Ollama, use OpenAIChatModel with OllamaProvider to allow a custom base_url
     model_instance: Any = full_model_str
-    if provider.lower() == "ollama":
-      ollama_base_url = (base_url or "http://localhost:11434/v1").rstrip("/")
-      if not ollama_base_url.endswith("/v1"):
-        ollama_base_url += "/v1"
-      model_instance = OpenAIChatModel(raw_model, provider=OllamaProvider(base_url=ollama_base_url))
-      logger.debug(f"Ollama base_url: {ollama_base_url}")
+    if provider.lower() in ["ollama", "lm studio", "custom"]:
+      custom_base_url = (base_url or custom_endpoints(provider.lower())).rstrip("/")
+      if not custom_base_url.endswith("/v1"):
+        custom_base_url += "/v1"
+      model_instance = OpenAIChatModel(raw_model, provider=OllamaProvider(base_url=custom_base_url))
+      logger.debug(f"Custom base_url: {custom_base_url}")
     elif provider.lower() == "subconscious" and raw_model == "echo":
       return EchoProvider()
 
