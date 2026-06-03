@@ -43,7 +43,7 @@ except ImportError:
   _SCOUR_AVAILABLE = False
 
 try:
-  import cairosvg as _cairosvg
+  import cairosvg as _cairosvg  #@IgnoreException
   _CAIROSVG_AVAILABLE = True
 except (ImportError, OSError):
   _cairosvg = None  # type: ignore[assignment]

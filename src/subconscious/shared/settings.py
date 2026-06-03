@@ -30,6 +30,8 @@ _PROVIDERS = [
   ft.dropdown.Option("LiteLLM"),
   ft.dropdown.Option("Nebius AI Studio"),
   ft.dropdown.Option("Ollama"),
+  ft.dropdown.Option("Custom"),
+  ft.dropdown.Option("LM Studio"),
   ft.dropdown.Option("Perplexity"),
   ft.dropdown.Option("SambaNova"),
   ft.dropdown.Option("Together AI"),
@@ -113,6 +115,21 @@ def ModelPanel(
   def handle_delete(e):
     if on_delete:
       on_delete(model_id)
+  
+  def local_endpoint(provider: str) -> str:
+    """ Returns to assumed local endpoint for the passed in provider.
+        Ofcourse, users can edit it for different or remote endpoints
+    """
+    endpoints = {
+      "Ollama": "http://localhost:11434/v1",
+      "LM Studio": "http://127.0.0.1:1234/v1"
+    }
+    return endpoints.get(provider, "")
+
+  def show_url(provider: str) -> bool:
+    """ Shows the base url field for special providers """
+    supported_providers = ["Ollama", "LM Studio", "Custom"]
+    return provider in supported_providers
 
   # Derive display title for the panel header
   if alias:
@@ -145,10 +162,10 @@ def ModelPanel(
       ),
       FormField(
         label="Base URL",
-        value=base_url if base_url else ("http://localhost:11434/v1" if provider == "Ollama" else ""),
+        value=base_url if base_url else (local_endpoint(provider) if show_url(provider) else ""),
         on_change=handle_base_url_change,
-        hint="http://localhost:11434/v1",
-        visible=(provider == "Ollama"),
+        hint=local_endpoint(provider),
+        visible=(show_url(provider)),
       ),
       FormField(
         label="Alias",
@@ -1028,8 +1045,10 @@ def Tools(
 
 
 @ft.component
-def About(update_available: bool = False, on_update=None) -> ft.Control:
+def About(settings=None, update_available: bool = False, on_update=None) -> ft.Control:
   """ Renders the about settings panel """
+  # Set dummy state var to trigger state load
+  _, __ = ft.use_state(None)
 
   async def handle_update(_):
     if on_update:
