@@ -17,6 +17,7 @@ from sqlalchemy import select
 from packaging.version import Version
 from typing import AsyncIterator, Optional
 from sqlalchemy import update as sql_update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from pydantic_ai.messages import (
   ModelMessage, ModelRequest, ModelResponse,
   UserPromptPart, TextPart,
@@ -64,6 +65,7 @@ class Engine:
     try:
       system_settings = {
         "mode": [ "auto", "light", "dark" ],
+        "colour": ["default", "purple", "blue", "teal", "green", "yellow", "orange", "red", "pink"],
         "language": [ "en" ],
         "position": [ "x", "y" ],
         "size": [ "width", "height" ],
@@ -519,15 +521,27 @@ class Engine:
     logger.info(f"[notification] {title}: {message}")
 
   async def update_setting(self, key: str, value: str, tag: str = "system"):
-    """Update a setting in the database and notify any registered UI callbacks."""
+    """ Update a setting in the database and notify any registered UI callbacks. """
     async with self.db.get_session() as session:
-      stmt = sql_update(AppState).where(
-        AppState.key == key,
-        AppState.tag == tag
-      ).values(value=value)
+      insert_values = {
+        "key": key,
+        "tag": tag,
+        "value": value
+      }
+      
+      # Build the SQLite upsert statement
+      stmt = (
+        sqlite_insert(AppState)
+        .values(**insert_values)
+        .on_conflict_do_update(
+          index_elements=[AppState.key],  
+          set_={"value": sqlite_insert(AppState).excluded.value}
+        )
+      )
+      
+      # Execute and commit
       await session.execute(stmt)
       await session.commit()
-      logger.debug(f"Updated setting: {key}={value} (tag={tag})")
 
     # Notify registered UI callbacks so changes are reflected in real-time
     for cb in self._setting_callbacks.get(key, []):

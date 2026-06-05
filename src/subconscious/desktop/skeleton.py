@@ -80,6 +80,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   # Settings Management State
   settings, set_settings = ft.use_state({})
+  # Mutable ref to hold current settings for callbacks (avoids stale closure)
+  settings_ref, _ = ft.use_state([{}])
   selected_setting, set_selected_setting = ft.use_state(None)
   about_badge_dismissed, set_about_badge_dismissed = ft.use_state(False)
   settings_badge_dismissed, set_settings_badge_dismissed = ft.use_state(False)
@@ -102,6 +104,36 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     "auto": ft.ThemeMode.SYSTEM,
   }
 
+  _LIGHT = ft.Theme(
+    color_scheme=ft.ColorScheme(
+      primary=ft.Colors.BLACK,
+      secondary=ft.Colors.GREY,
+      surface=ft.Colors.WHITE,
+      secondary_container=ft.Colors.GREY_300,
+      primary_container=ft.Colors.GREY_300
+    )
+  )
+  _DARK = ft.Theme(
+    color_scheme=ft.ColorScheme(
+      primary=ft.Colors.WHITE,
+      secondary=ft.Colors.GREY,
+      surface=ft.Colors.BLACK87,
+      secondary_container=ft.Colors.GREY_800,
+      primary_container=ft.Colors.GREY_800
+    )
+  )
+
+  _THEME_MAP = {
+    "purple": ft.Theme(color_scheme_seed=ft.Colors.DEEP_PURPLE),
+    "blue": ft.Theme(color_scheme_seed=ft.Colors.BLUE),
+    "teal": ft.Theme(color_scheme_seed=ft.Colors.TEAL),
+    "green": ft.Theme(color_scheme_seed=ft.Colors.GREEN),
+    "yellow": ft.Theme(color_scheme_seed=ft.Colors.YELLOW),
+    "orange": ft.Theme(color_scheme_seed=ft.Colors.ORANGE),
+    "red": ft.Theme(color_scheme_seed=ft.Colors.RED),
+    "pink": ft.Theme(color_scheme_seed=ft.Colors.PINK),
+  }
+
   async def apply_setting_to_ui(key: str, value: str, _tag: str = "system"):
     """
     UI-only: apply an already-persisted setting to the live Flet page and
@@ -112,7 +144,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     if key == "mode":
       page.theme_mode = _MODE_MAP.get(value, ft.ThemeMode.SYSTEM)
       page.update()
-    new_settings = {**settings, key: str(value)}
+    elif key == "colour":
+      if value == "default":
+        page.theme = _LIGHT
+        page.dark_theme = _DARK
+      else:
+        page.theme = _THEME_MAP.get(value, page.theme)
+        page.dark_theme = _THEME_MAP.get(value, page.theme)
+      page.update()
+
+    new_settings = {**settings_ref[0], key: str(value)}
+    settings_ref[0] = new_settings
     set_settings(new_settings)
 
   async def load_settings():
@@ -121,16 +163,22 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     # because that function also calls engine.update_setting, which would
     # trigger the callback again and cause infinite recursion.
     engine.register_setting_callback("mode", apply_setting_to_ui)
+    engine.register_setting_callback("colour", apply_setting_to_ui)
 
     async with engine.db.get_session() as session:
       stmt = select(AppState).where(AppState.tag.in_(["system", "general"]))
       result = await session.scalars(stmt)
       db_settings = {s.key: s.value for s in result.all()}
+      settings_ref[0] = db_settings
       set_settings(db_settings)
 
       # Apply some settings immediately if needed
       if "mode" in db_settings:
-        page.theme_mode = _MODE_MAP.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
+        await apply_setting_to_ui("mode", db_settings["mode"], "system")
+        # page.theme_mode = _MODE_MAP.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
+      if "colour" in db_settings:
+        await apply_setting_to_ui("colour", db_settings["colour"], "system")
+      
 
     # Load model configs from encrypted storage
     engine.config.read_keyring()
@@ -310,7 +358,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_workspaces(result.all())
 
   async def load_threads(workspace_id=None):
-    from sqlalchemy import func, case
     async with engine.db.get_session() as session:
       # Sort by updated_at when available, fall back to created_at for older rows
       recency = func.coalesce(Thread.updated_at, Thread.created_at).desc()
@@ -717,8 +764,6 @@ async def main(page: ft.Page, engine):
   """ Application window config """
   page.padding = 0
   page.spacing = 0
-  page.window.width = 800
-  page.window.height = 800
   page.title = "Subconscious"
   page.window.min_width = 506
   page.window.min_height = 300
@@ -727,24 +772,6 @@ async def main(page: ft.Page, engine):
   page.bgcolor = ft.Colors.SURFACE
   page.window.title_bar_hidden = True
   page.theme_mode = ft.ThemeMode.LIGHT
-  page.theme = ft.Theme(
-    color_scheme=ft.ColorScheme(
-      primary=ft.Colors.BLACK,
-      secondary=ft.Colors.GREY,
-      surface=ft.Colors.WHITE,
-      secondary_container=ft.Colors.GREY_300,
-      primary_container=ft.Colors.GREY_300
-    )
-  )
-  page.dark_theme = ft.Theme(
-    color_scheme=ft.ColorScheme(
-      primary=ft.Colors.WHITE,
-      secondary=ft.Colors.GREY_400,
-      surface=ft.Colors.GREY_900,
-      secondary_container=ft.Colors.GREY_800,
-      primary_container=ft.Colors.GREY_700
-    )
-  )
 
   # Could put load settings here
 
