@@ -560,7 +560,27 @@ class Engine:
         )
       )
       return result
-  
+
+  async def save_ui_state(self, key: str, value: str) -> None:
+    """Upsert a UI state entry in app_state (tag='ui_state')."""
+    async with self.db.get_session() as session:
+      existing = await session.scalar(
+        select(AppState).where(AppState.key == key, AppState.tag == "ui_state")
+      )
+      if existing:
+        existing.value = value
+      else:
+        session.add(AppState(key=key, value=value, tag="ui_state"))
+      await session.commit()
+
+  async def load_ui_state(self) -> dict:
+    """Load all UI state entries from app_state (tag='ui_state')."""
+    async with self.db.get_session() as session:
+      result = await session.scalars(
+        select(AppState).where(AppState.tag == "ui_state")
+      )
+      return {s.key: s.value for s in result.all()}
+
   async def check_for_updates(self):
     """ Check for updates """
     try:
