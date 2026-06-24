@@ -2,6 +2,7 @@ import asyncio
 import flet as ft
 
 from .screens.chat import ChatWindow
+from .screens.auth import AccountWindow
 from ..shared.buttons import TextButton
 from ..shared.forms import FormField, TextArea, CheckBox
 from ..shared.layout import ResponsiveItem, ResponsiveParent
@@ -43,6 +44,16 @@ def MainWindow(
   on_update=None,
   selected_model_config=None,
   on_model_select=None,
+  auth_user=None,
+  is_authenticated: bool = False,
+  on_login_email=None,
+  on_register_email=None,
+  on_verify_email=None,
+  on_complete_signup=None,
+  on_request_reset=None,
+  on_confirm_reset=None,
+  on_github_login=None,
+  on_logout=None,
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -241,29 +252,17 @@ def MainWindow(
       )
   elif current_view == "account":
     content = ft.Container(
-      content=ft.Column(
-        [
-          ft.Icon(
-            ft.Icons.PERSON_OUTLINED,
-            size=64,
-            color=ft.Colors.GREY_400
-          ),
-          ft.Text(
-            "Account",
-            size=24,
-            weight=ft.FontWeight.W_500,
-            color=ft.Colors.GREY_500
-          ),
-          ft.Text(
-            "Login and profile management coming soon.",
-            size=14,
-            color=ft.Colors.GREY_500
-          ),
-        ],
-        spacing=12,
-        expand=True,
-        alignment=ft.MainAxisAlignment.CENTER,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+      content=AccountWindow(
+        user=auth_user,
+        is_authenticated=is_authenticated,
+        on_login_email=on_login_email,
+        on_register_email=on_register_email,
+        on_verify_email=on_verify_email,
+        on_complete_signup=on_complete_signup,
+        on_request_reset=on_request_reset,
+        on_confirm_reset=on_confirm_reset,
+        on_github_login=on_github_login,
+        on_logout=on_logout,
       ),
       expand=True,
     )

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from .tray import *
 from .frame import Frame
 from .sidebar import Sidebar
+from ..auth import AuthError
 from .titlebar import TitleBar
 from .mainwindow import MainWindow
 from .contextlist import ContextList
@@ -77,6 +78,12 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   show_all_threads, set_show_all_threads = ft.use_state(False)
   # Currently active model config for the chat window
   selected_model_config, set_selected_model_config = ft.use_state(None)
+
+  # Auth / account state
+  auth_user, set_auth_user = ft.use_state(engine.auth.current_user if hasattr(engine, "auth") else None)
+  is_authenticated, set_is_authenticated = ft.use_state(
+    engine.auth.is_authenticated if hasattr(engine, "auth") else False
+  )
 
   # Settings Management State
   settings, set_settings = ft.use_state({})
@@ -414,6 +421,21 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     asyncio.create_task(load_workspaces())
     asyncio.create_task(load_threads())
     asyncio.create_task(load_settings())
+    asyncio.create_task(refresh_account())
+
+  async def refresh_account():
+    """If a session was restored from disk, validate it against the server and
+    refresh the cached user profile."""
+    if not getattr(engine, "auth", None) or not engine.auth.is_authenticated:
+      return
+    try:
+      await engine.auth.fetch_me()
+    except AuthError:
+      # Token invalid/expired and couldn't refresh — session is cleared by the
+      # auth manager; just reflect that in the UI.
+      pass
+    set_auth_user(engine.auth.current_user)
+    set_is_authenticated(engine.auth.is_authenticated)
   
   ft.use_effect(on_mount, [])
 
@@ -684,6 +706,70 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("account")
     set_context_visible(False)
 
+  # ── Auth handlers ──────────────────────────────────────────────────────────
+  # Each returns a small result dict consumed by AccountWindow:
+  #   {"ok": bool, "error": str | None, "token": str | None}
+  def _sync_auth_state():
+    set_auth_user(engine.auth.current_user)
+    set_is_authenticated(engine.auth.is_authenticated)
+
+  async def handle_login_email(email, password):
+    try:
+      await engine.auth.login_email(email, password)
+      _sync_auth_state()
+      return {"ok": True}
+    except AuthError as exc:
+      return {"ok": False, "error": exc.message}
+
+  async def handle_register_email(email):
+    try:
+      await engine.auth.register_email(email)
+      return {"ok": True}
+    except AuthError as exc:
+      return {"ok": False, "error": exc.message}
+
+  async def handle_verify_email(email, code):
+    try:
+      token = await engine.auth.verify_email(email, code)
+      return {"ok": True, "token": token}
+    except AuthError as exc:
+      return {"ok": False, "error": exc.message}
+
+  async def handle_complete_signup(token, password, display_name):
+    try:
+      await engine.auth.complete_signup(token, password, display_name)
+      _sync_auth_state()
+      return {"ok": True}
+    except AuthError as exc:
+      return {"ok": False, "error": exc.message}
+
+  async def handle_request_reset(email):
+    try:
+      await engine.auth.request_password_reset(email)
+      return {"ok": True}
+    except AuthError as exc:
+      return {"ok": False, "error": exc.message}
+
+  async def handle_confirm_reset(email, code, new_password):
+    try:
+      await engine.auth.confirm_password_reset(email, code, new_password)
+      _sync_auth_state()
+      return {"ok": True}
+    except AuthError as exc:
+      return {"ok": False, "error": exc.message}
+
+  async def handle_github_login():
+    try:
+      await engine.auth.login_oauth("github")
+      _sync_auth_state()
+      return {"ok": True}
+    except AuthError as exc:
+      return {"ok": False, "error": exc.message}
+
+  async def handle_logout():
+    await engine.auth.logout()
+    _sync_auth_state()
+
   return [
     TitleBar(dev=engine.config.dev),
     Frame(
@@ -753,6 +839,16 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_update=engine.run_update,
         selected_model_config=selected_model_config,
         on_model_select=handle_model_select,
+        auth_user=auth_user,
+        is_authenticated=is_authenticated,
+        on_login_email=handle_login_email,
+        on_register_email=handle_register_email,
+        on_verify_email=handle_verify_email,
+        on_complete_signup=handle_complete_signup,
+        on_request_reset=handle_request_reset,
+        on_confirm_reset=handle_confirm_reset,
+        on_github_login=handle_github_login,
+        on_logout=handle_logout,
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,

@@ -24,6 +24,7 @@ from pydantic_ai.messages import (
 )
 
 from .config import Config
+from .auth import AuthManager
 from .constants import VERSION
 from .agent import AgentManager
 from .db.session import Database
@@ -176,6 +177,10 @@ class Engine:
 
     # Initialize Agent Manager
     self.agent_manager = AgentManager(config)
+
+    # Initialize Auth Manager and restore any persisted session
+    self.auth = AuthManager(config)
+    self.auth.load_session()
 
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
