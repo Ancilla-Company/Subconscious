@@ -43,6 +43,11 @@ def MainWindow(
   on_update=None,
   selected_model_config=None,
   on_model_select=None,
+  initial_chatbox_text: str = "",
+  initial_chatbox_attachments=None,
+  on_chatbox_change=None,
+  chatbox_restore_token: int = 0,
+  active_workspace=None,
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -69,6 +74,7 @@ def MainWindow(
   if current_view == "threads":
     content = ft.Container(
       content=ChatWindow(
+        key=f"chatwindow-{chatbox_restore_token}",
         thread=thread,
         messages=messages,
         streaming_text=streaming_text,
@@ -78,6 +84,11 @@ def MainWindow(
         model_configs=model_configs,
         selected_model_config=selected_model_config,
         on_model_select=on_model_select,
+        initial_chatbox_text=initial_chatbox_text,
+        initial_chatbox_attachments=initial_chatbox_attachments or [],
+        on_chatbox_change=on_chatbox_change,
+        chatbox_restore_token=chatbox_restore_token,
+        active_workspace=active_workspace,
       )
     )
   elif current_view == "settings":
@@ -155,8 +166,9 @@ def MainWindow(
     elif settings_mode == "about":
       content = ft.Container(
         content=About(
-          update_available=update_available,
+          settings=on_setting_change,
           on_update=on_update,
+          update_available=update_available,
         ),
         expand=True
       )

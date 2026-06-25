@@ -1,11 +1,12 @@
 """ Desktop version of Subconscious skeleton - desktop layout with titlebar & contextlist """
+import json
 import uuid
 import asyncio
 import pathlib
 import logging
 import traceback
 import flet as ft
-from sqlalchemy import select
+from sqlalchemy import select, func
 from datetime import datetime, timezone
 
 from .tray import *
@@ -97,6 +98,16 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   # Tool configs loaded from DB: list of dicts
   tool_configs, set_tool_configs = ft.use_state([])
   tool_expanded_indices, set_tool_expanded_indices = ft.use_state(set())
+
+  # Chatbox initial values restored from DB on startup
+  initial_chatbox_text, set_initial_chatbox_text = ft.use_state("")
+  initial_chatbox_attachments, set_initial_chatbox_attachments = ft.use_state([])
+  # Incremented every time we navigate to the threads view so ChatWindow's
+  # use_effect always re-fires and seeds the chatbox from persisted state.
+  chatbox_restore_token, set_chatbox_restore_token = ft.use_state(0)
+  # Mutable refs for debounced async tasks (single-element lists avoid re-renders)
+  _resize_debounce = [None]
+  _chatbox_debounce = [None]
 
   _MODE_MAP = {
     "light": ft.ThemeMode.LIGHT,
@@ -210,6 +221,149 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_skill_configs(loaded_skills)
     loaded_tools = await engine.load_tool_configs()
     set_tool_configs(loaded_tools)
+
+  async def restore_ui_state():
+    """Load persisted UI state from app_state and restore view, workspace, thread, and chatbox."""
+    try:
+      ui = await engine.load_ui_state()
+    except Exception:
+      return
+
+    # --- Window size ---
+    async def resizer():
+      try:
+        # await asyncio.sleep(2)
+        w = ui.get("ui_window_width", 800.0)
+        h = ui.get("ui_window_height", 800.0)
+        if w:
+          page.window.width = float(w)
+        if h:
+          page.window.height = float(h)
+        if w or h:
+          page.update()
+      except Exception as e:
+        pass
+    asyncio.create_task(resizer())
+
+    # --- Navigation ---
+    view = ui.get("ui_current_view", "none")
+    ctx = ui.get("ui_current_context", "none")
+    account = ui.get("ui_current_account", "none")
+    workspace = ui.get("ui_selected_workspace_id")
+    setting = ui.get("ui_selected_setting") or None
+    ctx_vis = ui.get("ui_context_visible", "false") == "true"
+
+    # Defer set_current_view until after chatbox state is ready (see bottom of this function).
+    # Setting the view to "threads" before initial_chatbox_text is set causes ChatWindow to
+    # mount with empty props, defeating the key-based remount restore strategy.
+    set_current_context(ctx)
+    set_context_visible(ctx_vis)
+
+    # --- Selected setting ---
+    if setting:
+      set_selected_setting(setting)
+
+    # --- Selected workspace ---
+    if workspace:
+      async with engine.db.get_session() as session:
+        workspace_obj = await session.get(Workspace, int(workspace))
+
+        if workspace_obj:
+          set_workspace_mode("edit")
+          set_editing_workspace(workspace_obj)
+    
+    # --- Selected account ---
+
+    # --- All-workspaces threads view ---
+    # Restore this before the active workspace so the on_workspace_change effect
+    # loads the correct (all-workspaces) thread list rather than a single workspace.
+    show_all = ui.get("ui_show_all_threads", "false") == "true"
+    if show_all:
+      set_show_all_threads(True)
+
+    # --- Active workspace ---
+    ws_id_str = ui.get("ui_active_workspace_id", "")
+    restored_ws = None
+    if ws_id_str:
+      try:
+        ws_id = int(ws_id_str)
+        async with engine.db.get_session() as session:
+          restored_ws = await session.get(Workspace, ws_id)
+        if restored_ws:
+          set_active_chat_workspace(restored_ws)
+      except Exception:
+        pass
+
+    # --- Active thread ---
+    thread_id_str = ui.get("ui_selected_thread_id", "")
+    if thread_id_str:
+      try:
+        thread_id = int(thread_id_str)
+        async with engine.db.get_session() as session:
+          restored_thread = await session.get(Thread, thread_id)
+        if restored_thread:
+          set_selected_thread(restored_thread)
+          await load_messages(thread_id)
+
+          # Also record which thread belongs to the restored workspace
+          ws_key = restored_ws.id if restored_ws else None
+          set_thread_by_workspace({ws_key: restored_thread})
+      except Exception:
+        pass
+
+    # --- Chatbox ---
+    chatbox_text = ui.get("ui_chatbox_text", "")
+    try:
+      chatbox_attachments = json.loads(ui.get("ui_chatbox_attachments", "[]"))
+    except Exception:
+      chatbox_attachments = []
+    set_initial_chatbox_text(chatbox_text)
+    set_initial_chatbox_attachments(chatbox_attachments)
+    # Set the view and bump the token together so ChatWindow first mounts (or remounts)
+    # with the correct initial_chatbox_text/attachments already in props.
+    set_current_view(view)
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+  def handle_chatbox_change(text: str, attachments: list):
+    """ Debounced save of chatbox text and attachments to app_state. """
+    # Cancel any pending save
+    if _chatbox_debounce[0] and not _chatbox_debounce[0].done():
+      _chatbox_debounce[0].cancel()
+
+    attachments_json = json.dumps(attachments)
+
+    if not text and not attachments:
+      # Clear immediately so a sent/cleared chatbox is never falsely restored
+      async def immediate_clear():
+        set_initial_chatbox_text("")
+        set_initial_chatbox_attachments(attachments)
+        await engine.save_ui_state("ui_chatbox_text", "")
+        await engine.save_ui_state("ui_chatbox_attachments", "[]")
+      _chatbox_debounce[0] = asyncio.create_task(immediate_clear())
+      return
+
+    async def delayed_save():
+      await asyncio.sleep(1.5)
+      set_initial_chatbox_text(text)
+      set_initial_chatbox_attachments(attachments)
+      await engine.save_ui_state("ui_chatbox_text", text)
+      await engine.save_ui_state("ui_chatbox_attachments", attachments_json)
+
+    _chatbox_debounce[0] = asyncio.create_task(delayed_save())
+
+  def handle_window_event(e: ft.WindowEvent):
+    """ On window resize store dimensions """
+    async def save_size(e: ft.WindowEvent):
+      await asyncio.sleep(1.5)
+      await engine.save_ui_state("ui_window_width", str(e.control.width))
+      await engine.save_ui_state("ui_window_height", str(e.control.height))
+
+    if e.type.name == "RESIZED":
+      # Cancel any pending save
+      if _resize_debounce[0] and not _resize_debounce[0].done():
+        _resize_debounce[0].cancel()
+      
+      _resize_debounce[0] = asyncio.create_task(save_size(e))
 
   async def handle_setting_change(key, value, tag):
     """UI-driven: persist a setting to the database then apply it to the UI."""
@@ -389,7 +543,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ft.use_effect(on_workspace_change, [active_chat_workspace])
 
   def on_show_all_threads_change():
-    """Reload thread list when the all-threads toggle changes."""
+    """Reload thread list when the all-threads toggle changes and persist the choice."""
+    asyncio.create_task(engine.save_ui_state("ui_show_all_threads", "true" if show_all_threads else "false"))
     if show_all_threads:
       asyncio.create_task(load_threads())
     elif active_chat_workspace:
@@ -411,9 +566,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_messages(ui_msgs)
 
   def on_mount():
-    asyncio.create_task(load_workspaces())
     asyncio.create_task(load_threads())
     asyncio.create_task(load_settings())
+    asyncio.create_task(load_workspaces())
+    asyncio.create_task(restore_ui_state())
   
   ft.use_effect(on_mount, [])
 
@@ -423,26 +579,50 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_view("workspaces")
     set_current_context("workspaces")
 
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", ""))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "workspaces"))
+
   async def handle_workspace_click(workspace):
     set_editing_workspace(workspace)
     set_workspace_mode("edit")
     set_current_view("workspaces")
     set_current_context("workspaces")
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", str(workspace.id) or ""))
   
   async def handle_settings_click(setting):
     if setting == "about":
       set_about_badge_dismissed(True)
     set_selected_setting(setting)
+    asyncio.create_task(engine.save_ui_state("ui_selected_setting", setting or ""))
 
   async def handle_new_thread(e=None):
     set_selected_thread(None)
     set_messages([])
     set_current_view("threads")
     set_current_context("threads")
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_selected_thread_id", ""))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "threads"))
   
   async def handle_thread_click(thread):
     set_selected_thread(thread)
     set_current_view("threads")
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_selected_thread_id", str(thread.id)))
+
     # Remember which thread was selected for this workspace so we can restore it later
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
@@ -652,6 +832,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   def toggle_context(e=None):
     set_context_visible(not context_visible)
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true" if not context_visible else "false"))
     
   def handle_context_width_change(delta_x):
     new_width = context_width + delta_x
@@ -659,19 +840,31 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_context_width(new_width)
 
   async def switch_to_workspace(e=None):
+    set_context_visible(True)
     set_current_view("workspaces")
     set_current_context("workspaces")
-    set_context_visible(True)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true"))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "workspaces"))
 
   async def switch_to_threads(e=None):
+    set_context_visible(True)
     set_current_view("threads")
     set_current_context("threads")
-    set_context_visible(True)
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "threads"))
 
   def handle_chat_workspace_change(workspace):
     """Switch the active chat workspace and reset the all-threads view."""
     set_show_all_threads(False)
     set_active_chat_workspace(workspace)
+    asyncio.create_task(engine.save_ui_state("ui_active_workspace_id", str(workspace.id) if workspace else ""))
 
   async def switch_to_settings(e=None):
     set_settings_badge_dismissed(True)
@@ -679,10 +872,34 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("settings")
     set_context_visible(True)
 
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true"))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "settings"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "settings"))
+
   async def switch_to_account(e=None):
     set_current_view("account")
     set_current_context("account")
     set_context_visible(False)
+    
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "account"))
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "false"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "account"))
+  
+  # Register window event callback
+  page.window.on_event = handle_window_event
+
+  # Determine which workspace to surface in the chat header. When "All Workspaces"
+  # is active, reflect the workspace the selected thread actually belongs to
+  # instead of the (now ambiguous) active_chat_workspace.
+  if show_all_threads:
+    header_workspace = next(
+      (w for w in workspaces if selected_thread and w.id == selected_thread.workspace_id),
+      None,
+    )
+  else:
+    header_workspace = active_chat_workspace
 
   return [
     TitleBar(dev=engine.config.dev),
@@ -717,7 +934,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         set_selected_setting=handle_settings_click,
         show_about_badge=bool(engine.update_available) and not about_badge_dismissed,
         show_all_threads=show_all_threads,
-        on_toggle_all_threads=lambda: set_show_all_threads(not show_all_threads)
+        on_toggle_all_threads=set_show_all_threads
       ),
       mainwindow=MainWindow(
         current_view=current_view,
@@ -753,6 +970,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_update=engine.run_update,
         selected_model_config=selected_model_config,
         on_model_select=handle_model_select,
+        initial_chatbox_text=initial_chatbox_text,
+        initial_chatbox_attachments=initial_chatbox_attachments,
+        on_chatbox_change=handle_chatbox_change,
+        chatbox_restore_token=chatbox_restore_token,
+        active_workspace=header_workspace,
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,

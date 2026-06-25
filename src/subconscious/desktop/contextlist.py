@@ -62,7 +62,8 @@ def ContextList(
           WorkspacePopupItem(
             name=ws.name,
             switch_workspace=lambda _, w=ws: on_chat_workspace_change(w) if on_chat_workspace_change else None,
-            slug=ws.id
+            slug=ws.id,
+            active=bool(not show_all_threads and active_chat_workspace and ws.id == active_chat_workspace.id)
           ) for ws in (workspaces_list or [])
         ] + [
           ft.PopupMenuItem(),  # divider
@@ -78,7 +79,7 @@ def ContextList(
               ],
               spacing=8
             ),
-            on_click=lambda _: on_toggle_all_threads() if on_toggle_all_threads else None,
+            on_click=lambda _: on_toggle_all_threads(not show_all_threads),
           )
         ]
       )

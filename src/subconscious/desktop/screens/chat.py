@@ -184,18 +184,23 @@ def ChatWindow(
   is_streaming=False,
   model_configs=None,
   selected_model_config=None,
-  on_model_select=None
+  on_model_select=None,
+  initial_chatbox_text: str = "",
+  initial_chatbox_attachments=None,
+  on_chatbox_change=None,
+  chatbox_restore_token: int = 0,
+  active_workspace=None,
 ) -> ft.Control:
   """ Handles the main chat window, including message display and input form """
   fp = ft.FilePicker() # Initialize and add file picker to page
   
-  # Message state
-  message_text, set_message_text = ft.use_state("")
+  # Message state — seeded from persisted props so a remount always restores the saved chatbox
+  message_text, set_message_text = ft.use_state(initial_chatbox_text)
   # Attatchment row height
   height, set_height = ft.use_state(40)
 
   # Attachments: list of dicts  {"path": str, "type": "file"|"folder", "name": str}
-  attachments, set_attachments = ft.use_state([])
+  attachments, set_attachments = ft.use_state(initial_chatbox_attachments or [])
 
   # Determine whether an LLM/model is configured for the UI
   def llm_configured():
@@ -207,7 +212,10 @@ def ChatWindow(
   # ── Attachment helpers ───────────────────────────────────────────────────
   def remove_attachment(path: str):
     """ Remove attqchment helper """
-    set_attachments([a for a in attachments if a["path"] != path])
+    new_attachments = [a for a in attachments if a["path"] != path]
+    set_attachments(new_attachments)
+    if on_chatbox_change:
+      on_chatbox_change(message_text, new_attachments)
 
   async def handle_pick_files(e):
     """ File picker helper """
@@ -220,14 +228,20 @@ def ChatWindow(
           if any(a["path"] == f.path for a in attachments): continue
           _attachments.append({"path": f.path, "type": "file", "name": _pl.Path(f.path).name or f.path})
 
-    set_attachments(_attachments + attachments)
+    new_attachments = _attachments + attachments
+    set_attachments(new_attachments)
+    if on_chatbox_change:
+      on_chatbox_change(message_text, new_attachments)
 
   async def handle_pick_folder(e):
     """ Folder picker helper """
     res = await fp.get_directory_path(dialog_title="Select folder")
     if res:
       if any(a["path"] == res.path for a in attachments): return
-      set_attachments(attachments + [{"path": res, "type": "folder", "name": _pl.Path(res).name or res}])
+      new_attachments = attachments + [{"path": res, "type": "folder", "name": _pl.Path(res).name or res}]
+      set_attachments(new_attachments)
+      if on_chatbox_change:
+        on_chatbox_change(message_text, new_attachments)
 
   async def handle_submit(e):
     """ Handle submit """
@@ -236,15 +250,26 @@ def ChatWindow(
       current_attachments = list(attachments)
       set_message_text("")
       set_attachments([])
+      if on_chatbox_change:
+        on_chatbox_change("", [])  # Clear persisted chatbox state immediately
 
       if on_send_message:
         await on_send_message(user_msg_content, current_attachments)
 
   chat_name = thread.title if thread else "New Thread"
+  workspace_name = active_workspace.name if active_workspace else "All Workspaces"
   chatwindow_header = ft.Container(
     ft.Row(
       [
         ft.Text(chat_name, size=14, text_align=ft.TextAlign.LEFT, weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
+        ft.Row(
+          [
+            ft.Text(workspace_name, size=13, text_align=ft.TextAlign.RIGHT, color=ft.Colors.GREY_600),
+          ],
+          spacing=0,
+          alignment=ft.MainAxisAlignment.END,
+          vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
         # ft.IconButton(
         #   icon=ft.Icons.MORE_VERT_ROUNDED,
         #   tooltip="More",
@@ -257,7 +282,7 @@ def ChatWindow(
     ),
     expand=True,
     bgcolor=ft.Colors.SURFACE,
-    padding=ft.padding.only(10, 4, 4, 4)
+    padding=ft.padding.only(10, 4, 13, 4)
   )
 
   # Message display logic — ChatWindow is a @ft.component so this entire function
@@ -407,7 +432,7 @@ def ChatWindow(
                                   hint_text="Type a message...",
                                   border_color=ft.Colors.TRANSPARENT,
                                   hint_style=ft.TextStyle(weight=ft.FontWeight.NORMAL),
-                                  on_change=lambda e: set_message_text(e.control.value)
+                                  on_change=lambda e: (set_message_text(e.control.value), on_chatbox_change(e.control.value, attachments) if on_chatbox_change else None)
                                 ),
                                 margin=ft.Margin.only(top=-5)
                               ),
