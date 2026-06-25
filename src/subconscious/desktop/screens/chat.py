@@ -189,6 +189,7 @@ def ChatWindow(
   initial_chatbox_attachments=None,
   on_chatbox_change=None,
   chatbox_restore_token: int = 0,
+  active_workspace=None,
 ) -> ft.Control:
   """ Handles the main chat window, including message display and input form """
   fp = ft.FilePicker() # Initialize and add file picker to page
@@ -256,10 +257,19 @@ def ChatWindow(
         await on_send_message(user_msg_content, current_attachments)
 
   chat_name = thread.title if thread else "New Thread"
+  workspace_name = active_workspace.name if active_workspace else "All Workspaces"
   chatwindow_header = ft.Container(
     ft.Row(
       [
         ft.Text(chat_name, size=14, text_align=ft.TextAlign.LEFT, weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
+        ft.Row(
+          [
+            ft.Text(workspace_name, size=13, text_align=ft.TextAlign.RIGHT, color=ft.Colors.GREY_600),
+          ],
+          spacing=0,
+          alignment=ft.MainAxisAlignment.END,
+          vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
         # ft.IconButton(
         #   icon=ft.Icons.MORE_VERT_ROUNDED,
         #   tooltip="More",
@@ -272,7 +282,7 @@ def ChatWindow(
     ),
     expand=True,
     bgcolor=ft.Colors.SURFACE,
-    padding=ft.padding.only(10, 4, 4, 4)
+    padding=ft.padding.only(10, 4, 13, 4)
   )
 
   # Message display logic — ChatWindow is a @ft.component so this entire function

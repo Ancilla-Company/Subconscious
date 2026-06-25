@@ -58,14 +58,20 @@ def Avatar(seed: str, tooltip: str, view_name: str, selected_view: str, callback
 
 class WorkspacePopupItem(ft.PopupMenuItem):
   """ Popup Item for popup menu """
-  def __init__(self, name, switch_workspace, slug):
+  def __init__(self, name, switch_workspace, slug, active=False):
     super().__init__()
     self.switch_workspace = switch_workspace
     self.name = name
     self.content = ft.Row(
       controls=[
+        ft.Icon(
+          ft.Icons.CHECK,
+          size=16,
+          color=ft.Colors.PRIMARY if active else ft.Colors.TRANSPARENT,
+        ),
         ft.Text(name),
       ],
+      spacing=8,
     )
     self.data = slug
     self.on_click = switch_workspace

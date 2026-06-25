@@ -47,6 +47,7 @@ def MainWindow(
   initial_chatbox_attachments=None,
   on_chatbox_change=None,
   chatbox_restore_token: int = 0,
+  active_workspace=None,
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -87,6 +88,7 @@ def MainWindow(
         initial_chatbox_attachments=initial_chatbox_attachments or [],
         on_chatbox_change=on_chatbox_change,
         chatbox_restore_token=chatbox_restore_token,
+        active_workspace=active_workspace,
       )
     )
   elif current_view == "settings":

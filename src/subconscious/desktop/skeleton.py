@@ -274,6 +274,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     
     # --- Selected account ---
 
+    # --- All-workspaces threads view ---
+    # Restore this before the active workspace so the on_workspace_change effect
+    # loads the correct (all-workspaces) thread list rather than a single workspace.
+    show_all = ui.get("ui_show_all_threads", "false") == "true"
+    if show_all:
+      set_show_all_threads(True)
+
     # --- Active workspace ---
     ws_id_str = ui.get("ui_active_workspace_id", "")
     restored_ws = None
@@ -536,7 +543,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ft.use_effect(on_workspace_change, [active_chat_workspace])
 
   def on_show_all_threads_change():
-    """Reload thread list when the all-threads toggle changes."""
+    """Reload thread list when the all-threads toggle changes and persist the choice."""
+    asyncio.create_task(engine.save_ui_state("ui_show_all_threads", "true" if show_all_threads else "false"))
     if show_all_threads:
       asyncio.create_task(load_threads())
     elif active_chat_workspace:
@@ -882,6 +890,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   # Register window event callback
   page.window.on_event = handle_window_event
 
+  # Determine which workspace to surface in the chat header. When "All Workspaces"
+  # is active, reflect the workspace the selected thread actually belongs to
+  # instead of the (now ambiguous) active_chat_workspace.
+  if show_all_threads:
+    header_workspace = next(
+      (w for w in workspaces if selected_thread and w.id == selected_thread.workspace_id),
+      None,
+    )
+  else:
+    header_workspace = active_chat_workspace
+
   return [
     TitleBar(dev=engine.config.dev),
     Frame(
@@ -915,7 +934,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         set_selected_setting=handle_settings_click,
         show_about_badge=bool(engine.update_available) and not about_badge_dismissed,
         show_all_threads=show_all_threads,
-        on_toggle_all_threads=lambda: set_show_all_threads(not show_all_threads)
+        on_toggle_all_threads=set_show_all_threads
       ),
       mainwindow=MainWindow(
         current_view=current_view,
@@ -955,6 +974,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         initial_chatbox_attachments=initial_chatbox_attachments,
         on_chatbox_change=handle_chatbox_change,
         chatbox_restore_token=chatbox_restore_token,
+        active_workspace=header_workspace,
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
