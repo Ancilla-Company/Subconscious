@@ -18,6 +18,7 @@ from .contextlist import ContextList
 from .engine import DesktopEngine as Engine
 from ..db.models import Workspace, Thread, AppState
 from ..shared.messages import HumanMessage, AIMessage
+from ..shared.tool_config import ToolToggleTree, SkillToggleList
 
 
 # Logging config
@@ -98,6 +99,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   # Tool configs loaded from DB: list of dicts
   tool_configs, set_tool_configs = ft.use_state([])
   tool_expanded_indices, set_tool_expanded_indices = ft.use_state(set())
+
+  # Built-in tool hierarchy {slug: [{name, doc}]} loaded from the engine registry
+  tool_catalog, set_tool_catalog = ft.use_state({})
+  # Tools/Skills enable-disable config for the workspace currently being edited
+  ws_tools_config, set_ws_tools_config = ft.use_state({})
+  ws_skills_config, set_ws_skills_config = ft.use_state({})
+  # Thread-level Tools/Skills dialog: mode is None | "tools" | "skills".
+  # Rendered declaratively in the reactive tree (see AppView return) so the
+  # toggle components run inside the renderer context.
+  thread_dialog_mode, set_thread_dialog_mode = ft.use_state(None)
+  thread_dialog_cfg, set_thread_dialog_cfg = ft.use_state({})
 
   # Chatbox initial values restored from DB on startup
   initial_chatbox_text, set_initial_chatbox_text = ft.use_state("")
@@ -222,6 +234,12 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     loaded_tools = await engine.load_tool_configs()
     set_tool_configs(loaded_tools)
 
+    # Load the built-in tool hierarchy for the toggle trees
+    try:
+      set_tool_catalog(engine.get_tool_catalog())
+    except Exception as exc:
+      logger.warning(f"Failed to load tool catalog: {exc}")
+
   async def restore_ui_state():
     """Load persisted UI state from app_state and restore view, workspace, thread, and chatbox."""
     try:
@@ -271,6 +289,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         if workspace_obj:
           set_workspace_mode("edit")
           set_editing_workspace(workspace_obj)
+          set_ws_tools_config(Engine._parse_json_config(getattr(workspace_obj, "tools_config", None)))
+          set_ws_skills_config(Engine._parse_json_config(getattr(workspace_obj, "skills_config", None)))
     
     # --- Selected account ---
 
@@ -578,6 +598,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_workspace_mode("create")
     set_current_view("workspaces")
     set_current_context("workspaces")
+    set_ws_tools_config({})
+    set_ws_skills_config({})
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", ""))
@@ -589,6 +611,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_workspace_mode("edit")
     set_current_view("workspaces")
     set_current_context("workspaces")
+    set_ws_tools_config(Engine._parse_json_config(getattr(workspace, "tools_config", None)))
+    set_ws_skills_config(Engine._parse_json_config(getattr(workspace, "skills_config", None)))
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
@@ -775,6 +799,51 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       await msgs.scroll_to(offset=-1, duration=300)
 
 
+  def handle_workspace_tools_change(config):
+    """Persist the editing workspace's tool toggle config (defaults for its threads)."""
+    if not editing_workspace:
+      return
+    set_ws_tools_config(dict(config))
+    asyncio.create_task(engine.set_workspace_tools_config(editing_workspace.id, config))
+
+  def handle_workspace_skills_change(config):
+    """Persist the editing workspace's skill toggle config."""
+    if not editing_workspace:
+      return
+    set_ws_skills_config(dict(config))
+    asyncio.create_task(engine.set_workspace_skills_config(editing_workspace.id, config))
+
+  async def handle_open_thread_tools(e=None):
+    """Resolve the active thread's tool config and open the tools dialog."""
+    if not selected_thread:
+      return
+    ws_id = active_chat_workspace.id if active_chat_workspace else selected_thread.workspace_id
+    cfg = await engine.resolve_tools_config(ws_id, selected_thread.id)
+    set_thread_dialog_cfg(cfg)
+    set_thread_dialog_mode("tools")
+
+  async def handle_open_thread_skills(e=None):
+    """Resolve the active thread's skill config and open the skills dialog."""
+    if not selected_thread:
+      return
+    ws_id = active_chat_workspace.id if active_chat_workspace else selected_thread.workspace_id
+    cfg = await engine.resolve_skills_config(ws_id, selected_thread.id)
+    set_thread_dialog_cfg(cfg)
+    set_thread_dialog_mode("skills")
+
+  def close_thread_dialog(e=None):
+    set_thread_dialog_mode(None)
+
+  def handle_thread_tools_change(config):
+    """Persist a thread-level tools override."""
+    if selected_thread:
+      asyncio.create_task(engine.set_thread_tools_config(selected_thread.id, config))
+
+  def handle_thread_skills_change(config):
+    """Persist a thread-level skills override."""
+    if selected_thread:
+      asyncio.create_task(engine.set_thread_skills_config(selected_thread.id, config))
+
   async def handle_save_workspace(name, description, ws_id=None):
     async with engine.db.get_session() as session:
       if ws_id:
@@ -901,7 +970,64 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   else:
     header_workspace = active_chat_workspace
 
-  return [
+  # Build the thread-level Tools/Skills dialog declaratively so its reactive
+  # toggle component renders inside the renderer context. Shown when open.
+  thread_dialog = None
+  if thread_dialog_mode == "tools" and selected_thread:
+    thread_dialog = ft.AlertDialog(
+      open=True,
+      modal=False,
+      title=ft.Text("Thread Tools"),
+      content=ft.Container(
+        content=ToolToggleTree(
+          catalog=tool_catalog,
+          configured_tools=tool_configs,
+          config=thread_dialog_cfg,
+          on_change=handle_thread_tools_change,
+          sync_key=selected_thread.id,
+        ),
+        width=420,
+        height=520,
+      ),
+      actions=[
+        ft.TextButton(
+          "Done",
+          on_click=close_thread_dialog,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+        ),
+      ],
+      actions_alignment=ft.MainAxisAlignment.END,
+      shape=ft.RoundedRectangleBorder(radius=3),
+      on_dismiss=close_thread_dialog,
+    )
+  elif thread_dialog_mode == "skills" and selected_thread:
+    thread_dialog = ft.AlertDialog(
+      open=True,
+      modal=False,
+      title=ft.Text("Thread Skills"),
+      content=ft.Container(
+        content=SkillToggleList(
+          skills=skill_configs,
+          config=thread_dialog_cfg,
+          on_change=handle_thread_skills_change,
+          sync_key=selected_thread.id,
+        ),
+        width=420,
+        height=420,
+      ),
+      actions=[
+        ft.TextButton(
+          "Done",
+          on_click=close_thread_dialog,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+        ),
+      ],
+      actions_alignment=ft.MainAxisAlignment.END,
+      shape=ft.RoundedRectangleBorder(radius=3),
+      on_dismiss=close_thread_dialog,
+    )
+
+  view = [
     TitleBar(dev=engine.config.dev),
     Frame(
       sidebar=Sidebar(
@@ -975,12 +1101,24 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_chatbox_change=handle_chatbox_change,
         chatbox_restore_token=chatbox_restore_token,
         active_workspace=header_workspace,
+        tool_catalog=tool_catalog,
+        workspace_tools_config=ws_tools_config,
+        workspace_skills_config=ws_skills_config,
+        on_workspace_tools_change=handle_workspace_tools_change,
+        on_workspace_skills_change=handle_workspace_skills_change,
+        on_open_thread_tools=handle_open_thread_tools,
+        on_open_thread_skills=handle_open_thread_skills,
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
       workspace_name=active_chat_workspace.name if active_chat_workspace else "All Workspaces"
     )
   ]
+
+  if thread_dialog is not None:
+    view.append(thread_dialog)
+
+  return view
 
 async def main(page: ft.Page, engine):
   """ Application window config """

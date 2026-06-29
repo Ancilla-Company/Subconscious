@@ -297,9 +297,14 @@ class Engine:
       raise ValueError("No model configured. Add a model in Settings → Models.")
 
     # Resolve tools
-    slugs = enabled_tools if enabled_tools is not None else self.tool_registry.all_slugs()
-    tools = self.tool_registry.get_tools(slugs)
-
+    if enabled_tools is not None:
+      tools = self.tool_registry.get_tools(enabled_tools)
+    else:
+      # Resolve the effective tools_config (thread override else workspace
+      # defaults) and build the enabled callables from it.
+      cfg = await self.resolve_tools_config(workspace_id, thread_id)
+      tools = self.tool_registry.get_tools_for_config(cfg)
+    
     agent = self.agent_manager.build_agent(model_cfg, tools=tools)  # type: ignore[call-arg]
 
     # Build the dependency context for tools that need DB / workspace access
@@ -480,6 +485,121 @@ class Engine:
         .values(default_model_id=model_id)
       )
       await session.commit()
+
+  # ------------------------------------------------------------------
+  # Tool & skill configuration (workspace defaults + thread overrides)
+  # ------------------------------------------------------------------
+
+  def get_tool_catalog(self) -> dict:
+    """Return the built-in tool hierarchy {slug: [{name, doc}, ...]}."""
+    return self.tool_registry.catalog()
+
+  @staticmethod
+  def _parse_json_config(raw: Optional[str]) -> dict:
+    """Parse a JSON config string, returning {} on null/invalid input."""
+    if not raw:
+      return {}
+    try:
+      data = json.loads(raw)
+      return data if isinstance(data, dict) else {}
+    except Exception:
+      return {}
+
+  async def get_workspace_tools_config(self, workspace_id: int) -> dict:
+    """Return the persisted tools_config for a workspace ({} if unset)."""
+    if not workspace_id:
+      return {}
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return self._parse_json_config(ws.tools_config) if ws else {}
+
+  async def set_workspace_tools_config(self, workspace_id: int, config: dict) -> None:
+    """Persist the tools_config for a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.tools_config = json.dumps(config)
+        await session.commit()
+
+  async def get_workspace_skills_config(self, workspace_id: int) -> dict:
+    """Return the persisted skills_config for a workspace ({} if unset)."""
+    if not workspace_id:
+      return {}
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return self._parse_json_config(ws.skills_config) if ws else {}
+
+  async def set_workspace_skills_config(self, workspace_id: int, config: dict) -> None:
+    """Persist the skills_config for a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.skills_config = json.dumps(config)
+        await session.commit()
+
+  async def get_thread_tools_config(self, thread_id: int) -> Optional[dict]:
+    """Return the thread tools_config override, or None when it inherits the workspace."""
+    if not thread_id:
+      return None
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th and th.tools_config:
+        return self._parse_json_config(th.tools_config)
+      return None
+
+  async def set_thread_tools_config(self, thread_id: int, config: dict) -> None:
+    """Persist a thread-level tools_config override."""
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th:
+        th.tools_config = json.dumps(config)
+        await session.commit()
+
+  async def get_thread_skills_config(self, thread_id: int) -> Optional[dict]:
+    """Return the thread skills_config override, or None when it inherits the workspace."""
+    if not thread_id:
+      return None
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th and th.skills_config:
+        return self._parse_json_config(th.skills_config)
+      return None
+
+  async def set_thread_skills_config(self, thread_id: int, config: dict) -> None:
+    """Persist a thread-level skills_config override."""
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th:
+        th.skills_config = json.dumps(config)
+        await session.commit()
+
+  async def resolve_tools_config(
+    self, workspace_id: Optional[int], thread_id: Optional[int]
+  ) -> dict:
+    """
+    Return the effective tools_config: the thread override when present,
+    otherwise the workspace defaults ({} when neither is configured, which
+    the registry treats as "all tools enabled").
+    """
+    if thread_id:
+      tcfg = await self.get_thread_tools_config(thread_id)
+      if tcfg is not None:
+        return tcfg
+    if workspace_id:
+      return await self.get_workspace_tools_config(workspace_id)
+    return {}
+
+  async def resolve_skills_config(
+    self, workspace_id: Optional[int], thread_id: Optional[int]
+  ) -> dict:
+    """Return the effective skills_config (thread override else workspace)."""
+    if thread_id:
+      scfg = await self.get_thread_skills_config(thread_id)
+      if scfg is not None:
+        return scfg
+    if workspace_id:
+      return await self.get_workspace_skills_config(workspace_id)
+    return {}
 
   async def run_agent_stream(self, message: str):
     """ Legacy: Runs the agent in streaming mode (kept for TUI / API compatibility). """

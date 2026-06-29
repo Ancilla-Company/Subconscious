@@ -44,6 +44,8 @@ class Workspace(Base):
   description = Column(String, nullable=True)
   network_id = Column(Integer, ForeignKey('networks.id'), nullable=False)
   uuid = Column(String, default=str(uuid.uuid4()))
+  tools_config = Column(Text, nullable=True)
+  skills_config = Column(Text, nullable=True)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
@@ -58,6 +60,8 @@ class Thread(Base):
   title = Column(String)
   description = Column(String, nullable=True)
   default_model_id = Column(String, nullable=True, default="default") # NULL also means default
+  tools_config = Column(Text, nullable=True)
+  skills_config = Column(Text, nullable=True)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
