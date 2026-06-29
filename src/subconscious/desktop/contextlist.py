@@ -128,20 +128,20 @@ def ContextList(
         on_click=lambda _: set_selected_setting("models"),
         selected=selected_setting == "models"
       ),
-      # ContextItem(
-      #   key="tools",
-      #   name="Tools",
-      #   description="Configure Tools",
-      #   on_click=lambda _: set_selected_setting("tools"),
-      #   selected=selected_setting == "tools"
-      # ),
-      # ContextItem(
-      #   key="skills",
-      #   name="Skills",
-      #   description="Configure Skills",
-      #   on_click=lambda _: set_selected_setting("skills"),
-      #   selected=selected_setting == "skills"
-      # ),
+      ContextItem(
+        key="tools",
+        name="Tools",
+        description="Configure Tools",
+        on_click=lambda _: set_selected_setting("tools"),
+        selected=selected_setting == "tools"
+      ),
+      ContextItem(
+        key="skills",
+        name="Skills",
+        description="Configure Skills",
+        on_click=lambda _: set_selected_setting("skills"),
+        selected=selected_setting == "skills"
+      ),
       ContextItem(
         key="about",
         name="About",

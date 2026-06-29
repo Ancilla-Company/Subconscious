@@ -190,6 +190,8 @@ def ChatWindow(
   on_chatbox_change=None,
   chatbox_restore_token: int = 0,
   active_workspace=None,
+  on_open_thread_tools=None,
+  on_open_thread_skills=None,
 ) -> ft.Control:
   """ Handles the main chat window, including message display and input form """
   fp = ft.FilePicker() # Initialize and add file picker to page
@@ -270,12 +272,34 @@ def ChatWindow(
           alignment=ft.MainAxisAlignment.END,
           vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        # ft.IconButton(
-        #   icon=ft.Icons.MORE_VERT_ROUNDED,
-        #   tooltip="More",
-        #   style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-        #   on_click=lambda e: print("Show chat settings"),
-        # )
+        # "More" menu — thread-level Tools & Skills configuration.
+        # Only shown for a saved thread (config is persisted against thread id).
+        PopupMenuButton(
+          icon=ft.Icons.MORE_VERT_ROUNDED,
+          tooltip="More",
+          menu_items=[
+            ft.PopupMenuItem(
+              content=ft.Row(
+                [
+                  ft.Icon(ft.Icons.BUILD_OUTLINED, size=16, color=ft.Colors.PRIMARY),
+                  ft.Text("Tools"),
+                ],
+                spacing=8,
+              ),
+              on_click=on_open_thread_tools,
+            ),
+            ft.PopupMenuItem(
+              content=ft.Row(
+                [
+                  ft.Icon(ft.Icons.EXTENSION_OUTLINED, size=16, color=ft.Colors.PRIMARY),
+                  ft.Text("Skills"),
+                ],
+                spacing=8,
+              ),
+              on_click=on_open_thread_skills,
+            ),
+          ],
+        ) if thread is not None else ft.Container(),
       ],
       height=40,
       expand=True

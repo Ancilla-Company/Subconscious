@@ -1,3 +1,4 @@
+import json
 import asyncio
 import flet as ft
 
@@ -5,6 +6,7 @@ from .screens.chat import ChatWindow
 from ..shared.buttons import TextButton
 from ..shared.forms import FormField, TextArea, CheckBox
 from ..shared.layout import ResponsiveItem, ResponsiveParent
+from ..shared.tool_config import ToolToggleTree, SkillToggleList
 from ..shared.settings import Models, About, General, Tools, Skills
 
 
@@ -48,6 +50,13 @@ def MainWindow(
   on_chatbox_change=None,
   chatbox_restore_token: int = 0,
   active_workspace=None,
+  tool_catalog=None,
+  workspace_tools_config=None,
+  workspace_skills_config=None,
+  on_workspace_tools_change=None,
+  on_workspace_skills_change=None,
+  on_open_thread_tools=None,
+  on_open_thread_skills=None,
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -89,6 +98,8 @@ def MainWindow(
         on_chatbox_change=on_chatbox_change,
         chatbox_restore_token=chatbox_restore_token,
         active_workspace=active_workspace,
+        on_open_thread_tools=on_open_thread_tools,
+        on_open_thread_skills=on_open_thread_skills,
       )
     )
   elif current_view == "settings":
@@ -231,6 +242,23 @@ def MainWindow(
               )
             ),
             ResponsiveItem(
+              ToolToggleTree(
+                catalog=tool_catalog or {},
+                configured_tools=tool_configs or [],
+                config=workspace_tools_config or {},
+                on_change=on_workspace_tools_change,
+                sync_key=workspace.id if workspace else "new",
+              ),
+            ) if workspace_mode == "edit" else ResponsiveItem(ft.Container()),
+            ResponsiveItem(
+              SkillToggleList(
+                skills=skill_configs or [],
+                config=workspace_skills_config or {},
+                on_change=on_workspace_skills_change,
+                sync_key=workspace.id if workspace else "new",
+              ),
+            ) if workspace_mode == "edit" else ResponsiveItem(ft.Container()),
+            ResponsiveItem(
               ft.Row(
                 [
                   TextButton(on_click=save_ws, text="Save"),
@@ -238,7 +266,7 @@ def MainWindow(
                 ],
                 wrap=True,
                 spacing=4
-              ),
+              )
             )
           ]
         ),

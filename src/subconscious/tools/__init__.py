@@ -76,6 +76,52 @@ class BaseToolRegistry:
   def all_slugs(self) -> list[str]:
     return list(self._registry.keys())
 
+  def catalog(self) -> dict[str, list[dict]]:
+    """
+    Return a hierarchy of the built-in tools as:
+      { slug: [ {"name": <callable name>, "doc": <first docstring line>}, ... ] }
+
+    Used by the UI to render the per-workspace / per-thread tool toggle tree
+    (top-level slug toggle + an individual toggle per tool callable).
+    """
+    result: dict[str, list[dict]] = {}
+    for slug, tools in self._registry.items():
+      entries: list[dict] = []
+      for fn in tools:
+        doc = (getattr(fn, "__doc__", "") or "").strip()
+        first_line = doc.split("\n", 1)[0].strip() if doc else ""
+        entries.append({"name": getattr(fn, "__name__", str(fn)), "doc": first_line})
+      result[slug] = entries
+    return result
+
+  def get_tools_for_config(self, config: dict) -> list[Callable]:
+    """
+    Resolve enabled tool callables from a tools_config dict of the form:
+
+      {"builtin": {slug: {"enabled": bool, "tools": {name: bool}}}}
+
+    A missing slug or tool entry defaults to enabled (True), preserving the
+    legacy "all tools" behaviour for unconfigured workspaces/threads.
+    When a slug's top-level "enabled" is False, all of its tools are skipped.
+    When the "builtin_enabled" master flag is False, no built-in tools are
+    returned at all.
+    """
+    config = config or {}
+    if not config.get("builtin_enabled", True):
+      return []
+    builtin = config.get("builtin", {})
+    result: list[Callable] = []
+    for slug, tools in self._registry.items():
+      slug_cfg = builtin.get(slug, {})
+      if not slug_cfg.get("enabled", True):
+        continue
+      tool_states = slug_cfg.get("tools", {})
+      for fn in tools:
+        name = getattr(fn, "__name__", "")
+        if tool_states.get(name, True):
+          result.append(fn)
+    return result
+
 
 # Convenience alias — the base registry is also usable as ToolRegistry
 ToolRegistry = BaseToolRegistry
