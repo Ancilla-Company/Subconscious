@@ -24,6 +24,8 @@ from pydantic_ai.messages import (
 )
 
 from .config import Config
+from .api import APIService
+from .events import EventBus
 from .constants import VERSION
 from .agent import AgentManager
 from .db.session import Database
@@ -47,6 +49,10 @@ class Engine:
     # Callbacks registered by the UI layer to react to setting changes in real-time.
     # key → list of async callables(key, value, tag)
     self._setting_callbacks: dict[str, list] = {}
+    # In-process event bus. The local API's WebSocket fan-out (and future sync
+    # module) subscribe here so changes made by any client — including the
+    # in-process Flet UI — propagate live to all connected clients.
+    self.events = EventBus()
 
   def register_setting_callback(self, key: str, callback) -> None:
     """Register an async callback to be invoked when *key* is updated via update_setting."""
@@ -170,19 +176,35 @@ class Engine:
     # Check for updates
     asyncio.create_task(self.check_for_updates())
 
-    # start the heartbeat: DEBUG
-    if self.config.dev:
-      self._heartbeat_task = asyncio.create_task(self.heartbeat())
-
     # Initialize Agent Manager
     self.agent_manager = AgentManager(config)
 
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
 
+    # Start the API background service
+    self.api_service = APIService(self, self.config, preferred_port=8771)
+    await self.api_service.start()
+
+    # Start the heartbeat: DEBUG
+    if self.config.dev:
+      self._heartbeat_task = asyncio.create_task(self.heartbeat())
+
     # Show ready notification: DEBUG
     if self.config.dev:
       await self.show_notification("Subconscious", "Startup Complete.")
+
+  async def stop_api(self) -> None:
+    """ Stop the local API service if it is running """
+    service = getattr(self, "api_service", None)
+    if service is not None:
+      await service.stop()
+
+  async def restart_api(self) -> None:
+    """ Restart the local API service (stop then start again) """
+    service = getattr(self, "api_service", None)
+    if service is not None:
+      await service.restart()
 
   async def get_or_create_thread(
     self,
@@ -217,7 +239,20 @@ class Engine:
       session.add(thread)
       await session.commit()
       await session.refresh(thread)
-      return thread
+      workspace = await session.get(Workspace, workspace_id)
+      workspace_uuid = workspace.uuid if workspace else None
+
+    await self.events.publish({
+      "type": "thread.created",
+      "data": {
+        "uuid": thread.uuid,
+        "workspace_uuid": workspace_uuid,
+        "title": thread.title,
+        "created_at": thread.created_at.isoformat() if thread.created_at else None,
+        "updated_at": thread.updated_at.isoformat() if thread.updated_at else None,
+      },
+    })
+    return thread
 
   async def save_message(self, thread_id: int, role: str, content: str) -> Message:
     """Persist a single message and return the ORM object. Also bumps the thread's updated_at."""
@@ -232,7 +267,21 @@ class Engine:
       )
       await session.commit()
       await session.refresh(msg)
-      return msg
+      thread = await session.get(Thread, thread_id)
+      thread_uuid = thread.uuid if thread else None
+
+    # Notify connected clients (VS Code extension, etc.) of the new message.
+    await self.events.publish({
+      "type": "message.created",
+      "data": {
+        "uuid": msg.uuid,
+        "thread_uuid": thread_uuid,
+        "role": role,
+        "content": content,
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+      },
+    })
+    return msg
 
   async def load_thread_messages(self, thread_id: int) -> list[Message]:
     """Return all messages for a thread ordered chronologically."""
@@ -611,12 +660,21 @@ class Engine:
 
   async def stop_engine(self):
     """ Cleanup engine resources """
+    # Stop the API service first so no new requests arrive during teardown.
+    service = getattr(self, "api_service", None)
+    if service is not None:
+      try:
+        await asyncio.wait_for(service.stop(), timeout=11.0)
+      except asyncio.TimeoutError:
+        logger.warning("Engine stop_engine: api_service.stop() timed out.")
+    
     if hasattr(self, '_heartbeat_task') and not self._heartbeat_task.done():
       self._heartbeat_task.cancel()
       try:
         await self._heartbeat_task
       except asyncio.CancelledError:
         pass
+    
     if hasattr(self, 'db'):
       try:
         await asyncio.wait_for(self.db.close(), timeout=1.0)

@@ -24,6 +24,11 @@ def main():
     action="store_true",
     help=("Run in development mode" if dev_present else argparse.SUPPRESS)
   )
+  base_parser.add_argument(
+    "--no-api",
+    action="store_true",
+    help="Run the engine without the api"
+  )
 
   parser = argparse.ArgumentParser(
     prog="subconscious",
@@ -47,15 +52,15 @@ def main():
     parents=[base_parser]
   )
 
+  # Subcommand: engine
+  engine_parser = subparsers.add_parser(
+    "engine", 
+    help="Starts only the engine",
+    parents=[base_parser]
+  )
+
   # Only create these subparsers when the dev flag is present on the command line.
   if dev_present:
-    # Subcommand: engine
-    engine_parser = subparsers.add_parser(
-      "engine", 
-      help="Starts only the engine",
-      parents=[base_parser]
-    )
-
     # Subcommand: tui
     tui_parser = subparsers.add_parser(
       "code",
@@ -96,21 +101,19 @@ def main():
     # Default to launching the GUI when no subcommand is provided.
     if args.command == "engine":
       loop.run_until_complete(Engine().start_engine(
-        Config(dev=args.dev, gui=False, tui=False)
+        Config(dev=args.dev, gui=False, tui=False, api=args.no_api)
       ))
     elif args.command == "desktop" or args.command is None:
       loop.run_until_complete(start_gui(
-        Config(dev=args.dev, gui=True, tui=False)
+        Config(dev=args.dev, gui=True, tui=False, api=args.no_api)
       ))
     elif args.command == "web":
       loop.run_until_complete(start_web(
-        Config(dev=args.dev, gui=False, tui=False)
+        Config(dev=args.dev, gui=False, tui=False, api=args.no_api)
       ))
     elif args.command == "code":
-      # Dynamic import until feature is completed
-      from ..tui.tui import start_tui
       loop.run_until_complete(start_tui(
-        Config(dev=args.dev, gui=False, tui=True)
+        Config(dev=args.dev, gui=False, tui=True, api=args.no_api)
       ))
     else:
       parser.print_help()
