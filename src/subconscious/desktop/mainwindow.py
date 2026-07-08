@@ -3,7 +3,7 @@ import asyncio
 import flet as ft
 
 from .screens.chat import ChatWindow
-from ..shared.buttons import TextButton
+from ..shared.buttons import TextButton, WideTextButton
 from ..shared.forms import FormField, TextArea, CheckBox
 from ..shared.layout import ResponsiveItem, ResponsiveParent
 from ..shared.tool_config import ToolToggleTree, SkillToggleList
@@ -55,6 +55,8 @@ def MainWindow(
   workspace_skills_config=None,
   on_workspace_tools_change=None,
   on_workspace_skills_change=None,
+  workspace_directories=None,
+  on_workspace_directories_change=None,
   on_open_thread_tools=None,
   on_open_thread_skills=None,
 ) -> ft.Control:
@@ -207,67 +209,152 @@ def MainWindow(
       def delete_ws(e):
         if on_delete_workspace and workspace:
           asyncio.create_task(on_delete_workspace(workspace.id))
+
+      # ── Attached directories ────────────────────────────────────────────
+      dir_picker = ft.FilePicker()
+
+      def add_directory(e):
+        async def _pick():
+          res = await dir_picker.get_directory_path(dialog_title="Select a directory")
+          # Newer Flet returns the path string directly; guard for object form too.
+          path = getattr(res, "path", res) if res else None
+          if not path:
+            return
+          current = list(workspace_directories or [])
+          if path not in current:
+            current.append(path)
+            if on_workspace_directories_change:
+              on_workspace_directories_change(current)
+        asyncio.create_task(_pick())
+
+      def remove_directory(path):
+        current = [d for d in (workspace_directories or []) if d != path]
+        if on_workspace_directories_change:
+          on_workspace_directories_change(current)
+
+      def directory_row(path: str) -> ft.Control:
+        return ft.Container(
+          content=ft.Row(
+            [
+              ft.Icon(ft.Icons.FOLDER_OUTLINED, size=16, color=ft.Colors.PRIMARY),
+              ft.Text(
+                path,
+                size=13,
+                expand=True,
+                tooltip=path,
+                color=ft.Colors.PRIMARY,
+                no_wrap=True,
+                overflow=ft.TextOverflow.ELLIPSIS,
+              ),
+              ft.IconButton(
+                icon=ft.Icons.CLOSE,
+                icon_size=16,
+                height=30,
+                width=30,
+                padding=4,
+                tooltip="Remove directory",
+                on_click=lambda e, p=path: remove_directory(p),
+                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+              ),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+          ),
+          bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+          border_radius=ft.BorderRadius(3, 3, 3, 3),
+          padding=ft.padding.only(10, 2, 2, 2),
+        )
+
+      directories_section = ft.Column(
+        [
+          ft.Container(
+            content=ft.Text(
+              "Directories",
+              size=15,
+              color=ft.Colors.PRIMARY,
+            ),
+            height=25
+          ),
+          ft.Column(
+            [directory_row(d) for d in (workspace_directories or [])],
+            spacing=6,
+          ),
+          WideTextButton(
+            label="Add Directory",
+            on_click=add_directory
+          )
+        ],
+        spacing=0
+      )
         
       content = ft.Container(
         content=ResponsiveParent(
           [
-            ResponsiveItem(
-              ft.Container(
-                ft.Text(
-                  "New Workspace" if workspace_mode == "create" else "Edit Workspace",
-                  size=20,
-                  weight=ft.FontWeight.W_500,
-                  color=ft.Colors.PRIMARY,
-                  expand=True
+            *[
+              ResponsiveItem(
+                ft.Container(
+                  ft.Text(
+                    "New Workspace" if workspace_mode == "create" else "Edit Workspace",
+                    size=20,
+                    weight=ft.FontWeight.W_500,
+                    color=ft.Colors.PRIMARY,
+                    expand=True
+                  ),
+                  height=40,
+                  padding=ft.padding.only(0, 6, 0 , 0),
+                  margin=ft.margin.only(0, 4, 0, 4)
+                )
+              ),
+              ResponsiveItem(
+                FormField(
+                  label="Name",
+                  value=ws_name,
+                  on_change=lambda e: set_ws_name(e.control.value),
+                  hint="Enter a name for your workspace"
+                )
+              ),
+              ResponsiveItem(
+                TextArea(
+                  label="Description",
+                  value=ws_description,
+                  on_change=lambda e: set_ws_description(e.control.value),
+                  hint="Enter a description for your workspace"
+                )
+              )
+            ],
+            *[
+              ResponsiveItem(directories_section)
+            ],
+            # ResponsiveItem(directories_section) if workspace_mode == "edit" else ResponsiveItem(ft.Container()),
+            *[
+              ResponsiveItem(
+                ToolToggleTree(
+                  catalog=tool_catalog or {},
+                  configured_tools=tool_configs or [],
+                  config=workspace_tools_config or {},
+                  on_change=on_workspace_tools_change,
+                  sync_key=workspace.id if workspace else "new",
                 ),
-                height=40,
-                padding=ft.padding.only(0, 6, 0 , 0),
-                margin=ft.margin.only(0, 4, 0, 4)
+              ) if workspace_mode == "edit" else ResponsiveItem(ft.Container()),
+              ResponsiveItem(
+                SkillToggleList(
+                  skills=skill_configs or [],
+                  config=workspace_skills_config or {},
+                  on_change=on_workspace_skills_change,
+                  sync_key=workspace.id if workspace else "new",
+                ),
+              ) if workspace_mode == "edit" else ResponsiveItem(ft.Container()),
+              ResponsiveItem(
+                ft.Row(
+                  [
+                    TextButton(on_click=save_ws, text="Save"),
+                    TextButton(on_click=delete_ws, text="Delete") if workspace_mode == "edit" else ft.Container(),
+                  ],
+                  wrap=True,
+                  spacing=4
+                )
               )
-            ),
-            ResponsiveItem(
-              FormField(
-                label="Name",
-                value=ws_name,
-                on_change=lambda e: set_ws_name(e.control.value),
-                hint="Enter a name for your workspace"
-              )
-            ),
-            ResponsiveItem(
-              TextArea(
-                label="Description",
-                value=ws_description,
-                on_change=lambda e: set_ws_description(e.control.value),
-                hint="Enter a description for your workspace"
-              )
-            ),
-            ResponsiveItem(
-              ToolToggleTree(
-                catalog=tool_catalog or {},
-                configured_tools=tool_configs or [],
-                config=workspace_tools_config or {},
-                on_change=on_workspace_tools_change,
-                sync_key=workspace.id if workspace else "new",
-              ),
-            ) if workspace_mode == "edit" else ResponsiveItem(ft.Container()),
-            ResponsiveItem(
-              SkillToggleList(
-                skills=skill_configs or [],
-                config=workspace_skills_config or {},
-                on_change=on_workspace_skills_change,
-                sync_key=workspace.id if workspace else "new",
-              ),
-            ) if workspace_mode == "edit" else ResponsiveItem(ft.Container()),
-            ResponsiveItem(
-              ft.Row(
-                [
-                  TextButton(on_click=save_ws, text="Save"),
-                  TextButton(on_click=delete_ws, text="Delete") if workspace_mode == "edit" else ft.Container(),
-                ],
-                wrap=True,
-                spacing=4
-              )
-            )
+            ]
           ]
         ),
         expand=True

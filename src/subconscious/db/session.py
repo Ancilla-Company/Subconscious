@@ -60,6 +60,8 @@ class Database:
         await conn.execute(text("ALTER TABLE workspaces ADD COLUMN tools_config TEXT"))
       if "skills_config" not in ws_columns:
         await conn.execute(text("ALTER TABLE workspaces ADD COLUMN skills_config TEXT"))
+      if "directories" not in ws_columns:
+        await conn.execute(text("ALTER TABLE workspaces ADD COLUMN directories TEXT"))
 
     # Backfill UUIDs for rows created before the uuid columns existed. SQLite
     # can't generate per-row UUIDs in pure SQL, so do it in Python.

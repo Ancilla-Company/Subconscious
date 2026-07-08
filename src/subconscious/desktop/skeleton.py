@@ -105,11 +105,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   # Tools/Skills enable-disable config for the workspace currently being edited
   ws_tools_config, set_ws_tools_config = ft.use_state({})
   ws_skills_config, set_ws_skills_config = ft.use_state({})
+  # Directories attached to the workspace currently being edited
+  ws_directories, set_ws_directories = ft.use_state(list())
   # Thread-level Tools/Skills dialog: mode is None | "tools" | "skills".
   # Rendered declaratively in the reactive tree (see AppView return) so the
   # toggle components run inside the renderer context.
   thread_dialog_mode, set_thread_dialog_mode = ft.use_state(None)
   thread_dialog_cfg, set_thread_dialog_cfg = ft.use_state({})
+
+  # Background jobs / notifications popup state
+  notifications_open, set_notifications_open = ft.use_state(False)
+  jobs, set_jobs = ft.use_state(list())
 
   # Chatbox initial values restored from DB on startup
   initial_chatbox_text, set_initial_chatbox_text = ft.use_state("")
@@ -316,6 +322,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           set_editing_workspace(workspace_obj)
           set_ws_tools_config(Engine._parse_json_config(getattr(workspace_obj, "tools_config", None)))
           set_ws_skills_config(Engine._parse_json_config(getattr(workspace_obj, "skills_config", None)))
+          set_ws_directories(Engine._parse_json_list(getattr(workspace_obj, "directories", None)))
     
     # --- Selected account ---
 
@@ -627,6 +634,42 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   
   ft.use_effect(on_mount, [])
 
+  def subscribe_jobs():
+    """Subscribe to the engine EventBus and mirror background job state into the
+    UI so the notifications popup updates live as jobs progress."""
+    queue = engine.events.subscribe()
+    set_jobs(engine.jobs.list())
+
+    async def _consume():
+      try:
+        while True:
+          event = await queue.get()
+          if str(event.get("type", "")).startswith("job."):
+            set_jobs(engine.jobs.list())
+      except asyncio.CancelledError:
+        pass
+
+    task = asyncio.create_task(_consume())
+
+    def cleanup():
+      engine.events.unsubscribe(queue)
+      task.cancel()
+
+    return cleanup
+
+  ft.use_effect(subscribe_jobs, [])
+
+  def open_notifications(e=None):
+    set_jobs(engine.jobs.list())
+    set_notifications_open(True)
+
+  def close_notifications(e=None):
+    set_notifications_open(False)
+
+  def clear_finished_jobs(e=None):
+    engine.jobs.clear_finished()
+    set_jobs(engine.jobs.list())
+
   async def handle_new_workspace(e):
     set_editing_workspace(None)
     set_workspace_mode("create")
@@ -634,6 +677,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("workspaces")
     set_ws_tools_config({})
     set_ws_skills_config({})
+    set_ws_directories([])
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", ""))
@@ -647,6 +691,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("workspaces")
     set_ws_tools_config(Engine._parse_json_config(getattr(workspace, "tools_config", None)))
     set_ws_skills_config(Engine._parse_json_config(getattr(workspace, "skills_config", None)))
+    set_ws_directories(Engine._parse_json_list(getattr(workspace, "directories", None)))
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
@@ -766,7 +811,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_messages(new_messages)
 
     # --- 5. Create streaming AI bubble ---
-    ai_ui_msg = AIMessage(content="", timestamp=datetime.now(timezone.utc))
+    # Use the same timestamp convention as human messages and DB-loaded messages
+    # (naive local time labelled UTC) so the displayed time matches. Using
+    # datetime.now(timezone.utc) here produced a real-UTC time that rendered
+    # offset from local in the bubble.
+    ai_ui_msg = AIMessage(content="", timestamp=datetime.now().replace(tzinfo=timezone.utc))
     streaming_messages = new_messages + [ai_ui_msg]
     set_messages(streaming_messages)
 
@@ -839,6 +888,16 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       return
     set_ws_skills_config(dict(config))
     asyncio.create_task(engine.set_workspace_skills_config(editing_workspace.id, config))
+
+  def handle_workspace_directories_change(directories):
+    """Persist the editing workspace's attached directory list and (re)index."""
+    if not editing_workspace:
+      return
+    set_ws_directories(list(directories))
+    asyncio.create_task(engine.set_workspace_directories(editing_workspace.id, directories))
+    # Kick off a background re-index so new directory contents become searchable
+    # (and removed directories get pruned). Progress shows in the notifications popup.
+    engine.reindex_workspace(editing_workspace.id, editing_workspace.name)
 
   async def handle_open_thread_tools(e=None):
     """Resolve the active thread's tool config and open the tools dialog."""
@@ -997,50 +1056,41 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   else:
     header_workspace = active_chat_workspace
 
-  # Build the thread-level Tools/Skills dialog declaratively so its reactive
-  # toggle component renders inside the renderer context. Shown when open.
+  # Thread-level Tools/Skills dialog. Kept mounted with a stable key and toggled
+  # via `open` rather than being added/removed from the tree — removing an open
+  # AlertDialog leaves it stuck on screen (the reported "Done does nothing" bug),
+  # whereas flipping `open` triggers a proper dismiss animation.
   thread_dialog = None
-  if thread_dialog_mode == "tools" and selected_thread:
+  if selected_thread is not None:
+    is_skills = thread_dialog_mode == "skills"
+    if is_skills:
+      dialog_title = "Thread Skills"
+      dialog_body: ft.Control = SkillToggleList(
+        skills=skill_configs,
+        config=thread_dialog_cfg,
+        on_change=handle_thread_skills_change,
+        sync_key=selected_thread.id,
+      )
+      dialog_height = 420
+    else:
+      dialog_title = "Thread Tools"
+      dialog_body = ToolToggleTree(
+        catalog=tool_catalog,
+        configured_tools=tool_configs,
+        config=thread_dialog_cfg,
+        on_change=handle_thread_tools_change,
+        sync_key=selected_thread.id,
+      )
+      dialog_height = 520
     thread_dialog = ft.AlertDialog(
-      open=True,
+      key="thread-dialog",
+      open=thread_dialog_mode in ("tools", "skills"),
       modal=False,
-      title=ft.Text("Thread Tools"),
+      title=ft.Text(dialog_title),
       content=ft.Container(
-        content=ToolToggleTree(
-          catalog=tool_catalog,
-          configured_tools=tool_configs,
-          config=thread_dialog_cfg,
-          on_change=handle_thread_tools_change,
-          sync_key=selected_thread.id,
-        ),
+        content=ft.Column([dialog_body], scroll=ft.ScrollMode.ADAPTIVE, tight=True),
         width=420,
-        height=520,
-      ),
-      actions=[
-        ft.TextButton(
-          "Done",
-          on_click=close_thread_dialog,
-          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-        ),
-      ],
-      actions_alignment=ft.MainAxisAlignment.END,
-      shape=ft.RoundedRectangleBorder(radius=3),
-      on_dismiss=close_thread_dialog,
-    )
-  elif thread_dialog_mode == "skills" and selected_thread:
-    thread_dialog = ft.AlertDialog(
-      open=True,
-      modal=False,
-      title=ft.Text("Thread Skills"),
-      content=ft.Container(
-        content=SkillToggleList(
-          skills=skill_configs,
-          config=thread_dialog_cfg,
-          on_change=handle_thread_skills_change,
-          sync_key=selected_thread.id,
-        ),
-        width=420,
-        height=420,
+        height=dialog_height,
       ),
       actions=[
         ft.TextButton(
@@ -1054,6 +1104,79 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       on_dismiss=close_thread_dialog,
     )
 
+  # Background-jobs / notifications popup — shows ongoing work (e.g. indexing).
+  def _job_row(j: dict) -> ft.Control:
+    status = j.get("status", "running")
+    running = status == "running"
+    status_colours = {
+      "running":   ft.Colors.PRIMARY,
+      "completed": ft.Colors.GREEN,
+      "failed":    ft.Colors.ERROR,
+      "cancelled": ft.Colors.GREY,
+    }
+    indeterminate = running and not j.get("total")
+    body: list = [
+      ft.Row(
+        [
+          ft.Text(j.get("title", "Job"), weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
+          ft.Text(status.capitalize(), size=12, color=status_colours.get(status, ft.Colors.GREY)),
+        ],
+        spacing=8,
+      ),
+    ]
+    if running:
+      body.append(ft.ProgressBar(value=None if indeterminate else j.get("progress", 0.0)))
+    if j.get("message"):
+      body.append(
+        ft.Text(j["message"], size=12, color=ft.Colors.GREY, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+      )
+    return ft.Container(
+      content=ft.Column(body, spacing=6),
+      padding=ft.padding.all(10),
+      bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+      border_radius=ft.BorderRadius(3, 3, 3, 3),
+    )
+
+  job_controls = [_job_row(j) for j in jobs] if jobs else [
+    ft.Container(
+      content=ft.Text("No background jobs.", size=14, color=ft.Colors.GREY_600),
+      padding=ft.padding.all(10),
+    )
+  ]
+  active_jobs = sum(1 for j in jobs if j.get("status") == "running")
+
+  notifications_dialog = ft.AlertDialog(
+    key="notifications-dialog",
+    open=notifications_open,
+    modal=False,
+    title=ft.Row(
+      [
+        ft.Text("Background Jobs", expand=True),
+        ft.TextButton(
+          "Clear finished",
+          on_click=clear_finished_jobs,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+        ),
+      ],
+      spacing=8,
+    ),
+    content=ft.Container(
+      content=ft.Column(job_controls, scroll=ft.ScrollMode.ADAPTIVE, spacing=10, tight=True),
+      width=440,
+      height=420,
+    ),
+    actions=[
+      ft.TextButton(
+        "Close",
+        on_click=close_notifications,
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+      ),
+    ],
+    actions_alignment=ft.MainAxisAlignment.END,
+    shape=ft.RoundedRectangleBorder(radius=3),
+    on_dismiss=close_notifications,
+  )
+
   view = [
     TitleBar(dev=engine.config.dev),
     Frame(
@@ -1066,6 +1189,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         selected_view=current_context, # Use context to light up the sidebar icon correctly
         config=engine.config,
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
+        on_notifications_click=open_notifications,
+        active_jobs=active_jobs,
       ),
       contextlist=ContextList(
         visible=context_visible,
@@ -1131,8 +1256,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         tool_catalog=tool_catalog,
         workspace_tools_config=ws_tools_config,
         workspace_skills_config=ws_skills_config,
+        workspace_directories=ws_directories,
         on_workspace_tools_change=handle_workspace_tools_change,
         on_workspace_skills_change=handle_workspace_skills_change,
+        on_workspace_directories_change=handle_workspace_directories_change,
         on_open_thread_tools=handle_open_thread_tools,
         on_open_thread_skills=handle_open_thread_skills,
       ),
@@ -1144,6 +1271,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   if thread_dialog is not None:
     view.append(thread_dialog)
+
+  view.append(notifications_dialog)
 
   return view
 

@@ -261,6 +261,39 @@ def TextButton(on_click, text, tooltip=None, icon=None, visible=True, disabled=F
     badge=badge
   )
 
+@ft.component
+def WideTextButton(label, on_click) -> ft.Control:
+  """ Full width TextButton formatted to the application's style language """
+  return ft.Row(
+    [
+      ft.TextButton(
+        height=40,
+        expand=True,
+        content=ft.Row(
+          [
+            ft.Icon(
+              ft.Icons.CREATE_NEW_FOLDER_OUTLINED,
+              size=16,
+              color=ft.Colors.PRIMARY
+            ),
+            ft.Text(label),
+          ],
+          expand=True,
+          spacing=6,
+          alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        on_click=on_click,
+        style=ft.ButtonStyle(
+          side=ft.BorderSide(
+            1,
+            ft.Colors.PRIMARY
+          ),
+          shape=ft.RoundedRectangleBorder(radius=3)
+        )
+      )
+    ]
+  )
+
 def Badge() -> ft.Badge:
   """ Returns a standard badge for buttons """
   return ft.Badge(

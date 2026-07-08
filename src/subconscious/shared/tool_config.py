@@ -110,26 +110,49 @@ def ToolToggleTree(
   builtin_master = cfg.get("builtin_enabled", True)
   configured_master = cfg.get("configured_enabled", True)
 
-  rows: list = [
-    ft.Container(
-      height=25,
-      content=ft.Text(
-        "Tools",
-        size=15,
-        color=ft.Colors.PRIMARY
-      )
-    )
-  ]
+  rows: list = []
 
   # Master toggle for all built-in (default) tools.
   rows.append(
-    ft.Switch(
-      height=30,
-      value=builtin_master,
-      label=ft.Text("Default Tools", size=20, expand=True),
-      on_change=lambda e: toggle_builtin_master(e.control.value),
+    # ft.Switch(
+    #   height=30,
+    #   value=builtin_master,
+    #   label=ft.Text("Default Tools", size=20, expand=True),
+    #   on_change=lambda e: toggle_builtin_master(e.control.value),
+    # )
+    ft.ExpansionTile(
+      # width=700,
+      title=ft.Column(
+        [
+
+        ft.Switch(
+          height=30,
+          value=builtin_master,
+          label="Builtin Tools",
+          # label=ft.Text(
+          #   "Default Tools",
+          #   size=20,
+          #   # expand=False
+          # ),
+          # expand=True,
+          on_change=lambda e: toggle_builtin_master(e.control.value),
+        ),
+        ]
+        # padding=ft.Padding.only(top=5,bottom=5)
+        # expand=True
+      ),
+      # title="Tools List Panel",
+      # title=ft.Text("Tools List Panel"),
+      expand=True,
+      expanded=False,
+      controls=[
+          ft.ListTile(title=ft.Text("Profile")),
+          ft.ListTile(title=ft.Text("Security")),
+      ],
     )
   )
+
+
 
   if not catalog:
     rows.append(
@@ -221,9 +244,26 @@ def ToolToggleTree(
     )
 
   return ft.Column(
-    rows,
-    spacing=0,
-    # scroll=ft.ScrollMode.ADAPTIVE
+    [
+      ft.Container(
+        height=25,
+        content=ft.Text(
+          "Tools",
+          size=15,
+          color=ft.Colors.PRIMARY
+        )
+      ),
+      ft.Container(
+        ft.Column(
+          rows,
+          spacing=0
+        ),
+        # scroll=ft.ScrollMode.ADAPTIVE
+        border_radius=3,
+        border=ft.border.all(1, ft.Colors.PRIMARY),
+      )
+    ],
+    spacing=0
   )
 
 

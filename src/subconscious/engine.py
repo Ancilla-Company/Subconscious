@@ -27,6 +27,8 @@ from pydantic_ai.messages import (
 from .config import Config
 from .api import APIService
 from .events import EventBus
+from .jobs import JobManager
+from .indexing import WorkspaceIndexer
 from .constants import VERSION
 from .agent import AgentManager, EchoProvider
 from .db.session import Database
@@ -34,6 +36,7 @@ from .desktop_tools import ToolRegistry, EngineContext
 from .db.models import (
   Workspace, Thread, Message, AppState, Networks,
   SkillRegistry, ToolRegistry as ToolRegistryModel,
+  IndexedDocument, DocumentChunk,
 )
 
 
@@ -59,6 +62,8 @@ class Engine:
     # module) subscribe here so changes made by any client — including the
     # in-process Flet UI — propagate live to all connected clients.
     self.events = EventBus()
+    # Background job registry (indexing, etc.) with EventBus fan-out for the UI.
+    self.jobs = JobManager(self.events)
 
   def register_setting_callback(self, key: str, callback) -> None:
     """Register an async callback to be invoked when *key* is updated via update_setting."""
@@ -187,6 +192,9 @@ class Engine:
 
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
+
+    # Workspace directory indexer (RAG ingestion) — runs work as background jobs.
+    self.indexer = WorkspaceIndexer(self.db, self.jobs)
 
     # Start the API background service
     self.api_service = APIService(self, self.config, preferred_port=8771)
@@ -617,6 +625,95 @@ class Engine:
       return data if isinstance(data, dict) else {}
     except Exception:
       return {}
+
+  @staticmethod
+  def _parse_json_list(raw: Optional[str]) -> list:
+    """Parse a JSON list string, returning [] on null/invalid input."""
+    if not raw:
+      return []
+    try:
+      data = json.loads(raw)
+      return data if isinstance(data, list) else []
+    except Exception:
+      return []
+
+  async def get_workspace_directories(self, workspace_id: int) -> list:
+    """Return the list of directory paths attached to a workspace ([] if unset)."""
+    if not workspace_id:
+      return []
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return self._parse_json_list(ws.directories) if ws else []
+
+  async def set_workspace_directories(self, workspace_id: int, directories: list) -> None:
+    """Persist the list of directory paths attached to a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.directories = json.dumps(directories)
+        await session.commit()
+
+  # ------------------------------------------------------------------
+  # Retrieval (RAG) — directory indexing + search
+  # ------------------------------------------------------------------
+
+  def reindex_workspace(self, workspace_id: int, workspace_name: str = "workspace") -> Optional[str]:
+    """Kick off (as a background job) an incremental re-index of a workspace's
+    attached directories. Returns the job id, or None when nothing to index.
+    """
+    indexer = getattr(self, "indexer", None)
+    if indexer is None:
+      return None
+
+    job = self.jobs.create("index", f"Indexing {workspace_name}")
+
+    async def _run():
+      try:
+        directories = await self.get_workspace_directories(workspace_id)
+        # Run even with no directories: the indexer prunes documents whose
+        # source directory was detached.
+        await indexer.reindex(workspace_id, directories, job)
+        self.jobs.complete(job, job.message or "Indexing complete")
+        await self.show_notification(
+          "Indexing complete", f"{workspace_name}: {job.message or 'done'}"
+        )
+      except Exception as exc:
+        logger.error(f"Workspace indexing failed ({workspace_id}): {exc}")
+        self.jobs.fail(job, str(exc))
+        await self.show_notification("Indexing failed", str(exc))
+
+    asyncio.create_task(_run())
+    return job.id
+
+  async def search_workspace(self, workspace_id: int, query: str, limit: int = 8) -> list[dict]:
+    """Retrieve the most relevant indexed chunks for *query* within a workspace.
+
+    Baseline keyword retrieval over the chunk store. Phase 2 replaces this with
+    a vector similarity query once ``DocumentChunk.embedding`` is populated.
+    """
+    if not query or not query.strip() or not workspace_id:
+      return []
+    like = f"%{query.strip()}%"
+    async with self.db.get_session() as session:
+      rows = await session.scalars(
+        select(DocumentChunk)
+        .where(
+          DocumentChunk.workspace_id == workspace_id,
+          DocumentChunk.content.like(like),
+        )
+        .limit(limit)
+      )
+      chunks = rows.all()
+      results: list[dict] = []
+      for c in chunks:
+        doc = await session.get(IndexedDocument, c.document_id)
+        results.append({
+          "path": doc.path if doc else "",
+          "start_line": c.start_line,
+          "end_line": c.end_line,
+          "content": c.content,
+        })
+      return results
 
   async def get_workspace_tools_config(self, workspace_id: int) -> dict:
     """Return the persisted tools_config for a workspace ({} if unset)."""
