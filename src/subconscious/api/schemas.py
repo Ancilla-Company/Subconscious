@@ -57,3 +57,13 @@ class HealthResponse(BaseModel):
   status: str = "ok"
   version: str
   node_id: Optional[str] = None
+
+
+class ModelConfigDTO(BaseModel):
+  """ A configured model, safe for the wire (the API key is never included). """
+  id: str
+  provider: Optional[str] = None
+  model: Optional[str] = None
+  system_prompt: Optional[str] = None
+  base_url: Optional[str] = None
+  is_default: bool = False

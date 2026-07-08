@@ -30,6 +30,7 @@ dependencies = [
   "bcrypt",
   "pyyaml",
   "fastapi",
+  "uvicorn[standard]",
   "keyring",
   "flet_lottie",
   "pydantic-ai; sys_platform != 'android' and sys_platform != 'ios'",

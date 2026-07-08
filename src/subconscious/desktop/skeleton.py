@@ -180,6 +180,47 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     settings_ref[0] = new_settings
     set_settings(new_settings)
 
+  def build_model_configs() -> list:
+    """Read model configs fresh from encrypted storage (plus the dev echo agent).
+
+    Used both for the initial load and for restoring a thread's persisted model
+    on startup / workspace switch, where the reactive `model_configs` closure
+    may not be populated yet.
+    """
+    engine.config.read_keyring()
+    raw_models = engine.config.secrets.get("models", {})
+    loaded = [{"id": k, **v} for k, v in raw_models.items()]
+    # In dev mode, append a simple echo agent for fast testing
+    if engine.config.dev:
+      loaded.append(
+        {
+          'id': 'echo',
+          'provider': 'Subconscious',
+          'model': 'echo',
+          'api_key': '',
+          'alias': 'Subconscious:Echo'
+        }
+      )
+    return loaded
+
+  async def resolve_thread_model(thread_id, configs=None):
+    """Map a thread's persisted model id to a config dict.
+
+    A stored value of 'default'/NULL — or an id pointing at a since-deleted
+    model — falls back to the first available config so the selector is never
+    left empty. Pass `configs` to reuse an already-loaded list; otherwise the
+    configs are read fresh from storage (needed during startup restore).
+    """
+    cfgs = configs if configs else build_model_configs()
+    if not cfgs:
+      return None
+    db_model_id = await engine.get_thread_model_id(thread_id)
+    if db_model_id and db_model_id != "default":
+      match = next((c for c in cfgs if c.get("id") == db_model_id), None)
+      if match:
+        return match
+    return cfgs[0]
+
   async def load_settings():
     # Register the UI-only callback so tool-driven setting changes are
     # reflected in real-time.  We do NOT register handle_setting_change here
@@ -204,23 +245,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       
 
     # Load model configs from encrypted storage
-    engine.config.read_keyring()
-    raw_models = engine.config.secrets.get("models", {})
-
-    # secrets["models"] is stored as {uuid: {...fields}} – convert to list
-    loaded = [{"id": k, **v} for k, v in raw_models.items()]
-
-    # IF in dev mode, append simple echo agent for fast testing
-    if engine.config.dev:
-      loaded.append(
-        {
-          'id': 'echo',
-          'provider': 'Subconscious',
-          'model': 'echo',
-          'api_key': '',
-          'alias': 'Subconscious:Echo'
-        }
-      )
+    loaded = build_model_configs()
 
     set_model_configs(loaded)
 
@@ -325,6 +350,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           set_selected_thread(restored_thread)
           await load_messages(thread_id)
 
+          # Restore the thread's persisted model so the selection survives restarts
+          set_selected_model_config(await resolve_thread_model(thread_id))
+
           # Also record which thread belongs to the restored workspace
           ws_key = restored_ws.id if restored_ws else None
           set_thread_by_workspace({ws_key: restored_thread})
@@ -362,7 +390,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       _chatbox_debounce[0] = asyncio.create_task(immediate_clear())
       return
 
-    async def delayed_save():
+    async def delayed_save(): #@IgnoreException
       await asyncio.sleep(1.5)
       set_initial_chatbox_text(text)
       set_initial_chatbox_attachments(attachments)
@@ -549,7 +577,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     restored = thread_by_workspace.get(ws_key)
     if restored:
       set_selected_thread(restored)
-      asyncio.create_task(load_messages(restored.id))
+
+      async def _restore_thread(tid):
+        await load_messages(tid)
+        # Restore the thread's persisted model on workspace switch
+        set_selected_model_config(await resolve_thread_model(tid))
+
+      asyncio.create_task(_restore_thread(restored.id))
     else:
       set_selected_thread(None)
       set_messages([])
@@ -651,16 +685,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
 
-    # Restore the persisted model config for this thread:
-    # Look up the DB-stored model_id; 'default'/NULL both resolve to the first config.
-    db_model_id = await engine.get_thread_model_id(thread.id)
-    if db_model_id and db_model_id != "default" and model_configs:
-      persisted = next((c for c in model_configs if c.get("id") == db_model_id), None)
-    elif model_configs:
-      persisted = model_configs[0]
-    else:
-      persisted = None
-    set_selected_model_config(persisted)
+    # Restore the persisted model config for this thread. 'default'/NULL and
+    # ids pointing at a deleted model both fall back to the first config.
+    set_selected_model_config(await resolve_thread_model(thread.id, model_configs))
 
     # Load messages from DB and convert to UI message objects
     db_msgs = await engine.load_thread_messages(thread.id)

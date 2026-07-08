@@ -19,6 +19,7 @@ from .schemas import (
   MessageDTO,
   WorkspaceDTO,
   HealthResponse,
+  ModelConfigDTO,
   CreateThreadRequest,
   UpdateThreadRequest,
 )
@@ -122,6 +123,26 @@ def create_app(engine: Engine, token: str) -> FastAPI:
   @app.get(f"{API_PREFIX}/health", response_model=HealthResponse)
   async def health() -> HealthResponse:
     return HealthResponse(version=VERSION, node_id=getattr(engine.config, "node_id", None))
+
+  @app.get(f"{API_PREFIX}/models", response_model=list[ModelConfigDTO], dependencies=[Depends(require_token)])
+  async def list_models() -> list[ModelConfigDTO]:
+    """ List configured models. The API key is never returned.
+
+        The first configured model is flagged ``is_default`` — it's the one used
+        when a chat.send frame omits ``model_id`` (mirrors the UI behaviour).
+    """
+    cfgs = engine.agent_manager.list_model_cfgs()
+    return [
+      ModelConfigDTO(
+        id=c["id"],
+        provider=c.get("provider"),
+        model=c.get("model"),
+        system_prompt=c.get("system_prompt"),
+        base_url=c.get("base_url"),
+        is_default=(i == 0),
+      )
+      for i, c in enumerate(cfgs)
+    ]
 
   @app.get(f"{API_PREFIX}/workspaces", response_model=list[WorkspaceDTO], dependencies=[Depends(require_token)])
   async def list_workspaces(session: AsyncSession = Depends(get_db)) -> list[WorkspaceDTO]:
@@ -260,9 +281,19 @@ async def _handle_chat_send(ws: WebSocket, engine: Engine, frame: dict) -> None:
   data = frame.get("data", {})
   thread_uuid = data.get("thread_uuid")
   content = (data.get("content") or "").strip()
+  # Optional model config selection. When omitted, stream_chat falls back to the
+  # engine's best/default model. A supplied-but-unknown id is an error.
+  model_id = data.get("model_id")
   if not thread_uuid or not content:
     await ws.send_json({"v": 1, "type": "chat.error", "id": corr, "data": {"error": "thread_uuid and content required"}})
     return
+
+  model_cfg = None
+  if model_id:
+    model_cfg = engine.agent_manager.get_model_cfg(model_id)
+    if model_cfg is None:
+      await ws.send_json({"v": 1, "type": "chat.error", "id": corr, "data": {"error": f"unknown model_id: {model_id}"}})
+      return
 
   # Resolve uuids → local ids
   async with engine.db.get_session() as session:
@@ -276,7 +307,9 @@ async def _handle_chat_send(ws: WebSocket, engine: Engine, frame: dict) -> None:
 
   reply_parts: list[str] = []
   try:
-    async for chunk in engine.stream_chat(content, thread_id, workspace_id=workspace_id):
+    async for chunk in engine.stream_chat(
+      content, thread_id, workspace_id=workspace_id, model_cfg=model_cfg,
+    ):
       reply_parts.append(chunk)
       await ws.send_json({"v": 1, "type": "chat.delta", "id": corr, "data": {"delta": chunk}})
   except Exception as exc:  # surface model/config errors to the client

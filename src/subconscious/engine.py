@@ -18,16 +18,17 @@ from packaging.version import Version
 from typing import AsyncIterator, Optional
 from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from pydantic_ai import Agent
 from pydantic_ai.messages import (
   ModelMessage, ModelRequest, ModelResponse,
-  UserPromptPart, TextPart,
+  UserPromptPart, TextPart, PartStartEvent, PartDeltaEvent, TextPartDelta,
 )
 
 from .config import Config
 from .api import APIService
 from .events import EventBus
 from .constants import VERSION
-from .agent import AgentManager
+from .agent import AgentManager, EchoProvider
 from .db.session import Database
 from .desktop_tools import ToolRegistry, EngineContext
 from .db.models import (
@@ -44,6 +45,11 @@ class Engine:
   """ Subconscious Engine Core """
   update_available = None
   latest_version: Optional[str] = None
+
+  # Default inactivity timeout (seconds) for LLM streaming. Bounds the wait for
+  # the first token and the gap between subsequent tokens so a stalled provider
+  # that returns nothing (and no error) can't hang the stream indefinitely.
+  _DEFAULT_STREAM_TIMEOUT = 90.0
 
   def __init__(self):
     # Callbacks registered by the UI layer to react to setting changes in real-time.
@@ -368,9 +374,67 @@ class Engine:
     # Build an attachment context block and prepend it to the user prompt
     prompt = self._build_prompt_with_attachments(content, attachments or [])
 
-    async with agent.run_stream(prompt, message_history=history, deps=ctx_deps) as result:  # type: ignore[call-overload]
-      async for chunk in result.stream_text(delta=True):
-        yield chunk
+    # Stream with an inactivity timeout. `asyncio.timeout` bounds the wait for
+    # the stream to start (connection + first token); the deadline is then
+    # rescheduled after every chunk so a legitimately long — but steadily
+    # streaming — response is never cut off, while a provider that stalls
+    # (no output, no error) is aborted with a clear error.
+    #
+    # We drive the full agent graph with `agent.iter()` rather than
+    # `agent.run_stream()`: run_stream stops at the first text output and
+    # skips any tool calls the model makes afterwards, which breaks
+    # multi-step flows (e.g. "read these files then rename them") where the
+    # model narrates a plan before calling tools. Iterating the graph lets
+    # every model-request/tool-call round run to completion while we stream
+    # text deltas from each model-request node.
+    timeout_s = self._resolve_stream_timeout(model_cfg)
+    loop = asyncio.get_running_loop()
+    try:
+      async with asyncio.timeout(timeout_s) as stream_timeout:
+        # The dev-only echo agent doesn't implement the graph API.
+        if isinstance(agent, EchoProvider):
+          async with agent.run_stream(prompt) as result:
+            async for chunk in result.stream_text():
+              stream_timeout.reschedule(loop.time() + timeout_s)
+              yield chunk
+        else:
+          async with agent.iter(prompt, message_history=history, deps=ctx_deps) as run:  # type: ignore[call-overload]
+            async for node in run:
+              if not Agent.is_model_request_node(node):
+                continue
+              # Stream text as the model produces it for this request node.
+              async with node.stream(run.ctx) as request_stream:
+                async for event in request_stream:
+                  delta: Optional[str] = None
+                  if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                    delta = event.part.content
+                  elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                    delta = event.delta.content_delta
+                  if delta:
+                    # Reset the inactivity deadline each time text arrives.
+                    stream_timeout.reschedule(loop.time() + timeout_s)
+                    yield delta
+    except asyncio.TimeoutError as exc:
+      raise TimeoutError(
+        f"The model did not respond within {timeout_s:.0f}s of inactivity. "
+        "The provider may be unavailable or stalled."
+      ) from exc
+
+  def _resolve_stream_timeout(self, model_cfg: Optional[dict]) -> float:
+    """Resolve the streaming inactivity timeout (seconds).
+
+    Precedence: ``model_cfg['stream_timeout']`` → the
+    ``SUBCONSCIOUS_STREAM_TIMEOUT`` env var → ``_DEFAULT_STREAM_TIMEOUT``.
+    Non-positive or unparseable values fall back to the default.
+    """
+    raw = model_cfg.get("stream_timeout") if model_cfg else None
+    if raw in (None, ""):
+      raw = os.environ.get("SUBCONSCIOUS_STREAM_TIMEOUT")
+    try:
+      val = float(raw) if raw not in (None, "") else self._DEFAULT_STREAM_TIMEOUT
+    except (TypeError, ValueError):
+      val = self._DEFAULT_STREAM_TIMEOUT
+    return val if val > 0 else self._DEFAULT_STREAM_TIMEOUT
 
   def _build_prompt_with_attachments(self, content: str, attachments: list[dict]) -> str:
     """
