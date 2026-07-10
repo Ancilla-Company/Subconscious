@@ -4,7 +4,9 @@ import logging
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
+from pydantic_ai.providers.bedrock import BedrockProvider
 from typing import Optional, Callable, TYPE_CHECKING, Any, cast
+from pydantic_ai.models.bedrock import BedrockConverseModel, BedrockModelSettings
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart, ModelResponse, TextPart
 
 from .config import Config
@@ -24,7 +26,10 @@ _PROVIDER_MAP = {
   "groq":                             ("groq",        "GROQ_API_KEY"),
   "mistral":                          ("mistral",     "MISTRAL_API_KEY"),
   "xai":                              ("xai",         "XAI_API_KEY"),
-  "bedrock":                          ("bedrock",     "AWS_ACCESS_KEY_ID"),
+  # Bedrock credentials are passed directly to BedrockProvider in build_agent,
+  # so no env-var is set here (the stored api_key is a Bedrock bearer token,
+  # not an AWS_ACCESS_KEY_ID).
+  "bedrock":                          ("bedrock",     None),
   "cerebras":                         ("cerebras",    "CEREBRAS_API_KEY"),
   "cohere":                           ("cohere",      "CO_API_KEY"),
   "hugging face":                     ("huggingface", "HUGGINGFACEHUB_API_TOKEN"),
@@ -93,22 +98,34 @@ class AgentManager:
     elif not api_key:
       logger.warning(f"No api_key stored for provider '{provider}' (model id={model_cfg.get('id')})")
 
-  def build_agent(self, model_cfg: dict, tools: Optional[list[Callable]] = None) -> Agent:
+  def build_agent(
+    self,
+    model_cfg: dict,
+    tools: Optional[list[Callable]] = None,
+    ambient_context: Optional[str] = None,
+  ) -> Agent:
     """
     Construct a pydantic-ai Agent from a stored model config dict.
     Ensures the matching env-var is set first.
 
     Args:
-      model_cfg: Provider/model/key dict as stored in secrets["models"].
-      tools:     Optional list of pydantic-ai tool callables to attach.
-                 When provided, EngineContext is used as the deps type so
-                 tools receive the DB session and workspace context.
+      model_cfg:       Provider/model/key dict as stored in secrets["models"].
+      tools:           Optional list of pydantic-ai tool callables to attach.
+                       When provided, EngineContext is used as the deps type so
+                       tools receive the DB session and workspace context.
+      ambient_context: Optional ambient context block (e.g. system information)
+                       to append to the model-configured system prompt. When
+                       non-empty it is appended after the model prompt; when
+                       None or empty the prompt is left unchanged. A valid Agent
+                       is always returned regardless of this value.
     """
     self.set_env_for_model(model_cfg)
 
     provider = (model_cfg.get("provider") or "").strip()
     raw_model = (model_cfg.get("model") or "").strip()
     system_prompt = (model_cfg.get("system_prompt") or "You are a helpful assistant.").strip()
+    if ambient_context:
+      system_prompt = f"{system_prompt}\n\n{ambient_context}"
     base_url = (model_cfg.get("base_url") or "").strip()
 
     prefix = _provider_prefix(provider)
@@ -131,6 +148,11 @@ class AgentManager:
         custom_base_url += "/v1"
       model_instance = OpenAIChatModel(raw_model, provider=OllamaProvider(base_url=custom_base_url))
       logger.debug(f"Custom base_url: {custom_base_url}")
+    elif provider.lower() == "bedrock":
+      # Use BedrockConverseModel with an explicit BedrockProvider so the stored
+      # credentials/region are passed directly rather than relying solely on the
+      # ambient AWS credential chain.
+      model_instance = self._build_bedrock_model(raw_model, model_cfg)
     elif provider.lower() == "subconscious" and raw_model == "echo":
       return EchoProvider()
 
@@ -145,6 +167,58 @@ class AgentManager:
 
     return Agent(model=model_instance, system_prompt=system_prompt)  # type: ignore[return-value]
 
+  @staticmethod
+  def _bedrock_region(model_name: str, model_cfg: dict) -> Optional[str]:
+    """Resolve the AWS region for a Bedrock model.
+
+    Preference order:
+      1. Explicit ``region`` field in the model config.
+      2. ``base_url`` field (some users store the region there).
+      3. Region embedded in a foundation-model / inference-profile ARN.
+      4. Ambient ``AWS_REGION`` / ``AWS_DEFAULT_REGION`` env vars.
+    """
+    region = (model_cfg.get("region") or model_cfg.get("base_url") or "").strip()
+    if not region and model_name.startswith("arn:aws:bedrock:"):
+      # arn:aws:bedrock:<region>:<account>:...
+      parts = model_name.split(":")
+      if len(parts) > 3 and parts[3]:
+        region = parts[3]
+    if not region:
+      region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "").strip()
+    return region or None
+
+  def _build_bedrock_model(self, model_name: str, model_cfg: dict) -> BedrockConverseModel:
+    """Construct a BedrockConverseModel backed by an explicit BedrockProvider.
+
+    The stored ``api_key`` is passed straight through as a Bedrock API key
+    (bearer token). If AWS access-key style credentials are present in the
+    config they are forwarded too; otherwise BedrockProvider falls back to the
+    standard AWS credential chain (env vars, shared config, IAM role, etc.).
+    """
+    api_key           = (model_cfg.get("api_key") or "").strip()
+    aws_access_key    = (model_cfg.get("aws_access_key_id") or "").strip()
+    aws_secret_key    = (model_cfg.get("aws_secret_access_key") or "").strip()
+    aws_session_token = (model_cfg.get("aws_session_token") or "").strip()
+    region            = self._bedrock_region(model_name, model_cfg)
+
+    provider_kwargs: dict[str, Any] = {}
+    if api_key:
+      provider_kwargs["api_key"] = api_key
+    if aws_access_key:
+      provider_kwargs["aws_access_key_id"] = aws_access_key
+    if aws_secret_key:
+      provider_kwargs["aws_secret_access_key"] = aws_secret_key
+    if aws_session_token:
+      provider_kwargs["aws_session_token"] = aws_session_token
+    if region:
+      provider_kwargs["region_name"] = region
+
+    logger.debug(
+      f"Building Bedrock model '{model_name}' (region={region or 'default'}, "
+      f"api_key={'set' if api_key else 'unset'})"
+    )
+    return BedrockConverseModel(model_name, provider=BedrockProvider(**provider_kwargs))
+
   def get_best_model_cfg(self) -> Optional[dict]:
     """Return the first usable model config from encrypted storage, or None."""
     self.config.read_keyring()
@@ -154,6 +228,24 @@ class AgentManager:
       if cfg.get("model") and cfg.get("provider"):
         return {"id": model_id, **cfg}
     return None
+
+  def list_model_cfgs(self) -> list[dict]:
+    """ Return every stored model config as a dict (``id`` + stored fields).
+
+        Includes the api_key — callers that expose these over the wire must
+        strip it (see the /models API endpoint).
+    """
+    self.config.read_keyring()
+    secrets = self.config.secrets or {}
+    models = secrets.get("models", {})
+    return [{"id": model_id, **cfg} for model_id, cfg in models.items()]
+
+  def get_model_cfg(self, model_id: str) -> Optional[dict]:
+    """Return the stored config for *model_id* (``id`` + fields), or None if unknown."""
+    self.config.read_keyring()
+    secrets = self.config.secrets or {}
+    cfg = (secrets.get("models") or {}).get(model_id)
+    return {"id": model_id, **cfg} if cfg else None
 
 
 class EchoProvider(Agent):

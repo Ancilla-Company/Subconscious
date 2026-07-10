@@ -3,8 +3,8 @@ import uuid
 import bcrypt
 from datetime import datetime
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import declarative_base, relationship, mapped_column, Mapped
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
 
 
 Base = declarative_base()
@@ -56,6 +56,7 @@ class Thread(Base):
   __tablename__ = 'threads'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
   workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
   title = Column(String)
   description = Column(String, nullable=True)
@@ -73,6 +74,7 @@ class Message(Base):
   __tablename__ = 'messages'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
   thread_id = Column(Integer, ForeignKey('threads.id'), nullable=False)
   role = Column(String, nullable=False) # user, agent, system
   content = Column(Text, nullable=False)

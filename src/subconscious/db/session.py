@@ -1,3 +1,4 @@
+import uuid
 import logging
 from sqlalchemy import text, NullPool
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -43,6 +44,14 @@ class Database:
         await conn.execute(text("ALTER TABLE threads ADD COLUMN tools_config TEXT"))
       if "skills_config" not in columns:
         await conn.execute(text("ALTER TABLE threads ADD COLUMN skills_config TEXT"))
+      if "uuid" not in columns:
+        await conn.execute(text("ALTER TABLE threads ADD COLUMN uuid VARCHAR"))
+
+      # messages.uuid – stable cross-peer identity for sync
+      result = await conn.execute(text("PRAGMA table_info(messages)"))
+      msg_columns = {row[1] for row in result.fetchall()}
+      if "uuid" not in msg_columns:
+        await conn.execute(text("ALTER TABLE messages ADD COLUMN uuid VARCHAR"))
 
       # workspaces.tools_config / skills_config
       result = await conn.execute(text("PRAGMA table_info(workspaces)"))
@@ -51,6 +60,19 @@ class Database:
         await conn.execute(text("ALTER TABLE workspaces ADD COLUMN tools_config TEXT"))
       if "skills_config" not in ws_columns:
         await conn.execute(text("ALTER TABLE workspaces ADD COLUMN skills_config TEXT"))
+
+    # Backfill UUIDs for rows created before the uuid columns existed. SQLite
+    # can't generate per-row UUIDs in pure SQL, so do it in Python.
+    async with self.engine.begin() as conn:
+      for table in ("threads", "messages", "workspaces"):
+        rows = await conn.execute(
+          text(f"SELECT id FROM {table} WHERE uuid IS NULL OR uuid = ''")
+        )
+        for (row_id,) in rows.fetchall():
+          await conn.execute(
+            text(f"UPDATE {table} SET uuid = :u WHERE id = :id"),
+            {"u": str(uuid.uuid4()), "id": row_id},
+          )
 
   def get_session(self) -> AsyncSession:
     """ Get a new async database session. """
