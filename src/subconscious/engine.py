@@ -30,8 +30,9 @@ from .events import EventBus
 from .jobs import JobManager
 from .indexing import WorkspaceIndexer
 from .constants import VERSION
-from .agent import AgentManager, EchoProvider
 from .db.session import Database
+from .agent import AgentManager, EchoProvider
+from .system_info import SystemInformationService
 from .desktop_tools import ToolRegistry, EngineContext
 from .db.models import (
   Workspace, Thread, Message, AppState, Networks,
@@ -49,10 +50,15 @@ class Engine:
   update_available = None
   latest_version: Optional[str] = None
 
-  # Default inactivity timeout (seconds) for LLM streaming. Bounds the wait for
-  # the first token and the gap between subsequent tokens so a stalled provider
-  # that returns nothing (and no error) can't hang the stream indefinitely.
+  # Default inactivity timeout (seconds) for LLM streaming
+  # Could be an issue for slow systems where nothing is wrong but response takes very long
   _DEFAULT_STREAM_TIMEOUT = 90.0
+
+  # In-memory cache of the `share_system_context` privacy toggle. Seeded at
+  _share_system_context: bool = True
+
+  # The system information service, created during start_engine by
+  system_info: Optional["SystemInformationService"] = None
 
   def __init__(self):
     # Callbacks registered by the UI layer to react to setting changes in real-time.
@@ -66,7 +72,7 @@ class Engine:
     self.jobs = JobManager(self.events)
 
   def register_setting_callback(self, key: str, callback) -> None:
-    """Register an async callback to be invoked when *key* is updated via update_setting."""
+    """ Register an async callback to be invoked when *key* is updated via update_setting """
     self._setting_callbacks.setdefault(key, []).append(callback)
 
   def unregister_setting_callback(self, key: str, callback) -> None:
@@ -86,12 +92,13 @@ class Engine:
         "language": [ "en" ],
         "position": [ "x", "y" ],
         "size": [ "width", "height" ],
-        "maximized": [ False, True ]
+        "maximized": [ False, True ],
+        "share_system_context": [ "true", "false" ]
       }
       
+      # Create or skip config
       async with self.db.get_session() as session:
         for key, value in system_settings.items():
-          # Check if already in DB
           exists = await session.scalar(
             select(AppState).where(AppState.key == key, AppState.tag == "system")
           )
@@ -107,11 +114,57 @@ class Engine:
     except Exception as e:
       logger.error(f"Failed to initialize settings: {e}")
 
+    # Seed the in-memory privacy toggle from the (now-ensured) stored value and
+    # register the callback that keeps it fresh on later updates (Req 7.5).
+    await self._seed_share_system_context()
+
+  async def _seed_share_system_context(self) -> None:
+    """ Seed the _share_system_context cache from AppState and register the
+    update callback.
+
+    A failed read leaves the cache at its default (True) and a malformed stored
+    registered regardless so later updates always refresh the cache.
+    """
+    try:
+      stored = await self.get_setting("share_system_context", tag="system")
+      self._share_system_context = stored == "true"
+    except Exception as exc:
+      logger.warning(f"Failed to seed share_system_context; using default (True): {exc}")
+      self._share_system_context = True
+    self.register_setting_callback(
+      "share_system_context", self._on_share_system_context_changed
+    )
+
+  async def _on_share_system_context_changed(self, key: str, value: str, tag: str) -> None:
+    """ Setting callback: refresh the in-memory share_system_context cache """
+    self._share_system_context = value == "true"
+
+  async def _collect_info(self) -> None:
+    """ Initiates the hardware information collection service """
+    try:
+      self.system_info = SystemInformationService(data_dir=str(self.config.data_dir))
+      # Fast, non-blocking: serve last-known data (or an UNKNOWN placeholder).
+      self.system_info.load_cached_profile()
+
+      # Refresh in the background so a slow collection never blocks startup.
+      asyncio.create_task(self._refresh_system_info())
+    except Exception as exc:
+      logger.error(
+        f"System information initialization failed; continuing without it: {exc}"
+      )
+      self.system_info = None
+
+  async def _refresh_system_info(self) -> None:
+    """ Run the (potentially slow) system-info collection off the event loop """
+    if self.system_info is None: return
+    try:
+      await asyncio.to_thread(self.system_info.refresh)
+      logger.debug("System information refreshed in background")
+    except Exception as exc:
+      logger.warning(f"Background system-info refresh failed: {exc}")
+
   async def init_system(self):
     """ Initialize system components (DB, Default Workspace) """
-    await self.db.init_models()
-    await self.init_settings()
-
     async with self.db.get_session() as session:
       # Find current network inside app_state
       self.current_network = await session.scalar(
@@ -178,11 +231,22 @@ class Engine:
 
   async def start_engine(self, config: Config):
     """ Engine startup logic """
-    # Initialize Database
+    # Initialize and load config
     self.config = config
     self.config.load()
+
+    # Init the database
     self.db = Database(config)
+    await self.db.init_models()
+
+    # Init the default settings
+    await self.init_settings()
+
+    # Initialize the system data
     await self.init_system()
+
+    # Collect the hardware info
+    await self._collect_info()
 
     # Check for updates
     asyncio.create_task(self.check_for_updates())
@@ -368,7 +432,17 @@ class Engine:
       cfg = await self.resolve_tools_config(workspace_id, thread_id)
       tools = self.tool_registry.get_tools_for_config(cfg)
     
-    agent = self.agent_manager.build_agent(model_cfg, tools=tools)  # type: ignore[call-arg]
+
+    ambient_context = (
+      self.system_info.format_ambient_context()
+      if self._share_system_context and self.system_info is not None
+      else None
+    )
+    agent = self.agent_manager.build_agent(
+      model_cfg,
+      tools=tools,
+      ambient_context=ambient_context,
+    )
 
     # Build the dependency context for tools that need DB / workspace access
     ctx_deps = EngineContext(
@@ -873,7 +947,7 @@ class Engine:
         sqlite_insert(AppState)
         .values(**insert_values)
         .on_conflict_do_update(
-          index_elements=[AppState.key],  
+          index_elements=[AppState.key, AppState.tag],
           set_={"value": sqlite_insert(AppState).excluded.value}
         )
       )

@@ -3,8 +3,8 @@ import uuid
 import bcrypt
 from datetime import datetime
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import declarative_base, relationship, mapped_column, Mapped
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
 
 
 Base = declarative_base()
