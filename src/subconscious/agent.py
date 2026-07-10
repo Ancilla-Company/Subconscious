@@ -98,22 +98,34 @@ class AgentManager:
     elif not api_key:
       logger.warning(f"No api_key stored for provider '{provider}' (model id={model_cfg.get('id')})")
 
-  def build_agent(self, model_cfg: dict, tools: Optional[list[Callable]] = None) -> Agent:
+  def build_agent(
+    self,
+    model_cfg: dict,
+    tools: Optional[list[Callable]] = None,
+    ambient_context: Optional[str] = None,
+  ) -> Agent:
     """
     Construct a pydantic-ai Agent from a stored model config dict.
     Ensures the matching env-var is set first.
 
     Args:
-      model_cfg: Provider/model/key dict as stored in secrets["models"].
-      tools:     Optional list of pydantic-ai tool callables to attach.
-                 When provided, EngineContext is used as the deps type so
-                 tools receive the DB session and workspace context.
+      model_cfg:       Provider/model/key dict as stored in secrets["models"].
+      tools:           Optional list of pydantic-ai tool callables to attach.
+                       When provided, EngineContext is used as the deps type so
+                       tools receive the DB session and workspace context.
+      ambient_context: Optional ambient context block (e.g. system information)
+                       to append to the model-configured system prompt. When
+                       non-empty it is appended after the model prompt; when
+                       None or empty the prompt is left unchanged. A valid Agent
+                       is always returned regardless of this value.
     """
     self.set_env_for_model(model_cfg)
 
     provider = (model_cfg.get("provider") or "").strip()
     raw_model = (model_cfg.get("model") or "").strip()
     system_prompt = (model_cfg.get("system_prompt") or "You are a helpful assistant.").strip()
+    if ambient_context:
+      system_prompt = f"{system_prompt}\n\n{ambient_context}"
     base_url = (model_cfg.get("base_url") or "").strip()
 
     prefix = _provider_prefix(provider)
