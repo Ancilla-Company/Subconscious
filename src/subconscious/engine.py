@@ -135,15 +135,28 @@ class Engine:
     self._share_system_context = value == "true"
 
   async def _collect_info(self) -> None:
-    """ Create the SystemInformationService and run its one-time load-or-collect """
+    """ Initiates the hardware information collection service """
     try:
       self.system_info = SystemInformationService(data_dir=str(self.config.data_dir))
-      self.system_info.ensure_profile()
+      # Fast, non-blocking: serve last-known data (or an UNKNOWN placeholder).
+      self.system_info.load_cached_profile()
+
+      # Refresh in the background so a slow collection never blocks startup.
+      asyncio.create_task(self._refresh_system_info())
     except Exception as exc:
       logger.error(
         f"System information initialization failed; continuing without it: {exc}"
       )
       self.system_info = None
+
+  async def _refresh_system_info(self) -> None:
+    """ Run the (potentially slow) system-info collection off the event loop """
+    if self.system_info is None: return
+    try:
+      await asyncio.to_thread(self.system_info.refresh)
+      logger.debug("System information refreshed in background")
+    except Exception as exc:
+      logger.warning(f"Background system-info refresh failed: {exc}")
 
   async def init_system(self):
     """ Initialize system components (DB, Default Workspace) """
@@ -412,10 +425,15 @@ class Engine:
       tools = self.tool_registry.get_tools_for_config(cfg)
     
 
+    ambient_context = (
+      self.system_info.format_ambient_context()
+      if self._share_system_context and self.system_info is not None
+      else None
+    )
     agent = self.agent_manager.build_agent(
       model_cfg,
       tools=tools,
-      ambient_context=self.system_info if self._share_system_context else None
+      ambient_context=ambient_context,
     )
 
     # Build the dependency context for tools that need DB / workspace access
