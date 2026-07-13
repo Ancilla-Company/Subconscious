@@ -166,5 +166,6 @@ jobs:
       - uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: Ancilla.Subconscious-Chat
+          release-tag: ${{ github.event.inputs.tag || github.event.release.tag_name }}
           token: ${{ secrets.WINGET_TOKEN }}
           
