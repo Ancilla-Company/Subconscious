@@ -4,10 +4,11 @@
   // belong in your VS Code User Settings (Ctrl/Cmd+Shift+P → "Open User Settings").
   "files.associations": { "*.env": "dotenv" },
   "github.copilot.enable": {
-    "*": true,
+    "*": false,
     "plaintext": false,
     "markdown": false,
     "scminput": false,
+    "jsonc": true,
     "dotenv": false,
     "python": false
   },
@@ -58,4 +59,33 @@
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
   "chat.agent.maxRequests": 100,
+  "kiroAgent.trustedCommands": [
+    "node *",
+    "npm *",
+    "npx *",
+    "yarn *",
+    "pnpm *",
+    "git status",
+    "git diff",
+    "git log",
+    "git show",
+    "git branch",
+    "git remote",
+    "conda list",
+    "conda info",
+    "conda env list",
+    "dir *",
+    "type *",
+    "echo *",
+    "where *",
+    "whoami",
+    "cmd *",
+    "if exist *",
+    "pip show *",
+    "python *",
+    "Get-ChildItem *",
+    "powershell *",
+    "conda run *",
+    "set *"
+  ]
 }
