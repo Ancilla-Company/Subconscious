@@ -16,6 +16,6 @@ UpgradeBehavior: install
 Installers:
 - Architecture: x64
   InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.11/subconscious-setup-x64.exe
-  InstallerSha256: B0485E26545450DB3940B2D9FB88804CF561D94158C094132FF255ED435DD79D
+  InstallerSha256: 1A3A01FEF5E16F8968F23A368FE7EC225977C61D39CC46459EF408497FD422C1
 ManifestType: installer
 ManifestVersion: 1.12.0
