@@ -4,8 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subconscious-chat"
-# Unreleased
-version = "0.1.10"
+version = "0.1.11"
 description = "A distributed, agentic AI platform — run AI agents everywhere, on every device."
 readme = "README.md"
 license = { text = "Proprietary" }
