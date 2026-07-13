@@ -2,7 +2,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: Ancilla.Subconscious-Chat
-PackageVersion: 0.1.10
+PackageVersion: 0.1.11
 InstallerType: nullsoft
 NestedInstallerType: exe
 InstallerSwitches:
@@ -15,7 +15,7 @@ InstallModes:
 UpgradeBehavior: install
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.10/subconscious-setup-x64.exe
-  InstallerSha256: 0B43797F79BAA093044BA46D4F5B4598B3EBC381E71E6FE8E754F86E4B497238
+  InstallerUrl: https://github.com/Ancilla-Company/Subconscious/releases/download/v0.1.11/subconscious-setup-x64.exe
+  InstallerSha256: B0485E26545450DB3940B2D9FB88804CF561D94158C094132FF255ED435DD79D
 ManifestType: installer
 ManifestVersion: 1.12.0
