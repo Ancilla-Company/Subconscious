@@ -138,8 +138,33 @@ jobs:
     needs: [attach-windows-release, update-winget-manifest]
     runs-on: ubuntu-latest
     steps:
+      - name: Validate WINGET_TOKEN
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::error title=WINGET_TOKEN missing::The WINGET_TOKEN secret is not set. Create a classic PAT with the 'public_repo' scope (or a fine-grained PAT with Contents + Pull requests read/write on your winget-pkgs fork) and add it under Settings > Secrets and variables > Actions as WINGET_TOKEN."
+            exit 1
+          fi
+          status=$(curl -sS -D /tmp/gh_headers.txt -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $WINGET_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/user)
+          if [ "$status" = "401" ]; then
+            echo "::error title=WINGET_TOKEN invalid or expired::GitHub returned 401 for WINGET_TOKEN. Regenerate the PAT and update the WINGET_TOKEN repository secret."
+            exit 1
+          fi
+          if [ "$status" != "200" ]; then
+            echo "::error title=WINGET_TOKEN validation failed::Could not validate WINGET_TOKEN (GitHub returned HTTP $status). Check the token and try again."
+            exit 1
+          fi
+          scopes=$(tr -d '\r' < /tmp/gh_headers.txt | grep -i '^x-oauth-scopes:' | cut -d' ' -f2-)
+          if [ -n "$scopes" ] && ! echo "$scopes" | grep -qw 'public_repo' && ! echo "$scopes" | grep -qw 'repo'; then
+            echo "::warning title=WINGET_TOKEN scope::WINGET_TOKEN is valid but its scopes ($scopes) do not include 'public_repo'. winget-releaser needs 'public_repo' (classic PAT) to push a branch to your winget-pkgs fork."
+          fi
+          echo "WINGET_TOKEN validated. Scopes: ${scopes:-<none reported (fine-grained token)>}"
       - uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: Ancilla.Subconscious-Chat
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.WINGET_TOKEN }}
           
