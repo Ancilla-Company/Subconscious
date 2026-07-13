@@ -21,8 +21,10 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
   ModelMessage, ModelRequest, ModelResponse,
+  FunctionToolCallEvent, FunctionToolResultEvent,
   UserPromptPart, TextPart, PartStartEvent, PartDeltaEvent, TextPartDelta,
 )
+from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults
 
 from .config import Config
 from .api import APIService
@@ -33,6 +35,10 @@ from .constants import VERSION
 from .db.session import Database
 from .agent import AgentManager, EchoProvider
 from .system_info import SystemInformationService
+from .stream_events import (
+  TextDelta, ToolCallStarted, ToolCallResult, ApprovalRequest, ApprovalResolved, StreamEvent,
+)
+from .tools import classify_operation
 from .desktop_tools import ToolRegistry, EngineContext
 from .db.models import (
   Workspace, Thread, Message, AppState, Networks,
@@ -68,6 +74,10 @@ class Engine:
     # module) subscribe here so changes made by any client — including the
     # in-process Flet UI — propagate live to all connected clients.
     self.events = EventBus()
+    # Pending human-in-the-loop tool-approval futures, keyed by tool_call_id.
+    self._pending_approvals: dict = {}
+    # Decisions that arrived before a waiter was registered (race guard).
+    self._approval_inbox: dict = {}
     # Background job registry (indexing, etc.) with EventBus fan-out for the UI.
     self.jobs = JobManager(self.events)
 
@@ -385,7 +395,7 @@ class Engine:
         history.append(ModelResponse(parts=[TextPart(content=content_str)]))
     return history
 
-  async def stream_chat(
+  async def stream_chat_events(
     self,
     content: str,
     thread_id: int,
@@ -393,23 +403,11 @@ class Engine:
     workspace_id: Optional[int] = None,
     attachments: Optional[list[dict]] = None,
     enabled_tools: Optional[list[str]] = None,
-  ) -> AsyncIterator[str]:
+    auto_approve: Optional[bool] = None,
+  ) -> AsyncIterator[StreamEvent]:
     """
-    Stream an AI response for *content* given the existing thread history.
-    Yields text chunks as they arrive from the LLM.
+    Stream a *structured* AI response for *content* given the thread history.
 
-    Args:
-      content:       The user message text.
-      thread_id:     ID of the active thread (used to load history).
-      workspace_id:  ID of the active workspace (used as tool scope).
-      model_cfg:     Override model config dict; uses best available if None.
-      enabled_tools: List of tool slugs to attach, e.g. ['time', 'calculator'].
-                     Defaults to all registered tools when None.
-      attachments:   List of dicts with keys 'path' and 'type' ('file'|'folder')
-                     selected by the user from the chat input. File contents and
-                     directory listings are inlined into the prompt context so the
-                     model can reason about them immediately without additional
-                     tool calls.
     """
     # Load history (excluding the message we're about to send – it was just saved)
     db_messages = await self.load_thread_messages(thread_id)
@@ -451,6 +449,7 @@ class Engine:
       thread_id=thread_id,
       engine=self,
       data_dir=str(self.config.data_dir),
+      approval_config=await self.resolve_approval_config(workspace_id, thread_id),
     )
 
     # Build an attachment context block and prepend it to the user prompt
@@ -471,36 +470,153 @@ class Engine:
     # text deltas from each model-request node.
     timeout_s = self._resolve_stream_timeout(model_cfg)
     loop = asyncio.get_running_loop()
-    try:
-      async with asyncio.timeout(timeout_s) as stream_timeout:
-        # The dev-only echo agent doesn't implement the graph API.
-        if isinstance(agent, EchoProvider):
+    timeout_s = self._resolve_stream_timeout(model_cfg)
+    loop = asyncio.get_running_loop()
+
+    # The dev-only echo agent doesn't implement the graph API (no tools/HITL).
+    if isinstance(agent, EchoProvider):
+      try:
+        async with asyncio.timeout(timeout_s) as stream_timeout:
           async with agent.run_stream(prompt) as result:
             async for chunk in result.stream_text():
               stream_timeout.reschedule(loop.time() + timeout_s)
-              yield chunk
-        else:
-          async with agent.iter(prompt, message_history=history, deps=ctx_deps) as run:  # type: ignore[call-overload]
+              yield TextDelta(content=chunk)
+      except asyncio.TimeoutError as exc:
+        raise TimeoutError(
+          f"The model did not respond within {timeout_s:.0f}s of inactivity. "
+          "The provider may be unavailable or stalled."
+        ) from exc
+      return
+
+    # Real agent: drive the full graph. When the model calls a tool that the
+    # approval policy gates, the run ends with a DeferredToolRequests output
+    # instead of executing it; we surface an ApprovalRequest, wait for the
+    # user's decision (outside the inactivity timeout), then resume the run
+    # with the decision until no further approvals are pending.
+    deferred_results: Optional[DeferredToolResults] = None
+    message_history = history
+    user_prompt: Optional[str] = prompt
+    while True:
+      try:
+        async with asyncio.timeout(timeout_s) as stream_timeout:
+          async with agent.iter(  # type: ignore[call-overload]
+            user_prompt,
+            message_history=message_history,
+            deps=ctx_deps,
+            deferred_tool_results=deferred_results,
+          ) as run:
             async for node in run:
-              if not Agent.is_model_request_node(node):
-                continue
-              # Stream text as the model produces it for this request node.
-              async with node.stream(run.ctx) as request_stream:
-                async for event in request_stream:
-                  delta: Optional[str] = None
-                  if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
-                    delta = event.part.content
-                  elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-                    delta = event.delta.content_delta
-                  if delta:
-                    # Reset the inactivity deadline each time text arrives.
+              if Agent.is_model_request_node(node):
+                # Stream text as the model produces it for this request node.
+                async with node.stream(run.ctx) as request_stream:
+                  async for event in request_stream:
+                    delta: Optional[str] = None
+                    if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                      delta = event.part.content
+                    elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                      delta = event.delta.content_delta
+                    if delta:
+                      stream_timeout.reschedule(loop.time() + timeout_s)
+                      yield TextDelta(content=delta)
+              elif Agent.is_call_tools_node(node):
+                # Surface each tool call and its result as discrete events so
+                # the UI can render them as their own bubbles.
+                async with node.stream(run.ctx) as tool_stream:
+                  async for event in tool_stream:
                     stream_timeout.reschedule(loop.time() + timeout_s)
-                    yield delta
-    except asyncio.TimeoutError as exc:
-      raise TimeoutError(
-        f"The model did not respond within {timeout_s:.0f}s of inactivity. "
-        "The provider may be unavailable or stalled."
-      ) from exc
+                    if isinstance(event, FunctionToolCallEvent):
+                      yield ToolCallStarted(
+                        tool_name=event.part.tool_name,
+                        args=event.part.args,
+                        tool_call_id=event.part.tool_call_id,
+                      )
+                    elif isinstance(event, FunctionToolResultEvent):
+                      result = event.result
+                      yield ToolCallResult(
+                        tool_name=getattr(result, "tool_name", "") or "",
+                        content=getattr(result, "content", None),
+                        tool_call_id=event.tool_call_id,
+                        outcome=getattr(result, "outcome", "success"),
+                      )
+      except asyncio.TimeoutError as exc:
+        raise TimeoutError(
+          f"The model did not respond within {timeout_s:.0f}s of inactivity. "
+          "The provider may be unavailable or stalled."
+        ) from exc
+
+      # If the model called any approval-gated tools, the run paused here.
+      output = getattr(run.result, "output", None)
+      if isinstance(output, DeferredToolRequests) and output.approvals:
+        logger.debug(
+          "Run paused for approval: %s",
+          [c.tool_name for c in output.approvals],
+        )
+        decisions: dict = {}
+        for call in output.approvals:
+          # Surface the request, then obtain the decision. Interactive mode
+          # waits (unbounded by the model timeout) for the UI; auto modes
+          # resolve immediately so non-interactive consumers never stall.
+          yield ApprovalRequest(
+            tool_name=call.tool_name,
+            args=call.args,
+            tool_call_id=call.tool_call_id,
+            operation=classify_operation(call.tool_name),
+          )
+          if auto_approve is None:
+            approved = await self._await_approval(call.tool_call_id)
+          else:
+            approved = bool(auto_approve)
+          logger.debug("Approval for %s (%s) -> %s", call.tool_name, call.tool_call_id, approved)
+          yield ApprovalResolved(tool_call_id=call.tool_call_id, approved=approved)
+          decisions[call.tool_call_id] = approved
+        # Resume the run with the decisions and continue streaming.
+        deferred_results = DeferredToolResults(approvals=decisions)
+        message_history = run.result.all_messages()
+        user_prompt = None
+        continue
+      break
+
+  async def stream_chat(
+    self,
+    content: str,
+    thread_id: int,
+    model_cfg: Optional[dict] = None,
+    workspace_id: Optional[int] = None,
+    attachments: Optional[list[dict]] = None,
+    enabled_tools: Optional[list[str]] = None,
+  ) -> AsyncIterator[str]:
+    """
+    Stream an AI response for *content* as plain text chunks.
+
+    This is a thin, backward-compatible wrapper over
+    :meth:`stream_chat_events` that yields only the model's narration text
+    (``TextDelta`` content), dropping tool-call/result events. The API and web
+    consumers rely on this text-only contract.
+
+    Args:
+      content:       The user message text.
+      thread_id:     ID of the active thread (used to load history).
+      workspace_id:  ID of the active workspace (used as tool scope).
+      model_cfg:     Override model config dict; uses best available if None.
+      enabled_tools: List of tool slugs to attach, e.g. ['time', 'calculator'].
+                     Defaults to all registered tools when None.
+      attachments:   List of dicts with keys 'path' and 'type' ('file'|'folder')
+                     selected by the user from the chat input. File contents and
+                     directory listings are inlined into the prompt context so the
+                     model can reason about them immediately without additional
+                     tool calls.
+    """
+    async for event in self.stream_chat_events(
+      content=content,
+      thread_id=thread_id,
+      model_cfg=model_cfg,
+      workspace_id=workspace_id,
+      attachments=attachments,
+      enabled_tools=enabled_tools,
+      auto_approve=True,
+    ):
+      if isinstance(event, TextDelta):
+        yield event.content
 
   def _resolve_stream_timeout(self, model_cfg: Optional[dict]) -> float:
     """Resolve the streaming inactivity timeout (seconds).
@@ -884,6 +1000,117 @@ class Engine:
     if workspace_id:
       return await self.get_workspace_skills_config(workspace_id)
     return {}
+
+  # ---------------------------------------------------------------------
+  # HITL tool-approval policy (per workspace / thread)
+  # ---------------------------------------------------------------------
+
+  # Default policy: require approval for both queries and mutations.
+  _DEFAULT_APPROVAL_CONFIG = {"query": True, "mutation": True}
+
+  @classmethod
+  def _normalize_approval_config(cls, cfg: Optional[dict]) -> dict:
+    """Coerce a (possibly partial/invalid) config to a full {query, mutation} dict."""
+    base = dict(cls._DEFAULT_APPROVAL_CONFIG)
+    if isinstance(cfg, dict):
+      for key in ("query", "mutation"):
+        if key in cfg:
+          base[key] = bool(cfg[key])
+    return base
+
+  async def get_workspace_approval_config(self, workspace_id: int) -> dict:
+    """Return the workspace's approval policy (defaults when unset)."""
+    if not workspace_id:
+      return dict(self._DEFAULT_APPROVAL_CONFIG)
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      raw = self._parse_json_config(ws.approval_config) if ws else {}
+    return self._normalize_approval_config(raw)
+
+  async def set_workspace_approval_config(self, workspace_id: int, config: dict) -> None:
+    """Persist the approval policy for a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.approval_config = json.dumps(self._normalize_approval_config(config))
+        await session.commit()
+
+  async def get_thread_approval_config(self, thread_id: int) -> Optional[dict]:
+    """Return the thread's approval override, or None when it inherits the workspace."""
+    if not thread_id:
+      return None
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th and th.approval_config:
+        return self._normalize_approval_config(self._parse_json_config(th.approval_config))
+    return None
+
+  async def set_thread_approval_config(self, thread_id: int, config: dict) -> None:
+    """Persist a thread-level approval override."""
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th:
+        th.approval_config = json.dumps(self._normalize_approval_config(config))
+        await session.commit()
+
+  async def resolve_approval_config(
+    self, workspace_id: Optional[int], thread_id: Optional[int]
+  ) -> dict:
+    """Effective approval policy: thread override else workspace else default (all True)."""
+    if thread_id:
+      cfg = await self.get_thread_approval_config(thread_id)
+      if cfg is not None:
+        return cfg
+    if workspace_id:
+      return await self.get_workspace_approval_config(workspace_id)
+    return dict(self._DEFAULT_APPROVAL_CONFIG)
+
+  # ---------------------------------------------------------------------
+  # HITL approval request/response bridge
+  # ---------------------------------------------------------------------
+
+  async def _await_approval(self, tool_call_id: str) -> bool:
+    """Suspend until the UI resolves the approval for *tool_call_id*.
+
+    Robust to ordering: if :meth:`resolve_approval` was already called for this
+    id (decision landed in the inbox before we started waiting), the stored
+    decision is used immediately. Otherwise a Future is registered and awaited.
+    This closes a race where an approval decision could be lost — leaving the
+    turn hung after the narration text with the tool never executing.
+    """
+    if tool_call_id in self._approval_inbox:
+      return self._approval_inbox.pop(tool_call_id)
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    self._pending_approvals[tool_call_id] = fut
+    try:
+      return await fut
+    finally:
+      self._pending_approvals.pop(tool_call_id, None)
+      self._approval_inbox.pop(tool_call_id, None)
+
+  def resolve_approval(self, tool_call_id: str, approved: bool) -> bool:
+    """Resolve a pending tool-approval request from the UI.
+
+    Always returns True: if a waiter is registered its Future is completed;
+    otherwise the decision is stored in the inbox so a subsequent
+    :meth:`_await_approval` picks it up (guards against the UI resolving before
+    the engine registers its waiter).
+    """
+    fut = self._pending_approvals.get(tool_call_id)
+    if fut is not None and not fut.done():
+      fut.set_result(bool(approved))
+      return True
+    self._approval_inbox[tool_call_id] = bool(approved)
+    return True
+
+  def cancel_pending_approvals(self) -> None:
+    """Deny/cancel any outstanding approval requests (e.g. on thread switch)."""
+    for tool_call_id, fut in list(self._pending_approvals.items()):
+      if not fut.done():
+        fut.set_result(False)
+      self._pending_approvals.pop(tool_call_id, None)
+    self._approval_inbox.clear()
 
   async def run_agent_stream(self, message: str):
     """ Legacy: Runs the agent in streaming mode (kept for TUI / API compatibility). """

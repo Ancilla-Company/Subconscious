@@ -47,6 +47,28 @@ class HumanMessage:
     self.timestamp = timestamp if timestamp else datetime.now(timezone.utc)
 
 
+class ApprovalMessage:
+  """ A human-in-the-loop approval prompt for a gated tool call.
+
+      Rendered with Approve / Deny buttons that resolve the pending approval on
+      the engine. ``resolved`` is None while awaiting a decision, then True
+      (approved) or False (denied). These messages are transient to a live turn
+      and are not persisted.
+  """
+  def __init__(self, tool_name, args, tool_call_id, operation="mutation",
+               engine=None, resolved=None, timestamp=None):
+    self.tool_name = tool_name
+    self.args = args
+    self.tool_call_id = tool_call_id
+    self.operation = operation
+    self.engine = engine
+    self.resolved = resolved
+    self.type = 'approval'
+    # Non-empty so the bubble renders its content rather than the waiting dots.
+    self.content = f"approval:{tool_call_id}"
+    self.timestamp = timestamp if timestamp else datetime.now(timezone.utc)
+
+
 class MessageBubble(ft.Row):
   """ A class to represent a message bubble in the chat.
       A message bubble is a single message displaying text
@@ -75,13 +97,28 @@ class MessageBubble(ft.Row):
     # Generate the content of the message bubble
     self.content = []
 
-    # If tool message just render expansion tile
+    # If tool message, render an expandable panel showing input + output.
     if isinstance(self.message, ToolMessage):
-      # Parse data may come with excessive escaping
-      data = json.loads(self.message.content)
-      if data.get('data') and isinstance(data['data'], list) and len(data['data']) > 0 and (isinstance(data['data'][0], str) or isinstance(data['data'][0], dict)):
-        data['data'] = json.loads(data['data'][0])
-      
+      tool_name, input_data, output_data, outcome = self._parse_tool_message(self.message.content)
+      header_label = f"Tool: {tool_name}" if tool_name else "Tool Call"
+      if outcome and outcome != "success":
+        header_label += f"  ({outcome})"
+
+      def _json_md(value):
+        try:
+          rendered = json.dumps(value, indent=2, default=str)
+        except (TypeError, ValueError):
+          rendered = str(value)
+        return ft.Markdown(
+          value=f"```json\n{rendered}\n```",
+          extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+          code_theme=CODE_THEME,
+          code_style_sheet=ft.MarkdownStyleSheet(
+            code_text_style=ft.TextStyle(font_family="Roboto Mono"),
+            blockquote_text_style=ft.TextStyle(font_family="Roboto Mono")
+          ),
+        )
+
       self.content.append(
         ft.Container(
           ft.ExpansionPanelList(
@@ -93,22 +130,28 @@ class MessageBubble(ft.Row):
             controls=[
               ft.ExpansionPanel(
                 header=ft.Container(
-                  content=ft.Text("Tool Response", size=14, color=ft.Colors.PRIMARY),
+                  content=ft.Row(
+                    [
+                      ft.Icon(ft.Icons.BUILD, size=15, color=ft.Colors.PRIMARY),
+                      ft.Text(header_label, size=14, color=ft.Colors.PRIMARY),
+                    ],
+                    spacing=6,
+                  ),
                   padding=ft.padding.only(10,15,4,5),
                 ),
                 bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
                 can_tap_header=True,
                 content=ft.Container(
-                  ft.Markdown(
-                    value=f"```json\n {json.dumps(data, indent=2)} \n```",
-                    extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                    code_theme=CODE_THEME,
-                    code_style_sheet=ft.MarkdownStyleSheet(
-                      code_text_style=ft.TextStyle(font_family="Roboto Mono"),
-                      blockquote_text_style=ft.TextStyle(font_family="Roboto Mono")
-                    ),
+                  ft.Column(
+                    [
+                      ft.Text("Input", size=12, color=ft.Colors.SECONDARY),
+                      _json_md(input_data),
+                      ft.Text("Output", size=12, color=ft.Colors.SECONDARY),
+                      _json_md(output_data),
+                    ],
+                    spacing=2,
                   ),
-                  padding=ft.padding.only(0, 0, 0, 0)
+                  padding=ft.padding.only(10, 0, 10, 8)
                 )
               )
             ]
@@ -117,6 +160,10 @@ class MessageBubble(ft.Row):
           padding=ft.padding.only(0,-10,0,-7)
         )
       )
+
+    # Approval prompt: input + Approve/Deny controls (or the decision made).
+    elif isinstance(self.message, ApprovalMessage):
+      self.content.append(self._build_approval_panel())
     else:
       for part in self.parts:
         if part.startswith(("```", "~~~")):
@@ -399,6 +446,104 @@ class MessageBubble(ft.Row):
       border=ft.border.all(1, ft.Colors.SECONDARY),  # Add a
     ))
     self.page.update()
+
+  def _build_approval_panel(self):
+    """Build the approval prompt UI (input + Approve/Deny or the decision)."""
+    msg = self.message
+    try:
+      args_json = json.dumps(msg.args, indent=2, default=str)
+    except (TypeError, ValueError):
+      args_json = str(msg.args)
+
+    op_label = "modifies data" if msg.operation == "mutation" else "reads data"
+    header = ft.Row(
+      [
+        ft.Icon(ft.Icons.SHIELD, size=16, color=ft.Colors.PRIMARY),
+        ft.Text(f"Approval required — {msg.tool_name}", size=14,
+                color=ft.Colors.PRIMARY, expand=True),
+        ft.Text(op_label, size=11, color=ft.Colors.SECONDARY),
+      ],
+      spacing=6,
+    )
+
+    input_md = ft.Markdown(
+      value=f"```json\n{args_json}\n```",
+      extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+      code_theme=CODE_THEME,
+      code_style_sheet=ft.MarkdownStyleSheet(
+        code_text_style=ft.TextStyle(font_family="Roboto Mono"),
+        blockquote_text_style=ft.TextStyle(font_family="Roboto Mono")
+      ),
+    )
+
+    self._approve_btn = ft.ElevatedButton(
+      "Approve", icon=ft.Icons.CHECK,
+      on_click=lambda e: self._resolve_approval(True),
+      style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+    )
+    self._deny_btn = ft.OutlinedButton(
+      "Deny", icon=ft.Icons.CLOSE,
+      on_click=lambda e: self._resolve_approval(False),
+      style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+    )
+    self._decision_row = ft.Row([self._approve_btn, self._deny_btn], spacing=8)
+    self._apply_decision_state()
+
+    return ft.Container(
+      ft.Column([header, input_md, self._decision_row], spacing=6),
+      bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+      border=ft.border.all(1, ft.Colors.PRIMARY),
+      border_radius=ft.BorderRadius(3, 3, 3, 3),
+      padding=ft.padding.only(10, 8, 10, 8),
+    )
+
+  def _apply_decision_state(self):
+    """Show Approve/Deny while pending, or a status label once resolved."""
+    resolved = getattr(self.message, "resolved", None)
+    if resolved is None:
+      self._approve_btn.disabled = False
+      self._deny_btn.disabled = False
+      return
+    label = "✓ Approved" if resolved else "✕ Denied"
+    color = ft.Colors.GREEN if resolved else ft.Colors.ERROR
+    self._decision_row.controls = [ft.Text(label, size=13, color=color)]
+
+  def _resolve_approval(self, approved: bool):
+    """Handle an Approve/Deny click: resolve on the engine and update UI."""
+    msg = self.message
+    if getattr(msg, "resolved", None) is not None:
+      return
+    msg.resolved = approved
+    engine = getattr(msg, "engine", None)
+    if engine is not None:
+      try:
+        engine.resolve_approval(msg.tool_call_id, approved)
+      except Exception:
+        pass
+    self._apply_decision_state()
+    try:
+      self.update()
+    except Exception:
+      pass
+
+  def _parse_tool_message(self, raw):
+    """Parse a ToolMessage's JSON content into (tool_name, input, output, outcome).
+
+    Tolerates malformed or legacy content: anything that isn't the expected
+    JSON object falls back to showing the raw value as the output.
+    """
+    try:
+      data = json.loads(raw)
+    except (TypeError, ValueError):
+      return "", None, raw, "success"
+    if not isinstance(data, dict):
+      return "", None, data, "success"
+    return (
+      data.get("tool_name", ""),
+      data.get("input"),
+      data.get("output"),
+      data.get("outcome", "success"),
+    )
 
   def split_markdown_sections(self, md_text):
     # Regex pattern to capture triple-delimited blocks (``` or ~~~) along with their content

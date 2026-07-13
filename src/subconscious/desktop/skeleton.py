@@ -16,13 +16,24 @@ from .titlebar import TitleBar
 from .mainwindow import MainWindow
 from .contextlist import ContextList
 from .engine import DesktopEngine as Engine
+from ..stream_events import tool_block_to_json
 from ..db.models import Workspace, Thread, AppState
-from ..shared.messages import HumanMessage, AIMessage
 from ..shared.tool_config import ToolToggleTree, SkillToggleList
+from ..shared.messages import HumanMessage, AIMessage, ToolMessage, ApprovalMessage
+from ..stream_events import TextDelta, ToolCallStarted, ToolCallResult, ApprovalRequest, ApprovalResolved
 
 
 # Logging config
 logger = logging.getLogger("subconscious")
+
+
+def _db_message_to_ui(role: str, content: str, ts):
+  """Map a persisted message row (user / assistant / tool) to its UI bubble."""
+  if role == "user":
+    return HumanMessage(content=content, timestamp=ts)
+  if role == "tool":
+    return ToolMessage(content=content, timestamp=ts)
+  return AIMessage(content=content, timestamp=ts)
 
 
 @ft.component
@@ -105,6 +116,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   # Tools/Skills enable-disable config for the workspace currently being edited
   ws_tools_config, set_ws_tools_config = ft.use_state({})
   ws_skills_config, set_ws_skills_config = ft.use_state({})
+  # HITL approval policy for the workspace currently being edited
+  ws_approval_config, set_ws_approval_config = ft.use_state({})
   # Directories attached to the workspace currently being edited
   ws_directories, set_ws_directories = ft.use_state(list())
   # Thread-level Tools/Skills dialog: mode is None | "tools" | "skills".
@@ -112,6 +125,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   # toggle components run inside the renderer context.
   thread_dialog_mode, set_thread_dialog_mode = ft.use_state(None)
   thread_dialog_cfg, set_thread_dialog_cfg = ft.use_state({})
+  # Thread-level approval policy shown alongside the tools dialog.
+  thread_dialog_approval_cfg, set_thread_dialog_approval_cfg = ft.use_state({})
 
   # Background jobs / notifications popup state
   notifications_open, set_notifications_open = ft.use_state(False)
@@ -322,6 +337,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           set_editing_workspace(workspace_obj)
           set_ws_tools_config(Engine._parse_json_config(getattr(workspace_obj, "tools_config", None)))
           set_ws_skills_config(Engine._parse_json_config(getattr(workspace_obj, "skills_config", None)))
+          set_ws_approval_config(Engine._parse_json_config(getattr(workspace_obj, "approval_config", None)))
           set_ws_directories(Engine._parse_json_list(getattr(workspace_obj, "directories", None)))
     
     # --- Selected account ---
@@ -620,10 +636,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     ui_msgs = []
     for m in db_msgs:
       ts = m.created_at.replace(tzinfo=timezone.utc) if m.created_at else datetime.now(timezone.utc)
-      if m.role == "user":
-        ui_msgs.append(HumanMessage(content=m.content, timestamp=ts))
-      else:
-        ui_msgs.append(AIMessage(content=m.content, timestamp=ts))
+      ui_msgs.append(_db_message_to_ui(m.role, m.content, ts))
     set_messages(ui_msgs)
 
   def on_mount():
@@ -677,6 +690,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("workspaces")
     set_ws_tools_config({})
     set_ws_skills_config({})
+    set_ws_approval_config({})
     set_ws_directories([])
 
     # Save state
@@ -691,6 +705,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("workspaces")
     set_ws_tools_config(Engine._parse_json_config(getattr(workspace, "tools_config", None)))
     set_ws_skills_config(Engine._parse_json_config(getattr(workspace, "skills_config", None)))
+    set_ws_approval_config(Engine._parse_json_config(getattr(workspace, "approval_config", None)))
     set_ws_directories(Engine._parse_json_list(getattr(workspace, "directories", None)))
 
     # Save state
@@ -739,10 +754,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     ui_msgs = []
     for m in db_msgs:
       ts = m.created_at.replace(tzinfo=timezone.utc) if m.created_at else datetime.now(timezone.utc)
-      if m.role == "user":
-        ui_msgs.append(HumanMessage(content=m.content, timestamp=ts))
-      else:
-        ui_msgs.append(AIMessage(content=m.content, timestamp=ts))
+      ui_msgs.append(_db_message_to_ui(m.role, m.content, ts))
     set_messages(ui_msgs)
 
   def handle_model_select(model_cfg: dict):
@@ -816,43 +828,105 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     # datetime.now(timezone.utc) here produced a real-UTC time that rendered
     # offset from local in the bubble.
     ai_ui_msg = AIMessage(content="", timestamp=datetime.now().replace(tzinfo=timezone.utc))
-    streaming_messages = new_messages + [ai_ui_msg]
-    set_messages(streaming_messages)
+    stream_msgs = new_messages + [ai_ui_msg]
+    set_messages(list(stream_msgs))
 
-    # --- 6. Stream from the LLM, drive re-renders via streaming_text state ---
-    full_response = ""
+    # --- 6. Stream structured events, rendering a bubble per block ---
+    # A single turn interleaves narration text, tool calls, and (when a tool is
+    # gated) approval prompts. Each becomes its own bubble. `current_text`
+    # buffers the active text block (shown live via streaming_text); tool
+    # results and approval prompts flush it and append their own bubble.
+    current_text = ""
+    pending_args: dict = {}
+    approval_msgs: dict = {}
     set_streaming_text("")  # Reset before starting
+
+    def _now():
+      return datetime.now().replace(tzinfo=timezone.utc)
+
+    def _ensure_text_placeholder():
+      # Guarantee a trailing empty AI bubble so streaming_text has a target.
+      if not (stream_msgs and stream_msgs[-1].type == "ai"):
+        stream_msgs.append(AIMessage(content="", timestamp=_now()))
+
+    async def _flush_text():
+      # Commit buffered narration into the trailing AI bubble (persisting it),
+      # or drop that bubble when the block produced no text.
+      nonlocal current_text
+      if stream_msgs and stream_msgs[-1].type == "ai":
+        if current_text.strip():
+          stream_msgs[-1].content = current_text
+          await engine.save_message(thread.id, "assistant", current_text)
+        else:
+          stream_msgs.pop()
+      current_text = ""
+
     try:
-      async for chunk in engine.stream_chat(
+      async for event in engine.stream_chat_events(
         content=content,
         thread_id=thread.id,
         workspace_id=workspace_id,
         attachments=attachments or [],
         model_cfg=selected_model_config or (model_configs[0] if model_configs else None),
       ):
-        logger.debug(f"AI Chunk: {chunk}")
-        full_response += chunk
-        # Updating a dedicated scalar state guarantees Flet detects the change
-        # and re-renders ChatWindow with the new streaming_text on every token.
-        set_streaming_text(full_response)
+        if isinstance(event, TextDelta):
+          _ensure_text_placeholder()
+          current_text += event.content
+          # A dedicated scalar guarantees Flet re-renders ChatWindow, which
+          # overlays streaming_text onto the trailing (empty) AI bubble.
+          set_streaming_text(current_text)
+
+        elif isinstance(event, ToolCallStarted):
+          # Capture args now; the matching result arrives as a later event.
+          pending_args[event.tool_call_id] = event.args
+
+        elif isinstance(event, ToolCallResult):
+          await _flush_text()
+          tool_json = tool_block_to_json(
+            tool_name=event.tool_name,
+            args=pending_args.pop(event.tool_call_id, None),
+            output=event.content,
+            tool_call_id=event.tool_call_id,
+            outcome=event.outcome,
+          )
+          await engine.save_message(thread.id, "tool", tool_json)
+          stream_msgs.append(ToolMessage(content=tool_json, timestamp=_now()))
+          set_streaming_text("")
+          set_messages(list(stream_msgs))
+
+        elif isinstance(event, ApprovalRequest):
+          # A gated tool is waiting: flush narration, then show an approval
+          # prompt whose buttons resolve the pending decision on the engine.
+          await _flush_text()
+          appr = ApprovalMessage(
+            tool_name=event.tool_name,
+            args=event.args,
+            tool_call_id=event.tool_call_id,
+            operation=event.operation,
+            engine=engine,
+            timestamp=_now(),
+          )
+          approval_msgs[event.tool_call_id] = appr
+          stream_msgs.append(appr)
+          set_streaming_text("")
+          set_messages(list(stream_msgs))
+
+        elif isinstance(event, ApprovalResolved):
+          appr = approval_msgs.get(event.tool_call_id)
+          if appr is not None:
+            appr.resolved = event.approved
+          set_messages(list(stream_msgs))
 
     except Exception as exc:
       logger.error(f"LLM stream error: {exc}")
-      full_response = f"⚠ Error reaching the model: {exc}"
-      set_streaming_text(full_response)
+      _ensure_text_placeholder()
+      current_text = (current_text + f"\n\n⚠ Error reaching the model: {exc}").strip()
+      set_streaming_text(current_text)
 
-    # Commit the final text into the messages list and clear the streaming slot.
-    ai_ui_msg.content = full_response
-    set_messages(list(streaming_messages))
+    # --- 7. Commit the final text block and persist it ---
+    await _flush_text()
+    set_messages(list(stream_msgs))
     set_streaming_text("")
-
-    # # Scroll the chat list to the bottom now that the full response is visible.
-    # if chat_scroll_ref[0] is not None:
-    #   await chat_scroll_ref[0].scroll_to(offset=-1, duration=300)
-
-    # --- 7. Persist the final AI message ---
-    if full_response:
-      await engine.save_message(thread.id, "assistant", full_response)
 
     # --- 8. Refresh thread list so new/renamed threads appear ---
     await load_threads(workspace_id)
@@ -889,6 +963,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_ws_skills_config(dict(config))
     asyncio.create_task(engine.set_workspace_skills_config(editing_workspace.id, config))
 
+  def handle_workspace_approval_change(config):
+    """Persist the editing workspace's HITL approval policy."""
+    if not editing_workspace:
+      return
+    set_ws_approval_config(dict(config))
+    asyncio.create_task(engine.set_workspace_approval_config(editing_workspace.id, config))
+
   def handle_workspace_directories_change(directories):
     """Persist the editing workspace's attached directory list and (re)index."""
     if not editing_workspace:
@@ -905,7 +986,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       return
     ws_id = active_chat_workspace.id if active_chat_workspace else selected_thread.workspace_id
     cfg = await engine.resolve_tools_config(ws_id, selected_thread.id)
+    acfg = await engine.resolve_approval_config(ws_id, selected_thread.id)
     set_thread_dialog_cfg(cfg)
+    set_thread_dialog_approval_cfg(acfg)
     set_thread_dialog_mode("tools")
 
   async def handle_open_thread_skills(e=None):
@@ -924,6 +1007,12 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     """Persist a thread-level tools override."""
     if selected_thread:
       asyncio.create_task(engine.set_thread_tools_config(selected_thread.id, config))
+
+  def handle_thread_approval_change(config):
+    """Persist a thread-level HITL approval override."""
+    if selected_thread:
+      set_thread_dialog_approval_cfg(dict(config))
+      asyncio.create_task(engine.set_thread_approval_config(selected_thread.id, config))
 
   def handle_thread_skills_change(config):
     """Persist a thread-level skills override."""
@@ -1079,6 +1168,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         configured_tools=tool_configs,
         config=thread_dialog_cfg,
         on_change=handle_thread_tools_change,
+        approval_config=thread_dialog_approval_cfg,
+        on_approval_change=handle_thread_approval_change,
         sync_key=selected_thread.id,
       )
       dialog_height = 520
@@ -1259,6 +1350,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         workspace_directories=ws_directories,
         on_workspace_tools_change=handle_workspace_tools_change,
         on_workspace_skills_change=handle_workspace_skills_change,
+        workspace_approval_config=ws_approval_config,
+        on_workspace_approval_change=handle_workspace_approval_change,
         on_workspace_directories_change=handle_workspace_directories_change,
         on_open_thread_tools=handle_open_thread_tools,
         on_open_thread_skills=handle_open_thread_skills,

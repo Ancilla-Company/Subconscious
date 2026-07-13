@@ -47,6 +47,7 @@ class Workspace(Base):
   tools_config = Column(Text, nullable=True)
   skills_config = Column(Text, nullable=True)
   directories = Column(Text, nullable=True)   # JSON list of absolute directory paths attached to the workspace
+  approval_config = Column(Text, nullable=True)  # JSON {"query": bool, "mutation": bool} — HITL approval policy
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
@@ -64,6 +65,7 @@ class Thread(Base):
   default_model_id = Column(String, nullable=True, default="default") # NULL also means default
   tools_config = Column(Text, nullable=True)
   skills_config = Column(Text, nullable=True)
+  approval_config = Column(Text, nullable=True)  # JSON {"query": bool, "mutation": bool} — HITL approval policy
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 

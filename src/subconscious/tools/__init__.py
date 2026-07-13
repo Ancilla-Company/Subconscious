@@ -4,7 +4,90 @@
 # extend this by importing and adding their additional tools.
 
 from typing import Callable, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+# ---------------------------------------------------------------------------
+# Tool operation classification (query vs mutation)
+# ---------------------------------------------------------------------------
+# Every tool is roughly classified as a "query" (reads/derives data with no
+# side effects) or a "mutation" (creates, updates, or deletes data / has side
+# effects). This drives human-in-the-loop approval: a workspace/thread can
+# independently require approval for queries and/or mutations. Unknown tools
+# default to "mutation" so a newly-added tool is gated (approval-required) by
+# default rather than silently running unapproved.
+
+QUERY = "query"
+MUTATION = "mutation"
+
+# Explicit classification for every known built-in and desktop tool.
+_MUTATION_TOOLS = frozenset({
+  # todo
+  "add_todo", "update_todo", "complete_todo", "delete_todo",
+  # memory
+  "remember", "forget", "forget_all",
+  # notes
+  "save_note", "delete_note",
+  # contacts
+  "add_contact", "update_contact", "delete_contact",
+  # terminal
+  "run_command", "run_terminal_command", "open_terminal_session",
+  "run_in_session", "close_terminal_session",
+  # settings
+  "update_app_setting", "set_theme_mode",
+  # images (write output files)
+  "optimize_image", "convert_image", "batch_optimize_images",
+  "batch_convert_image", "resize_image", "batch_resize_images",
+  # filesystem
+  "create_file", "move_to_trash", "replace_in_file",
+  # clipboard
+  "write_clipboard",
+})
+
+_QUERY_TOOLS = frozenset({
+  # time
+  "get_current_time", "get_current_date", "convert_timezone", "list_common_timezones",
+  # calculator
+  "calculate", "convert_units", "list_supported_units",
+  # weather
+  "get_weather", "get_forecast",
+  # todo / memory / notes / contacts reads
+  "list_todos", "recall", "list_memories", "list_notes", "get_note",
+  "list_contacts", "find_contact",
+  # web
+  "fetch_page", "search_web", "check_connectivity", "speed_test",
+  # terminal reads
+  "get_env_var", "get_system_info",
+  # settings reads
+  "get_app_setting",
+  # search / filesystem reads
+  "search_fs", "read_file", "read_range", "search_in_file", "search_files",
+  "list_directory", "get_file_info", "get_directory_tree", "find_symbol",
+  # clipboard reads
+  "read_clipboard",
+})
+
+# Name-prefix heuristic for tools not in the explicit maps (e.g. user-added).
+_QUERY_PREFIXES = (
+  "get_", "list_", "read_", "find_", "search_", "fetch_", "check_",
+  "view_", "show_", "describe_", "lookup_", "recall",
+)
+
+
+def classify_operation(tool_name: str) -> str:
+  """Return ``"query"`` or ``"mutation"`` for a tool name.
+
+  Explicit classifications win; otherwise a read-oriented name prefix marks a
+  query and everything else defaults to ``"mutation"`` (approval-gated).
+  """
+  if tool_name in _MUTATION_TOOLS:
+    return MUTATION
+  if tool_name in _QUERY_TOOLS:
+    return QUERY
+  for prefix in _QUERY_PREFIXES:
+    if tool_name.startswith(prefix):
+      return QUERY
+  return MUTATION
 
 
 @dataclass
@@ -19,6 +102,9 @@ class EngineContext:
   thread_id: int
   engine: Any = None       # Subconscious Engine instance
   data_dir: str = ""
+  # Resolved human-in-the-loop approval policy for this run:
+  # {"query": bool, "mutation": bool} where True == approval required.
+  approval_config: dict = field(default_factory=lambda: {"query": True, "mutation": True})
 
 
 # ---------------------------------------------------------------------------

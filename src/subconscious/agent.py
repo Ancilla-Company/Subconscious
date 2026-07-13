@@ -2,19 +2,31 @@ import os
 import asyncio
 import logging
 from pydantic_ai import Agent
+from pydantic_ai.tools import DeferredToolRequests
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.bedrock import BedrockProvider
+from pydantic_ai.toolsets.function import FunctionToolset
 from typing import Optional, Callable, TYPE_CHECKING, Any, cast
+from pydantic_ai.toolsets.approval_required import ApprovalRequiredToolset
 from pydantic_ai.models.bedrock import BedrockConverseModel, BedrockModelSettings
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart, ModelResponse, TextPart
 
 from .config import Config
-from .tools import EngineContext
+from .tools import EngineContext, classify_operation
 
 
 # Logging setup
 logger = logging.getLogger("subconscious")
+
+
+def _tool_approval_required(ctx, tool_def, tool_args) -> bool:
+  """ Predicate for :class:`ApprovalRequiredToolset`.
+  """
+  operation = classify_operation(getattr(tool_def, "name", "") or "")
+  deps = getattr(ctx, "deps", None)
+  approval_config = getattr(deps, "approval_config", None) or {}
+  return bool(approval_config.get(operation, True))
 
 
 # Map provider display names (as stored in settings) to pydantic-ai prefixes and env-var names
@@ -157,11 +169,17 @@ class AgentManager:
       return EchoProvider()
 
     if tools:
+      # Gate tool calls for human-in-the-loop approval. The tools are wrapped
+      toolset = ApprovalRequiredToolset(
+        wrapped=FunctionToolset(tools),
+        approval_required_func=_tool_approval_required,
+      )
       agent_kwargs: Any = dict(
         model=model_instance,
         system_prompt=system_prompt,
-        tools=tools,
+        toolsets=[toolset],
         deps_type=EngineContext,
+        output_type=[str, DeferredToolRequests],
       )
       return cast(Agent, Agent(**agent_kwargs))
 
