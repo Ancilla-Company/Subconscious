@@ -7,19 +7,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.1.10]
+## [0.1.11] - 2026-07-14
 
-### Added (Unreleased)
+### Added
+
+- Human in the loop for tool approvals
+- Device/OS metrics collection for better context
+- Adding directories to workspaces for context with RAG jobs for better answering
+- API for local client use as daemon
+- Tool config UI for workspace and threads
+- Workspace indicator to thread header
+- Added themes to general settings
+- Resume feature to reload UI as it was before closing
+
+### Changed
+
+- Adding UUIDs to messages and threads
+
+### Fixed
+
+- Pydantic graph bug where tool use breaks graph before turn complete
+- Provider bug fixes
+
+---
+
+## [0.1.10] - 2026-05-26
+
+### Added
 
 - Internet connectivity tool
 - File search tool
 - Echo agent for dev mode testing
 
-### Changed (Unreleased)
+### Changed
 
 - Updated image tools to accept vector files like svg
 
-### Fixed (Unreleased)
+### Fixed
 
 - Self update bug
 - Manifest format update for winget
@@ -83,5 +107,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+[0.1.11]: https://github.com/Ancilla-Company/Subconscious/releases/tag/v0.1.11
 [0.1.0]: https://github.com/Ancilla-Company/Subconscious/releases/tag/v0.1.0
 

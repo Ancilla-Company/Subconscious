@@ -3,8 +3,8 @@ import uuid
 import bcrypt
 from datetime import datetime
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import declarative_base, relationship, mapped_column, Mapped
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UniqueConstraint
 
 
 Base = declarative_base()
@@ -44,6 +44,10 @@ class Workspace(Base):
   description = Column(String, nullable=True)
   network_id = Column(Integer, ForeignKey('networks.id'), nullable=False)
   uuid = Column(String, default=str(uuid.uuid4()))
+  tools_config = Column(Text, nullable=True)
+  skills_config = Column(Text, nullable=True)
+  directories = Column(Text, nullable=True)   # JSON list of absolute directory paths attached to the workspace
+  approval_config = Column(Text, nullable=True)  # JSON {"query": bool, "mutation": bool} — HITL approval policy
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
@@ -54,10 +58,14 @@ class Thread(Base):
   __tablename__ = 'threads'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
   workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
   title = Column(String)
   description = Column(String, nullable=True)
   default_model_id = Column(String, nullable=True, default="default") # NULL also means default
+  tools_config = Column(Text, nullable=True)
+  skills_config = Column(Text, nullable=True)
+  approval_config = Column(Text, nullable=True)  # JSON {"query": bool, "mutation": bool} — HITL approval policy
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 
@@ -69,6 +77,7 @@ class Message(Base):
   __tablename__ = 'messages'
 
   id = Column(Integer, primary_key=True, autoincrement=True)
+  uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
   thread_id = Column(Integer, ForeignKey('threads.id'), nullable=False)
   role = Column(String, nullable=False) # user, agent, system
   content = Column(Text, nullable=False)
@@ -210,3 +219,45 @@ class ToolRegistry(Base):
   status = Column(String, nullable=False, default='active')       # active, disabled, error
   created_at = Column(DateTime, default=datetime.now)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class IndexedDocument(Base):
+  """
+  A file within a workspace's attached directories that has been ingested for
+  retrieval (RAG). Tracks size/mtime/hash so re-indexing can be incremental.
+  Status values: 'indexed', 'error'.
+  """
+  __tablename__ = 'indexed_documents'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False, index=True)
+  path = Column(String, nullable=False, index=True)     # absolute file path
+  directory = Column(String, nullable=True)             # attached root directory this file came from
+  size = Column(Integer, nullable=True)
+  mtime = Column(Integer, nullable=True)                # int(st_mtime) for cheap change detection
+  content_hash = Column(String, nullable=True)          # sha256 for small files
+  chunk_count = Column(Integer, nullable=False, default=0)
+  status = Column(String, nullable=False, default='indexed')  # indexed, error
+  error = Column(Text, nullable=True)
+  indexed_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class DocumentChunk(Base):
+  """
+  A chunk of an indexed document — the retrievable unit for RAG. The
+  ``embedding`` column is reserved for Phase 2 vector search (JSON-encoded
+  vector or external index reference); it is unused by the current keyword
+  retrieval path.
+  """
+  __tablename__ = 'document_chunks'
+
+  id = Column(Integer, primary_key=True, autoincrement=True)
+  document_id = Column(Integer, ForeignKey('indexed_documents.id'), nullable=False, index=True)
+  workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False, index=True)
+  ordinal = Column(Integer, nullable=False, default=0)  # position within the document
+  content = Column(Text, nullable=False)
+  start_line = Column(Integer, nullable=True)
+  end_line = Column(Integer, nullable=True)
+  token_estimate = Column(Integer, nullable=True)
+  embedding = Column(Text, nullable=True)               # Phase 2: vector store hook
+  created_at = Column(DateTime, default=datetime.now)

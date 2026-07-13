@@ -17,19 +17,33 @@ from sqlalchemy import select
 from packaging.version import Version
 from typing import AsyncIterator, Optional
 from sqlalchemy import update as sql_update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from pydantic_ai import Agent
 from pydantic_ai.messages import (
   ModelMessage, ModelRequest, ModelResponse,
-  UserPromptPart, TextPart,
+  FunctionToolCallEvent, FunctionToolResultEvent,
+  UserPromptPart, TextPart, PartStartEvent, PartDeltaEvent, TextPartDelta,
 )
+from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults
 
 from .config import Config
+from .api import APIService
+from .events import EventBus
+from .jobs import JobManager
+from .indexing import WorkspaceIndexer
 from .constants import VERSION
-from .agent import AgentManager
 from .db.session import Database
+from .agent import AgentManager, EchoProvider
+from .system_info import SystemInformationService
+from .stream_events import (
+  TextDelta, ToolCallStarted, ToolCallResult, ApprovalRequest, ApprovalResolved, StreamEvent,
+)
+from .tools import classify_operation
 from .desktop_tools import ToolRegistry, EngineContext
 from .db.models import (
   Workspace, Thread, Message, AppState, Networks,
   SkillRegistry, ToolRegistry as ToolRegistryModel,
+  IndexedDocument, DocumentChunk,
 )
 
 
@@ -42,13 +56,33 @@ class Engine:
   update_available = None
   latest_version: Optional[str] = None
 
+  # Default inactivity timeout (seconds) for LLM streaming
+  # Could be an issue for slow systems where nothing is wrong but response takes very long
+  _DEFAULT_STREAM_TIMEOUT = 90.0
+
+  # In-memory cache of the `share_system_context` privacy toggle. Seeded at
+  _share_system_context: bool = True
+
+  # The system information service, created during start_engine by
+  system_info: Optional["SystemInformationService"] = None
+
   def __init__(self):
     # Callbacks registered by the UI layer to react to setting changes in real-time.
     # key → list of async callables(key, value, tag)
     self._setting_callbacks: dict[str, list] = {}
+    # In-process event bus. The local API's WebSocket fan-out (and future sync
+    # module) subscribe here so changes made by any client — including the
+    # in-process Flet UI — propagate live to all connected clients.
+    self.events = EventBus()
+    # Pending human-in-the-loop tool-approval futures, keyed by tool_call_id.
+    self._pending_approvals: dict = {}
+    # Decisions that arrived before a waiter was registered (race guard).
+    self._approval_inbox: dict = {}
+    # Background job registry (indexing, etc.) with EventBus fan-out for the UI.
+    self.jobs = JobManager(self.events)
 
   def register_setting_callback(self, key: str, callback) -> None:
-    """Register an async callback to be invoked when *key* is updated via update_setting."""
+    """ Register an async callback to be invoked when *key* is updated via update_setting """
     self._setting_callbacks.setdefault(key, []).append(callback)
 
   def unregister_setting_callback(self, key: str, callback) -> None:
@@ -64,15 +98,17 @@ class Engine:
     try:
       system_settings = {
         "mode": [ "auto", "light", "dark" ],
+        "colour": ["default", "purple", "blue", "teal", "green", "yellow", "orange", "red", "pink"],
         "language": [ "en" ],
         "position": [ "x", "y" ],
         "size": [ "width", "height" ],
-        "maximized": [ False, True ]
+        "maximized": [ False, True ],
+        "share_system_context": [ "true", "false" ]
       }
       
+      # Create or skip config
       async with self.db.get_session() as session:
         for key, value in system_settings.items():
-          # Check if already in DB
           exists = await session.scalar(
             select(AppState).where(AppState.key == key, AppState.tag == "system")
           )
@@ -88,11 +124,57 @@ class Engine:
     except Exception as e:
       logger.error(f"Failed to initialize settings: {e}")
 
+    # Seed the in-memory privacy toggle from the (now-ensured) stored value and
+    # register the callback that keeps it fresh on later updates (Req 7.5).
+    await self._seed_share_system_context()
+
+  async def _seed_share_system_context(self) -> None:
+    """ Seed the _share_system_context cache from AppState and register the
+    update callback.
+
+    A failed read leaves the cache at its default (True) and a malformed stored
+    registered regardless so later updates always refresh the cache.
+    """
+    try:
+      stored = await self.get_setting("share_system_context", tag="system")
+      self._share_system_context = stored == "true"
+    except Exception as exc:
+      logger.warning(f"Failed to seed share_system_context; using default (True): {exc}")
+      self._share_system_context = True
+    self.register_setting_callback(
+      "share_system_context", self._on_share_system_context_changed
+    )
+
+  async def _on_share_system_context_changed(self, key: str, value: str, tag: str) -> None:
+    """ Setting callback: refresh the in-memory share_system_context cache """
+    self._share_system_context = value == "true"
+
+  async def _collect_info(self) -> None:
+    """ Initiates the hardware information collection service """
+    try:
+      self.system_info = SystemInformationService(data_dir=str(self.config.data_dir))
+      # Fast, non-blocking: serve last-known data (or an UNKNOWN placeholder).
+      self.system_info.load_cached_profile()
+
+      # Refresh in the background so a slow collection never blocks startup.
+      asyncio.create_task(self._refresh_system_info())
+    except Exception as exc:
+      logger.error(
+        f"System information initialization failed; continuing without it: {exc}"
+      )
+      self.system_info = None
+
+  async def _refresh_system_info(self) -> None:
+    """ Run the (potentially slow) system-info collection off the event loop """
+    if self.system_info is None: return
+    try:
+      await asyncio.to_thread(self.system_info.refresh)
+      logger.debug("System information refreshed in background")
+    except Exception as exc:
+      logger.warning(f"Background system-info refresh failed: {exc}")
+
   async def init_system(self):
     """ Initialize system components (DB, Default Workspace) """
-    await self.db.init_models()
-    await self.init_settings()
-
     async with self.db.get_session() as session:
       # Find current network inside app_state
       self.current_network = await session.scalar(
@@ -159,18 +241,25 @@ class Engine:
 
   async def start_engine(self, config: Config):
     """ Engine startup logic """
-    # Initialize Database
+    # Initialize and load config
     self.config = config
     self.config.load()
+
+    # Init the database
     self.db = Database(config)
+    await self.db.init_models()
+
+    # Init the default settings
+    await self.init_settings()
+
+    # Initialize the system data
     await self.init_system()
+
+    # Collect the hardware info
+    await self._collect_info()
 
     # Check for updates
     asyncio.create_task(self.check_for_updates())
-
-    # start the heartbeat: DEBUG
-    if self.config.dev:
-      self._heartbeat_task = asyncio.create_task(self.heartbeat())
 
     # Initialize Agent Manager
     self.agent_manager = AgentManager(config)
@@ -178,9 +267,32 @@ class Engine:
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
 
+    # Workspace directory indexer (RAG ingestion) — runs work as background jobs.
+    self.indexer = WorkspaceIndexer(self.db, self.jobs)
+
+    # Start the API background service
+    self.api_service = APIService(self, self.config, preferred_port=8771)
+    await self.api_service.start()
+
+    # Start the heartbeat: DEBUG
+    if self.config.dev:
+      self._heartbeat_task = asyncio.create_task(self.heartbeat())
+
     # Show ready notification: DEBUG
     if self.config.dev:
       await self.show_notification("Subconscious", "Startup Complete.")
+
+  async def stop_api(self) -> None:
+    """ Stop the local API service if it is running """
+    service = getattr(self, "api_service", None)
+    if service is not None:
+      await service.stop()
+
+  async def restart_api(self) -> None:
+    """ Restart the local API service (stop then start again) """
+    service = getattr(self, "api_service", None)
+    if service is not None:
+      await service.restart()
 
   async def get_or_create_thread(
     self,
@@ -215,7 +327,20 @@ class Engine:
       session.add(thread)
       await session.commit()
       await session.refresh(thread)
-      return thread
+      workspace = await session.get(Workspace, workspace_id)
+      workspace_uuid = workspace.uuid if workspace else None
+
+    await self.events.publish({
+      "type": "thread.created",
+      "data": {
+        "uuid": thread.uuid,
+        "workspace_uuid": workspace_uuid,
+        "title": thread.title,
+        "created_at": thread.created_at.isoformat() if thread.created_at else None,
+        "updated_at": thread.updated_at.isoformat() if thread.updated_at else None,
+      },
+    })
+    return thread
 
   async def save_message(self, thread_id: int, role: str, content: str) -> Message:
     """Persist a single message and return the ORM object. Also bumps the thread's updated_at."""
@@ -230,7 +355,21 @@ class Engine:
       )
       await session.commit()
       await session.refresh(msg)
-      return msg
+      thread = await session.get(Thread, thread_id)
+      thread_uuid = thread.uuid if thread else None
+
+    # Notify connected clients (VS Code extension, etc.) of the new message.
+    await self.events.publish({
+      "type": "message.created",
+      "data": {
+        "uuid": msg.uuid,
+        "thread_uuid": thread_uuid,
+        "role": role,
+        "content": content,
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+      },
+    })
+    return msg
 
   async def load_thread_messages(self, thread_id: int) -> list[Message]:
     """Return all messages for a thread ordered chronologically."""
@@ -256,7 +395,7 @@ class Engine:
         history.append(ModelResponse(parts=[TextPart(content=content_str)]))
     return history
 
-  async def stream_chat(
+  async def stream_chat_events(
     self,
     content: str,
     thread_id: int,
@@ -264,23 +403,11 @@ class Engine:
     workspace_id: Optional[int] = None,
     attachments: Optional[list[dict]] = None,
     enabled_tools: Optional[list[str]] = None,
-  ) -> AsyncIterator[str]:
+    auto_approve: Optional[bool] = None,
+  ) -> AsyncIterator[StreamEvent]:
     """
-    Stream an AI response for *content* given the existing thread history.
-    Yields text chunks as they arrive from the LLM.
+    Stream a *structured* AI response for *content* given the thread history.
 
-    Args:
-      content:       The user message text.
-      thread_id:     ID of the active thread (used to load history).
-      workspace_id:  ID of the active workspace (used as tool scope).
-      model_cfg:     Override model config dict; uses best available if None.
-      enabled_tools: List of tool slugs to attach, e.g. ['time', 'calculator'].
-                     Defaults to all registered tools when None.
-      attachments:   List of dicts with keys 'path' and 'type' ('file'|'folder')
-                     selected by the user from the chat input. File contents and
-                     directory listings are inlined into the prompt context so the
-                     model can reason about them immediately without additional
-                     tool calls.
     """
     # Load history (excluding the message we're about to send – it was just saved)
     db_messages = await self.load_thread_messages(thread_id)
@@ -295,10 +422,25 @@ class Engine:
       raise ValueError("No model configured. Add a model in Settings → Models.")
 
     # Resolve tools
-    slugs = enabled_tools if enabled_tools is not None else self.tool_registry.all_slugs()
-    tools = self.tool_registry.get_tools(slugs)
+    if enabled_tools is not None:
+      tools = self.tool_registry.get_tools(enabled_tools)
+    else:
+      # Resolve the effective tools_config (thread override else workspace
+      # defaults) and build the enabled callables from it.
+      cfg = await self.resolve_tools_config(workspace_id, thread_id)
+      tools = self.tool_registry.get_tools_for_config(cfg)
+    
 
-    agent = self.agent_manager.build_agent(model_cfg, tools=tools)  # type: ignore[call-arg]
+    ambient_context = (
+      self.system_info.format_ambient_context()
+      if self._share_system_context and self.system_info is not None
+      else None
+    )
+    agent = self.agent_manager.build_agent(
+      model_cfg,
+      tools=tools,
+      ambient_context=ambient_context,
+    )
 
     # Build the dependency context for tools that need DB / workspace access
     ctx_deps = EngineContext(
@@ -307,14 +449,190 @@ class Engine:
       thread_id=thread_id,
       engine=self,
       data_dir=str(self.config.data_dir),
+      approval_config=await self.resolve_approval_config(workspace_id, thread_id),
     )
 
     # Build an attachment context block and prepend it to the user prompt
     prompt = self._build_prompt_with_attachments(content, attachments or [])
 
-    async with agent.run_stream(prompt, message_history=history, deps=ctx_deps) as result:  # type: ignore[call-overload]
-      async for chunk in result.stream_text(delta=True):
-        yield chunk
+    # Stream with an inactivity timeout. `asyncio.timeout` bounds the wait for
+    # the stream to start (connection + first token); the deadline is then
+    # rescheduled after every chunk so a legitimately long — but steadily
+    # streaming — response is never cut off, while a provider that stalls
+    # (no output, no error) is aborted with a clear error.
+    #
+    # We drive the full agent graph with `agent.iter()` rather than
+    # `agent.run_stream()`: run_stream stops at the first text output and
+    # skips any tool calls the model makes afterwards, which breaks
+    # multi-step flows (e.g. "read these files then rename them") where the
+    # model narrates a plan before calling tools. Iterating the graph lets
+    # every model-request/tool-call round run to completion while we stream
+    # text deltas from each model-request node.
+    timeout_s = self._resolve_stream_timeout(model_cfg)
+    loop = asyncio.get_running_loop()
+    timeout_s = self._resolve_stream_timeout(model_cfg)
+    loop = asyncio.get_running_loop()
+
+    # The dev-only echo agent doesn't implement the graph API (no tools/HITL).
+    if isinstance(agent, EchoProvider):
+      try:
+        async with asyncio.timeout(timeout_s) as stream_timeout:
+          async with agent.run_stream(prompt) as result:
+            async for chunk in result.stream_text():
+              stream_timeout.reschedule(loop.time() + timeout_s)
+              yield TextDelta(content=chunk)
+      except asyncio.TimeoutError as exc:
+        raise TimeoutError(
+          f"The model did not respond within {timeout_s:.0f}s of inactivity. "
+          "The provider may be unavailable or stalled."
+        ) from exc
+      return
+
+    # Real agent: drive the full graph. When the model calls a tool that the
+    # approval policy gates, the run ends with a DeferredToolRequests output
+    # instead of executing it; we surface an ApprovalRequest, wait for the
+    # user's decision (outside the inactivity timeout), then resume the run
+    # with the decision until no further approvals are pending.
+    deferred_results: Optional[DeferredToolResults] = None
+    message_history = history
+    user_prompt: Optional[str] = prompt
+    while True:
+      try:
+        async with asyncio.timeout(timeout_s) as stream_timeout:
+          async with agent.iter(  # type: ignore[call-overload]
+            user_prompt,
+            message_history=message_history,
+            deps=ctx_deps,
+            deferred_tool_results=deferred_results,
+          ) as run:
+            async for node in run:
+              if Agent.is_model_request_node(node):
+                # Stream text as the model produces it for this request node.
+                async with node.stream(run.ctx) as request_stream:
+                  async for event in request_stream:
+                    delta: Optional[str] = None
+                    if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                      delta = event.part.content
+                    elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                      delta = event.delta.content_delta
+                    if delta:
+                      stream_timeout.reschedule(loop.time() + timeout_s)
+                      yield TextDelta(content=delta)
+              elif Agent.is_call_tools_node(node):
+                # Surface each tool call and its result as discrete events so
+                # the UI can render them as their own bubbles.
+                async with node.stream(run.ctx) as tool_stream:
+                  async for event in tool_stream:
+                    stream_timeout.reschedule(loop.time() + timeout_s)
+                    if isinstance(event, FunctionToolCallEvent):
+                      yield ToolCallStarted(
+                        tool_name=event.part.tool_name,
+                        args=event.part.args,
+                        tool_call_id=event.part.tool_call_id,
+                      )
+                    elif isinstance(event, FunctionToolResultEvent):
+                      result = event.result
+                      yield ToolCallResult(
+                        tool_name=getattr(result, "tool_name", "") or "",
+                        content=getattr(result, "content", None),
+                        tool_call_id=event.tool_call_id,
+                        outcome=getattr(result, "outcome", "success"),
+                      )
+      except asyncio.TimeoutError as exc:
+        raise TimeoutError(
+          f"The model did not respond within {timeout_s:.0f}s of inactivity. "
+          "The provider may be unavailable or stalled."
+        ) from exc
+
+      # If the model called any approval-gated tools, the run paused here.
+      output = getattr(run.result, "output", None)
+      if isinstance(output, DeferredToolRequests) and output.approvals:
+        logger.debug(
+          "Run paused for approval: %s",
+          [c.tool_name for c in output.approvals],
+        )
+        decisions: dict = {}
+        for call in output.approvals:
+          # Surface the request, then obtain the decision. Interactive mode
+          # waits (unbounded by the model timeout) for the UI; auto modes
+          # resolve immediately so non-interactive consumers never stall.
+          yield ApprovalRequest(
+            tool_name=call.tool_name,
+            args=call.args,
+            tool_call_id=call.tool_call_id,
+            operation=classify_operation(call.tool_name),
+          )
+          if auto_approve is None:
+            approved = await self._await_approval(call.tool_call_id)
+          else:
+            approved = bool(auto_approve)
+          logger.debug("Approval for %s (%s) -> %s", call.tool_name, call.tool_call_id, approved)
+          yield ApprovalResolved(tool_call_id=call.tool_call_id, approved=approved)
+          decisions[call.tool_call_id] = approved
+        # Resume the run with the decisions and continue streaming.
+        deferred_results = DeferredToolResults(approvals=decisions)
+        message_history = run.result.all_messages()
+        user_prompt = None
+        continue
+      break
+
+  async def stream_chat(
+    self,
+    content: str,
+    thread_id: int,
+    model_cfg: Optional[dict] = None,
+    workspace_id: Optional[int] = None,
+    attachments: Optional[list[dict]] = None,
+    enabled_tools: Optional[list[str]] = None,
+  ) -> AsyncIterator[str]:
+    """
+    Stream an AI response for *content* as plain text chunks.
+
+    This is a thin, backward-compatible wrapper over
+    :meth:`stream_chat_events` that yields only the model's narration text
+    (``TextDelta`` content), dropping tool-call/result events. The API and web
+    consumers rely on this text-only contract.
+
+    Args:
+      content:       The user message text.
+      thread_id:     ID of the active thread (used to load history).
+      workspace_id:  ID of the active workspace (used as tool scope).
+      model_cfg:     Override model config dict; uses best available if None.
+      enabled_tools: List of tool slugs to attach, e.g. ['time', 'calculator'].
+                     Defaults to all registered tools when None.
+      attachments:   List of dicts with keys 'path' and 'type' ('file'|'folder')
+                     selected by the user from the chat input. File contents and
+                     directory listings are inlined into the prompt context so the
+                     model can reason about them immediately without additional
+                     tool calls.
+    """
+    async for event in self.stream_chat_events(
+      content=content,
+      thread_id=thread_id,
+      model_cfg=model_cfg,
+      workspace_id=workspace_id,
+      attachments=attachments,
+      enabled_tools=enabled_tools,
+      auto_approve=True,
+    ):
+      if isinstance(event, TextDelta):
+        yield event.content
+
+  def _resolve_stream_timeout(self, model_cfg: Optional[dict]) -> float:
+    """Resolve the streaming inactivity timeout (seconds).
+
+    Precedence: ``model_cfg['stream_timeout']`` → the
+    ``SUBCONSCIOUS_STREAM_TIMEOUT`` env var → ``_DEFAULT_STREAM_TIMEOUT``.
+    Non-positive or unparseable values fall back to the default.
+    """
+    raw = model_cfg.get("stream_timeout") if model_cfg else None
+    if raw in (None, ""):
+      raw = os.environ.get("SUBCONSCIOUS_STREAM_TIMEOUT")
+    try:
+      val = float(raw) if raw not in (None, "") else self._DEFAULT_STREAM_TIMEOUT
+    except (TypeError, ValueError):
+      val = self._DEFAULT_STREAM_TIMEOUT
+    return val if val > 0 else self._DEFAULT_STREAM_TIMEOUT
 
   def _build_prompt_with_attachments(self, content: str, attachments: list[dict]) -> str:
     """
@@ -479,6 +797,321 @@ class Engine:
       )
       await session.commit()
 
+  # ------------------------------------------------------------------
+  # Tool & skill configuration (workspace defaults + thread overrides)
+  # ------------------------------------------------------------------
+
+  def get_tool_catalog(self) -> dict:
+    """Return the built-in tool hierarchy {slug: [{name, doc}, ...]}."""
+    return self.tool_registry.catalog()
+
+  @staticmethod
+  def _parse_json_config(raw: Optional[str]) -> dict:
+    """Parse a JSON config string, returning {} on null/invalid input."""
+    if not raw:
+      return {}
+    try:
+      data = json.loads(raw)
+      return data if isinstance(data, dict) else {}
+    except Exception:
+      return {}
+
+  @staticmethod
+  def _parse_json_list(raw: Optional[str]) -> list:
+    """Parse a JSON list string, returning [] on null/invalid input."""
+    if not raw:
+      return []
+    try:
+      data = json.loads(raw)
+      return data if isinstance(data, list) else []
+    except Exception:
+      return []
+
+  async def get_workspace_directories(self, workspace_id: int) -> list:
+    """Return the list of directory paths attached to a workspace ([] if unset)."""
+    if not workspace_id:
+      return []
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return self._parse_json_list(ws.directories) if ws else []
+
+  async def set_workspace_directories(self, workspace_id: int, directories: list) -> None:
+    """Persist the list of directory paths attached to a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.directories = json.dumps(directories)
+        await session.commit()
+
+  # ------------------------------------------------------------------
+  # Retrieval (RAG) — directory indexing + search
+  # ------------------------------------------------------------------
+
+  def reindex_workspace(self, workspace_id: int, workspace_name: str = "workspace") -> Optional[str]:
+    """Kick off (as a background job) an incremental re-index of a workspace's
+    attached directories. Returns the job id, or None when nothing to index.
+    """
+    indexer = getattr(self, "indexer", None)
+    if indexer is None:
+      return None
+
+    job = self.jobs.create("index", f"Indexing {workspace_name}")
+
+    async def _run():
+      try:
+        directories = await self.get_workspace_directories(workspace_id)
+        # Run even with no directories: the indexer prunes documents whose
+        # source directory was detached.
+        await indexer.reindex(workspace_id, directories, job)
+        self.jobs.complete(job, job.message or "Indexing complete")
+        await self.show_notification(
+          "Indexing complete", f"{workspace_name}: {job.message or 'done'}"
+        )
+      except Exception as exc:
+        logger.error(f"Workspace indexing failed ({workspace_id}): {exc}")
+        self.jobs.fail(job, str(exc))
+        await self.show_notification("Indexing failed", str(exc))
+
+    asyncio.create_task(_run())
+    return job.id
+
+  async def search_workspace(self, workspace_id: int, query: str, limit: int = 8) -> list[dict]:
+    """Retrieve the most relevant indexed chunks for *query* within a workspace.
+
+    Baseline keyword retrieval over the chunk store. Phase 2 replaces this with
+    a vector similarity query once ``DocumentChunk.embedding`` is populated.
+    """
+    if not query or not query.strip() or not workspace_id:
+      return []
+    like = f"%{query.strip()}%"
+    async with self.db.get_session() as session:
+      rows = await session.scalars(
+        select(DocumentChunk)
+        .where(
+          DocumentChunk.workspace_id == workspace_id,
+          DocumentChunk.content.like(like),
+        )
+        .limit(limit)
+      )
+      chunks = rows.all()
+      results: list[dict] = []
+      for c in chunks:
+        doc = await session.get(IndexedDocument, c.document_id)
+        results.append({
+          "path": doc.path if doc else "",
+          "start_line": c.start_line,
+          "end_line": c.end_line,
+          "content": c.content,
+        })
+      return results
+
+  async def get_workspace_tools_config(self, workspace_id: int) -> dict:
+    """Return the persisted tools_config for a workspace ({} if unset)."""
+    if not workspace_id:
+      return {}
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return self._parse_json_config(ws.tools_config) if ws else {}
+
+  async def set_workspace_tools_config(self, workspace_id: int, config: dict) -> None:
+    """Persist the tools_config for a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.tools_config = json.dumps(config)
+        await session.commit()
+
+  async def get_workspace_skills_config(self, workspace_id: int) -> dict:
+    """Return the persisted skills_config for a workspace ({} if unset)."""
+    if not workspace_id:
+      return {}
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return self._parse_json_config(ws.skills_config) if ws else {}
+
+  async def set_workspace_skills_config(self, workspace_id: int, config: dict) -> None:
+    """Persist the skills_config for a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.skills_config = json.dumps(config)
+        await session.commit()
+
+  async def get_thread_tools_config(self, thread_id: int) -> Optional[dict]:
+    """Return the thread tools_config override, or None when it inherits the workspace."""
+    if not thread_id:
+      return None
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th and th.tools_config:
+        return self._parse_json_config(th.tools_config)
+      return None
+
+  async def set_thread_tools_config(self, thread_id: int, config: dict) -> None:
+    """Persist a thread-level tools_config override."""
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th:
+        th.tools_config = json.dumps(config)
+        await session.commit()
+
+  async def get_thread_skills_config(self, thread_id: int) -> Optional[dict]:
+    """Return the thread skills_config override, or None when it inherits the workspace."""
+    if not thread_id:
+      return None
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th and th.skills_config:
+        return self._parse_json_config(th.skills_config)
+      return None
+
+  async def set_thread_skills_config(self, thread_id: int, config: dict) -> None:
+    """Persist a thread-level skills_config override."""
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th:
+        th.skills_config = json.dumps(config)
+        await session.commit()
+
+  async def resolve_tools_config(
+    self, workspace_id: Optional[int], thread_id: Optional[int]
+  ) -> dict:
+    """
+    Return the effective tools_config: the thread override when present,
+    otherwise the workspace defaults ({} when neither is configured, which
+    the registry treats as "all tools enabled").
+    """
+    if thread_id:
+      tcfg = await self.get_thread_tools_config(thread_id)
+      if tcfg is not None:
+        return tcfg
+    if workspace_id:
+      return await self.get_workspace_tools_config(workspace_id)
+    return {}
+
+  async def resolve_skills_config(
+    self, workspace_id: Optional[int], thread_id: Optional[int]
+  ) -> dict:
+    """Return the effective skills_config (thread override else workspace)."""
+    if thread_id:
+      scfg = await self.get_thread_skills_config(thread_id)
+      if scfg is not None:
+        return scfg
+    if workspace_id:
+      return await self.get_workspace_skills_config(workspace_id)
+    return {}
+
+  # ---------------------------------------------------------------------
+  # HITL tool-approval policy (per workspace / thread)
+  # ---------------------------------------------------------------------
+
+  # Default policy: require approval for both queries and mutations.
+  _DEFAULT_APPROVAL_CONFIG = {"query": True, "mutation": True}
+
+  @classmethod
+  def _normalize_approval_config(cls, cfg: Optional[dict]) -> dict:
+    """Coerce a (possibly partial/invalid) config to a full {query, mutation} dict."""
+    base = dict(cls._DEFAULT_APPROVAL_CONFIG)
+    if isinstance(cfg, dict):
+      for key in ("query", "mutation"):
+        if key in cfg:
+          base[key] = bool(cfg[key])
+    return base
+
+  async def get_workspace_approval_config(self, workspace_id: int) -> dict:
+    """Return the workspace's approval policy (defaults when unset)."""
+    if not workspace_id:
+      return dict(self._DEFAULT_APPROVAL_CONFIG)
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      raw = self._parse_json_config(ws.approval_config) if ws else {}
+    return self._normalize_approval_config(raw)
+
+  async def set_workspace_approval_config(self, workspace_id: int, config: dict) -> None:
+    """Persist the approval policy for a workspace."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.approval_config = json.dumps(self._normalize_approval_config(config))
+        await session.commit()
+
+  async def get_thread_approval_config(self, thread_id: int) -> Optional[dict]:
+    """Return the thread's approval override, or None when it inherits the workspace."""
+    if not thread_id:
+      return None
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th and th.approval_config:
+        return self._normalize_approval_config(self._parse_json_config(th.approval_config))
+    return None
+
+  async def set_thread_approval_config(self, thread_id: int, config: dict) -> None:
+    """Persist a thread-level approval override."""
+    async with self.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      if th:
+        th.approval_config = json.dumps(self._normalize_approval_config(config))
+        await session.commit()
+
+  async def resolve_approval_config(
+    self, workspace_id: Optional[int], thread_id: Optional[int]
+  ) -> dict:
+    """Effective approval policy: thread override else workspace else default (all True)."""
+    if thread_id:
+      cfg = await self.get_thread_approval_config(thread_id)
+      if cfg is not None:
+        return cfg
+    if workspace_id:
+      return await self.get_workspace_approval_config(workspace_id)
+    return dict(self._DEFAULT_APPROVAL_CONFIG)
+
+  # ---------------------------------------------------------------------
+  # HITL approval request/response bridge
+  # ---------------------------------------------------------------------
+
+  async def _await_approval(self, tool_call_id: str) -> bool:
+    """Suspend until the UI resolves the approval for *tool_call_id*.
+
+    Robust to ordering: if :meth:`resolve_approval` was already called for this
+    id (decision landed in the inbox before we started waiting), the stored
+    decision is used immediately. Otherwise a Future is registered and awaited.
+    This closes a race where an approval decision could be lost — leaving the
+    turn hung after the narration text with the tool never executing.
+    """
+    if tool_call_id in self._approval_inbox:
+      return self._approval_inbox.pop(tool_call_id)
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    self._pending_approvals[tool_call_id] = fut
+    try:
+      return await fut
+    finally:
+      self._pending_approvals.pop(tool_call_id, None)
+      self._approval_inbox.pop(tool_call_id, None)
+
+  def resolve_approval(self, tool_call_id: str, approved: bool) -> bool:
+    """Resolve a pending tool-approval request from the UI.
+
+    Always returns True: if a waiter is registered its Future is completed;
+    otherwise the decision is stored in the inbox so a subsequent
+    :meth:`_await_approval` picks it up (guards against the UI resolving before
+    the engine registers its waiter).
+    """
+    fut = self._pending_approvals.get(tool_call_id)
+    if fut is not None and not fut.done():
+      fut.set_result(bool(approved))
+      return True
+    self._approval_inbox[tool_call_id] = bool(approved)
+    return True
+
+  def cancel_pending_approvals(self) -> None:
+    """Deny/cancel any outstanding approval requests (e.g. on thread switch)."""
+    for tool_call_id, fut in list(self._pending_approvals.items()):
+      if not fut.done():
+        fut.set_result(False)
+      self._pending_approvals.pop(tool_call_id, None)
+    self._approval_inbox.clear()
+
   async def run_agent_stream(self, message: str):
     """ Legacy: Runs the agent in streaming mode (kept for TUI / API compatibility). """
     if not hasattr(self, 'agent') or not self.agent:
@@ -489,12 +1122,21 @@ class Engine:
 
   async def stop_engine(self):
     """ Cleanup engine resources """
+    # Stop the API service first so no new requests arrive during teardown.
+    service = getattr(self, "api_service", None)
+    if service is not None:
+      try:
+        await asyncio.wait_for(service.stop(), timeout=11.0)
+      except asyncio.TimeoutError:
+        logger.warning("Engine stop_engine: api_service.stop() timed out.")
+    
     if hasattr(self, '_heartbeat_task') and not self._heartbeat_task.done():
       self._heartbeat_task.cancel()
       try:
         await self._heartbeat_task
       except asyncio.CancelledError:
         pass
+    
     if hasattr(self, 'db'):
       try:
         await asyncio.wait_for(self.db.close(), timeout=1.0)
@@ -519,15 +1161,27 @@ class Engine:
     logger.info(f"[notification] {title}: {message}")
 
   async def update_setting(self, key: str, value: str, tag: str = "system"):
-    """Update a setting in the database and notify any registered UI callbacks."""
+    """ Update a setting in the database and notify any registered UI callbacks. """
     async with self.db.get_session() as session:
-      stmt = sql_update(AppState).where(
-        AppState.key == key,
-        AppState.tag == tag
-      ).values(value=value)
+      insert_values = {
+        "key": key,
+        "tag": tag,
+        "value": value
+      }
+      
+      # Build the SQLite upsert statement
+      stmt = (
+        sqlite_insert(AppState)
+        .values(**insert_values)
+        .on_conflict_do_update(
+          index_elements=[AppState.key, AppState.tag],
+          set_={"value": sqlite_insert(AppState).excluded.value}
+        )
+      )
+      
+      # Execute and commit
       await session.execute(stmt)
       await session.commit()
-      logger.debug(f"Updated setting: {key}={value} (tag={tag})")
 
     # Notify registered UI callbacks so changes are reflected in real-time
     for cb in self._setting_callbacks.get(key, []):
@@ -546,7 +1200,27 @@ class Engine:
         )
       )
       return result
-  
+
+  async def save_ui_state(self, key: str, value: str) -> None:
+    """Upsert a UI state entry in app_state (tag='ui_state')."""
+    async with self.db.get_session() as session:
+      existing = await session.scalar(
+        select(AppState).where(AppState.key == key, AppState.tag == "ui_state")
+      )
+      if existing:
+        existing.value = value
+      else:
+        session.add(AppState(key=key, value=value, tag="ui_state"))
+      await session.commit()
+
+  async def load_ui_state(self) -> dict:
+    """Load all UI state entries from app_state (tag='ui_state')."""
+    async with self.db.get_session() as session:
+      result = await session.scalars(
+        select(AppState).where(AppState.tag == "ui_state")
+      )
+      return {s.key: s.value for s in result.all()}
+
   async def check_for_updates(self):
     """ Check for updates """
     try:

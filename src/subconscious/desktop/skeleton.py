@@ -1,11 +1,12 @@
 """ Desktop version of Subconscious skeleton - desktop layout with titlebar & contextlist """
+import json
 import uuid
 import asyncio
 import pathlib
 import logging
 import traceback
 import flet as ft
-from sqlalchemy import select
+from sqlalchemy import select, func
 from datetime import datetime, timezone
 
 from .tray import *
@@ -15,12 +16,24 @@ from .titlebar import TitleBar
 from .mainwindow import MainWindow
 from .contextlist import ContextList
 from .engine import DesktopEngine as Engine
+from ..stream_events import tool_block_to_json
 from ..db.models import Workspace, Thread, AppState
-from ..shared.messages import HumanMessage, AIMessage
+from ..shared.tool_config import ToolToggleTree, SkillToggleList
+from ..shared.messages import HumanMessage, AIMessage, ToolMessage, ApprovalMessage
+from ..stream_events import TextDelta, ToolCallStarted, ToolCallResult, ApprovalRequest, ApprovalResolved
 
 
 # Logging config
 logger = logging.getLogger("subconscious")
+
+
+def _db_message_to_ui(role: str, content: str, ts):
+  """Map a persisted message row (user / assistant / tool) to its UI bubble."""
+  if role == "user":
+    return HumanMessage(content=content, timestamp=ts)
+  if role == "tool":
+    return ToolMessage(content=content, timestamp=ts)
+  return AIMessage(content=content, timestamp=ts)
 
 
 @ft.component
@@ -80,6 +93,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   # Settings Management State
   settings, set_settings = ft.use_state({})
+  # Mutable ref to hold current settings for callbacks (avoids stale closure)
+  settings_ref, _ = ft.use_state([{}])
   selected_setting, set_selected_setting = ft.use_state(None)
   about_badge_dismissed, set_about_badge_dismissed = ft.use_state(False)
   settings_badge_dismissed, set_settings_badge_dismissed = ft.use_state(False)
@@ -96,10 +111,71 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   tool_configs, set_tool_configs = ft.use_state([])
   tool_expanded_indices, set_tool_expanded_indices = ft.use_state(set())
 
+  # Built-in tool hierarchy {slug: [{name, doc}]} loaded from the engine registry
+  tool_catalog, set_tool_catalog = ft.use_state({})
+  # Tools/Skills enable-disable config for the workspace currently being edited
+  ws_tools_config, set_ws_tools_config = ft.use_state({})
+  ws_skills_config, set_ws_skills_config = ft.use_state({})
+  # HITL approval policy for the workspace currently being edited
+  ws_approval_config, set_ws_approval_config = ft.use_state({})
+  # Directories attached to the workspace currently being edited
+  ws_directories, set_ws_directories = ft.use_state(list())
+  # Thread-level Tools/Skills dialog: mode is None | "tools" | "skills".
+  # Rendered declaratively in the reactive tree (see AppView return) so the
+  # toggle components run inside the renderer context.
+  thread_dialog_mode, set_thread_dialog_mode = ft.use_state(None)
+  thread_dialog_cfg, set_thread_dialog_cfg = ft.use_state({})
+  # Thread-level approval policy shown alongside the tools dialog.
+  thread_dialog_approval_cfg, set_thread_dialog_approval_cfg = ft.use_state({})
+
+  # Background jobs / notifications popup state
+  notifications_open, set_notifications_open = ft.use_state(False)
+  jobs, set_jobs = ft.use_state(list())
+
+  # Chatbox initial values restored from DB on startup
+  initial_chatbox_text, set_initial_chatbox_text = ft.use_state("")
+  initial_chatbox_attachments, set_initial_chatbox_attachments = ft.use_state([])
+  # Incremented every time we navigate to the threads view so ChatWindow's
+  # use_effect always re-fires and seeds the chatbox from persisted state.
+  chatbox_restore_token, set_chatbox_restore_token = ft.use_state(0)
+  # Mutable refs for debounced async tasks (single-element lists avoid re-renders)
+  _resize_debounce = [None]
+  _chatbox_debounce = [None]
+
   _MODE_MAP = {
     "light": ft.ThemeMode.LIGHT,
     "dark": ft.ThemeMode.DARK,
     "auto": ft.ThemeMode.SYSTEM,
+  }
+
+  _LIGHT = ft.Theme(
+    color_scheme=ft.ColorScheme(
+      primary=ft.Colors.BLACK,
+      secondary=ft.Colors.GREY,
+      surface=ft.Colors.WHITE,
+      secondary_container=ft.Colors.GREY_300,
+      primary_container=ft.Colors.GREY_300
+    )
+  )
+  _DARK = ft.Theme(
+    color_scheme=ft.ColorScheme(
+      primary=ft.Colors.WHITE,
+      secondary=ft.Colors.GREY,
+      surface=ft.Colors.BLACK87,
+      secondary_container=ft.Colors.GREY_800,
+      primary_container=ft.Colors.GREY_800
+    )
+  )
+
+  _THEME_MAP = {
+    "purple": ft.Theme(color_scheme_seed=ft.Colors.DEEP_PURPLE),
+    "blue": ft.Theme(color_scheme_seed=ft.Colors.BLUE),
+    "teal": ft.Theme(color_scheme_seed=ft.Colors.TEAL),
+    "green": ft.Theme(color_scheme_seed=ft.Colors.GREEN),
+    "yellow": ft.Theme(color_scheme_seed=ft.Colors.YELLOW),
+    "orange": ft.Theme(color_scheme_seed=ft.Colors.ORANGE),
+    "red": ft.Theme(color_scheme_seed=ft.Colors.RED),
+    "pink": ft.Theme(color_scheme_seed=ft.Colors.PINK),
   }
 
   async def apply_setting_to_ui(key: str, value: str, _tag: str = "system"):
@@ -112,34 +188,30 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     if key == "mode":
       page.theme_mode = _MODE_MAP.get(value, ft.ThemeMode.SYSTEM)
       page.update()
-    new_settings = {**settings, key: str(value)}
+    elif key == "colour":
+      if value == "default":
+        page.theme = _LIGHT
+        page.dark_theme = _DARK
+      else:
+        page.theme = _THEME_MAP.get(value, page.theme)
+        page.dark_theme = _THEME_MAP.get(value, page.theme)
+      page.update()
+
+    new_settings = {**settings_ref[0], key: str(value)}
+    settings_ref[0] = new_settings
     set_settings(new_settings)
 
-  async def load_settings():
-    # Register the UI-only callback so tool-driven setting changes are
-    # reflected in real-time.  We do NOT register handle_setting_change here
-    # because that function also calls engine.update_setting, which would
-    # trigger the callback again and cause infinite recursion.
-    engine.register_setting_callback("mode", apply_setting_to_ui)
+  def build_model_configs() -> list:
+    """Read model configs fresh from encrypted storage (plus the dev echo agent).
 
-    async with engine.db.get_session() as session:
-      stmt = select(AppState).where(AppState.tag.in_(["system", "general"]))
-      result = await session.scalars(stmt)
-      db_settings = {s.key: s.value for s in result.all()}
-      set_settings(db_settings)
-
-      # Apply some settings immediately if needed
-      if "mode" in db_settings:
-        page.theme_mode = _MODE_MAP.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
-
-    # Load model configs from encrypted storage
+    Used both for the initial load and for restoring a thread's persisted model
+    on startup / workspace switch, where the reactive `model_configs` closure
+    may not be populated yet.
+    """
     engine.config.read_keyring()
     raw_models = engine.config.secrets.get("models", {})
-
-    # secrets["models"] is stored as {uuid: {...fields}} – convert to list
     loaded = [{"id": k, **v} for k, v in raw_models.items()]
-
-    # IF in dev mode, append simple echo agent for fast testing
+    # In dev mode, append a simple echo agent for fast testing
     if engine.config.dev:
       loaded.append(
         {
@@ -150,6 +222,51 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           'alias': 'Subconscious:Echo'
         }
       )
+    return loaded
+
+  async def resolve_thread_model(thread_id, configs=None):
+    """Map a thread's persisted model id to a config dict.
+
+    A stored value of 'default'/NULL — or an id pointing at a since-deleted
+    model — falls back to the first available config so the selector is never
+    left empty. Pass `configs` to reuse an already-loaded list; otherwise the
+    configs are read fresh from storage (needed during startup restore).
+    """
+    cfgs = configs if configs else build_model_configs()
+    if not cfgs:
+      return None
+    db_model_id = await engine.get_thread_model_id(thread_id)
+    if db_model_id and db_model_id != "default":
+      match = next((c for c in cfgs if c.get("id") == db_model_id), None)
+      if match:
+        return match
+    return cfgs[0]
+
+  async def load_settings():
+    # Register the UI-only callback so tool-driven setting changes are
+    # reflected in real-time.  We do NOT register handle_setting_change here
+    # because that function also calls engine.update_setting, which would
+    # trigger the callback again and cause infinite recursion.
+    engine.register_setting_callback("mode", apply_setting_to_ui)
+    engine.register_setting_callback("colour", apply_setting_to_ui)
+
+    async with engine.db.get_session() as session:
+      stmt = select(AppState).where(AppState.tag.in_(["system", "general"]))
+      result = await session.scalars(stmt)
+      db_settings = {s.key: s.value for s in result.all()}
+      settings_ref[0] = db_settings
+      set_settings(db_settings)
+
+      # Apply some settings immediately if needed
+      if "mode" in db_settings:
+        await apply_setting_to_ui("mode", db_settings["mode"], "system")
+        # page.theme_mode = _MODE_MAP.get(db_settings["mode"], ft.ThemeMode.SYSTEM)
+      if "colour" in db_settings:
+        await apply_setting_to_ui("colour", db_settings["colour"], "system")
+      
+
+    # Load model configs from encrypted storage
+    loaded = build_model_configs()
 
     set_model_configs(loaded)
 
@@ -162,6 +279,162 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_skill_configs(loaded_skills)
     loaded_tools = await engine.load_tool_configs()
     set_tool_configs(loaded_tools)
+
+    # Load the built-in tool hierarchy for the toggle trees
+    try:
+      set_tool_catalog(engine.get_tool_catalog())
+    except Exception as exc:
+      logger.warning(f"Failed to load tool catalog: {exc}")
+
+  async def restore_ui_state():
+    """Load persisted UI state from app_state and restore view, workspace, thread, and chatbox."""
+    try:
+      ui = await engine.load_ui_state()
+    except Exception:
+      return
+
+    # --- Window size ---
+    async def resizer():
+      try:
+        # await asyncio.sleep(2)
+        w = ui.get("ui_window_width", 800.0)
+        h = ui.get("ui_window_height", 800.0)
+        if w:
+          page.window.width = float(w)
+        if h:
+          page.window.height = float(h)
+        if w or h:
+          page.update()
+      except Exception as e:
+        pass
+    asyncio.create_task(resizer())
+
+    # --- Navigation ---
+    view = ui.get("ui_current_view", "none")
+    ctx = ui.get("ui_current_context", "none")
+    account = ui.get("ui_current_account", "none")
+    workspace = ui.get("ui_selected_workspace_id")
+    setting = ui.get("ui_selected_setting") or None
+    ctx_vis = ui.get("ui_context_visible", "false") == "true"
+
+    # Defer set_current_view until after chatbox state is ready (see bottom of this function).
+    # Setting the view to "threads" before initial_chatbox_text is set causes ChatWindow to
+    # mount with empty props, defeating the key-based remount restore strategy.
+    set_current_context(ctx)
+    set_context_visible(ctx_vis)
+
+    # --- Selected setting ---
+    if setting:
+      set_selected_setting(setting)
+
+    # --- Selected workspace ---
+    if workspace:
+      async with engine.db.get_session() as session:
+        workspace_obj = await session.get(Workspace, int(workspace))
+
+        if workspace_obj:
+          set_workspace_mode("edit")
+          set_editing_workspace(workspace_obj)
+          set_ws_tools_config(Engine._parse_json_config(getattr(workspace_obj, "tools_config", None)))
+          set_ws_skills_config(Engine._parse_json_config(getattr(workspace_obj, "skills_config", None)))
+          set_ws_approval_config(Engine._parse_json_config(getattr(workspace_obj, "approval_config", None)))
+          set_ws_directories(Engine._parse_json_list(getattr(workspace_obj, "directories", None)))
+    
+    # --- Selected account ---
+
+    # --- All-workspaces threads view ---
+    # Restore this before the active workspace so the on_workspace_change effect
+    # loads the correct (all-workspaces) thread list rather than a single workspace.
+    show_all = ui.get("ui_show_all_threads", "false") == "true"
+    if show_all:
+      set_show_all_threads(True)
+
+    # --- Active workspace ---
+    ws_id_str = ui.get("ui_active_workspace_id", "")
+    restored_ws = None
+    if ws_id_str:
+      try:
+        ws_id = int(ws_id_str)
+        async with engine.db.get_session() as session:
+          restored_ws = await session.get(Workspace, ws_id)
+        if restored_ws:
+          set_active_chat_workspace(restored_ws)
+      except Exception:
+        pass
+
+    # --- Active thread ---
+    thread_id_str = ui.get("ui_selected_thread_id", "")
+    if thread_id_str:
+      try:
+        thread_id = int(thread_id_str)
+        async with engine.db.get_session() as session:
+          restored_thread = await session.get(Thread, thread_id)
+        if restored_thread:
+          set_selected_thread(restored_thread)
+          await load_messages(thread_id)
+
+          # Restore the thread's persisted model so the selection survives restarts
+          set_selected_model_config(await resolve_thread_model(thread_id))
+
+          # Also record which thread belongs to the restored workspace
+          ws_key = restored_ws.id if restored_ws else None
+          set_thread_by_workspace({ws_key: restored_thread})
+      except Exception:
+        pass
+
+    # --- Chatbox ---
+    chatbox_text = ui.get("ui_chatbox_text", "")
+    try:
+      chatbox_attachments = json.loads(ui.get("ui_chatbox_attachments", "[]"))
+    except Exception:
+      chatbox_attachments = []
+    set_initial_chatbox_text(chatbox_text)
+    set_initial_chatbox_attachments(chatbox_attachments)
+    # Set the view and bump the token together so ChatWindow first mounts (or remounts)
+    # with the correct initial_chatbox_text/attachments already in props.
+    set_current_view(view)
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+  def handle_chatbox_change(text: str, attachments: list):
+    """ Debounced save of chatbox text and attachments to app_state. """
+    # Cancel any pending save
+    if _chatbox_debounce[0] and not _chatbox_debounce[0].done():
+      _chatbox_debounce[0].cancel()
+
+    attachments_json = json.dumps(attachments)
+
+    if not text and not attachments:
+      # Clear immediately so a sent/cleared chatbox is never falsely restored
+      async def immediate_clear():
+        set_initial_chatbox_text("")
+        set_initial_chatbox_attachments(attachments)
+        await engine.save_ui_state("ui_chatbox_text", "")
+        await engine.save_ui_state("ui_chatbox_attachments", "[]")
+      _chatbox_debounce[0] = asyncio.create_task(immediate_clear())
+      return
+
+    async def delayed_save(): #@IgnoreException
+      await asyncio.sleep(1.5)
+      set_initial_chatbox_text(text)
+      set_initial_chatbox_attachments(attachments)
+      await engine.save_ui_state("ui_chatbox_text", text)
+      await engine.save_ui_state("ui_chatbox_attachments", attachments_json)
+
+    _chatbox_debounce[0] = asyncio.create_task(delayed_save())
+
+  def handle_window_event(e: ft.WindowEvent):
+    """ On window resize store dimensions """
+    async def save_size(e: ft.WindowEvent):
+      await asyncio.sleep(1.5)
+      await engine.save_ui_state("ui_window_width", str(e.control.width))
+      await engine.save_ui_state("ui_window_height", str(e.control.height))
+
+    if e.type.name == "RESIZED":
+      # Cancel any pending save
+      if _resize_debounce[0] and not _resize_debounce[0].done():
+        _resize_debounce[0].cancel()
+      
+      _resize_debounce[0] = asyncio.create_task(save_size(e))
 
   async def handle_setting_change(key, value, tag):
     """UI-driven: persist a setting to the database then apply it to the UI."""
@@ -310,7 +583,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_workspaces(result.all())
 
   async def load_threads(workspace_id=None):
-    from sqlalchemy import func, case
     async with engine.db.get_session() as session:
       # Sort by updated_at when available, fall back to created_at for older rows
       recency = func.coalesce(Thread.updated_at, Thread.created_at).desc()
@@ -328,7 +600,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     restored = thread_by_workspace.get(ws_key)
     if restored:
       set_selected_thread(restored)
-      asyncio.create_task(load_messages(restored.id))
+
+      async def _restore_thread(tid):
+        await load_messages(tid)
+        # Restore the thread's persisted model on workspace switch
+        set_selected_model_config(await resolve_thread_model(tid))
+
+      asyncio.create_task(_restore_thread(restored.id))
     else:
       set_selected_thread(None)
       set_messages([])
@@ -342,7 +620,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ft.use_effect(on_workspace_change, [active_chat_workspace])
 
   def on_show_all_threads_change():
-    """Reload thread list when the all-threads toggle changes."""
+    """Reload thread list when the all-threads toggle changes and persist the choice."""
+    asyncio.create_task(engine.save_ui_state("ui_show_all_threads", "true" if show_all_threads else "false"))
     if show_all_threads:
       asyncio.create_task(load_threads())
     elif active_chat_workspace:
@@ -357,69 +636,125 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     ui_msgs = []
     for m in db_msgs:
       ts = m.created_at.replace(tzinfo=timezone.utc) if m.created_at else datetime.now(timezone.utc)
-      if m.role == "user":
-        ui_msgs.append(HumanMessage(content=m.content, timestamp=ts))
-      else:
-        ui_msgs.append(AIMessage(content=m.content, timestamp=ts))
+      ui_msgs.append(_db_message_to_ui(m.role, m.content, ts))
     set_messages(ui_msgs)
 
   def on_mount():
-    asyncio.create_task(load_workspaces())
     asyncio.create_task(load_threads())
     asyncio.create_task(load_settings())
+    asyncio.create_task(load_workspaces())
+    asyncio.create_task(restore_ui_state())
   
   ft.use_effect(on_mount, [])
+
+  def subscribe_jobs():
+    """Subscribe to the engine EventBus and mirror background job state into the
+    UI so the notifications popup updates live as jobs progress."""
+    queue = engine.events.subscribe()
+    set_jobs(engine.jobs.list())
+
+    async def _consume():
+      try:
+        while True:
+          event = await queue.get()
+          if str(event.get("type", "")).startswith("job."):
+            set_jobs(engine.jobs.list())
+      except asyncio.CancelledError:
+        pass
+
+    task = asyncio.create_task(_consume())
+
+    def cleanup():
+      engine.events.unsubscribe(queue)
+      task.cancel()
+
+    return cleanup
+
+  ft.use_effect(subscribe_jobs, [])
+
+  def open_notifications(e=None):
+    set_jobs(engine.jobs.list())
+    set_notifications_open(True)
+
+  def close_notifications(e=None):
+    set_notifications_open(False)
+
+  def clear_finished_jobs(e=None):
+    engine.jobs.clear_finished()
+    set_jobs(engine.jobs.list())
 
   async def handle_new_workspace(e):
     set_editing_workspace(None)
     set_workspace_mode("create")
     set_current_view("workspaces")
     set_current_context("workspaces")
+    set_ws_tools_config({})
+    set_ws_skills_config({})
+    set_ws_approval_config({})
+    set_ws_directories([])
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", ""))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "workspaces"))
 
   async def handle_workspace_click(workspace):
     set_editing_workspace(workspace)
     set_workspace_mode("edit")
     set_current_view("workspaces")
     set_current_context("workspaces")
+    set_ws_tools_config(Engine._parse_json_config(getattr(workspace, "tools_config", None)))
+    set_ws_skills_config(Engine._parse_json_config(getattr(workspace, "skills_config", None)))
+    set_ws_approval_config(Engine._parse_json_config(getattr(workspace, "approval_config", None)))
+    set_ws_directories(Engine._parse_json_list(getattr(workspace, "directories", None)))
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", str(workspace.id) or ""))
   
   async def handle_settings_click(setting):
     if setting == "about":
       set_about_badge_dismissed(True)
     set_selected_setting(setting)
+    asyncio.create_task(engine.save_ui_state("ui_selected_setting", setting or ""))
 
   async def handle_new_thread(e=None):
     set_selected_thread(None)
     set_messages([])
     set_current_view("threads")
     set_current_context("threads")
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_selected_thread_id", ""))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "threads"))
   
   async def handle_thread_click(thread):
     set_selected_thread(thread)
     set_current_view("threads")
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_selected_thread_id", str(thread.id)))
+
     # Remember which thread was selected for this workspace so we can restore it later
     ws_key = active_chat_workspace.id if active_chat_workspace else None
     set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
 
-    # Restore the persisted model config for this thread:
-    # Look up the DB-stored model_id; 'default'/NULL both resolve to the first config.
-    db_model_id = await engine.get_thread_model_id(thread.id)
-    if db_model_id and db_model_id != "default" and model_configs:
-      persisted = next((c for c in model_configs if c.get("id") == db_model_id), None)
-    elif model_configs:
-      persisted = model_configs[0]
-    else:
-      persisted = None
-    set_selected_model_config(persisted)
+    # Restore the persisted model config for this thread. 'default'/NULL and
+    # ids pointing at a deleted model both fall back to the first config.
+    set_selected_model_config(await resolve_thread_model(thread.id, model_configs))
 
     # Load messages from DB and convert to UI message objects
     db_msgs = await engine.load_thread_messages(thread.id)
     ui_msgs = []
     for m in db_msgs:
       ts = m.created_at.replace(tzinfo=timezone.utc) if m.created_at else datetime.now(timezone.utc)
-      if m.role == "user":
-        ui_msgs.append(HumanMessage(content=m.content, timestamp=ts))
-      else:
-        ui_msgs.append(AIMessage(content=m.content, timestamp=ts))
+      ui_msgs.append(_db_message_to_ui(m.role, m.content, ts))
     set_messages(ui_msgs)
 
   def handle_model_select(model_cfg: dict):
@@ -488,44 +823,110 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_messages(new_messages)
 
     # --- 5. Create streaming AI bubble ---
-    ai_ui_msg = AIMessage(content="", timestamp=datetime.now(timezone.utc))
-    streaming_messages = new_messages + [ai_ui_msg]
-    set_messages(streaming_messages)
+    # Use the same timestamp convention as human messages and DB-loaded messages
+    # (naive local time labelled UTC) so the displayed time matches. Using
+    # datetime.now(timezone.utc) here produced a real-UTC time that rendered
+    # offset from local in the bubble.
+    ai_ui_msg = AIMessage(content="", timestamp=datetime.now().replace(tzinfo=timezone.utc))
+    stream_msgs = new_messages + [ai_ui_msg]
+    set_messages(list(stream_msgs))
 
-    # --- 6. Stream from the LLM, drive re-renders via streaming_text state ---
-    full_response = ""
+    # --- 6. Stream structured events, rendering a bubble per block ---
+    # A single turn interleaves narration text, tool calls, and (when a tool is
+    # gated) approval prompts. Each becomes its own bubble. `current_text`
+    # buffers the active text block (shown live via streaming_text); tool
+    # results and approval prompts flush it and append their own bubble.
+    current_text = ""
+    pending_args: dict = {}
+    approval_msgs: dict = {}
     set_streaming_text("")  # Reset before starting
+
+    def _now():
+      return datetime.now().replace(tzinfo=timezone.utc)
+
+    def _ensure_text_placeholder():
+      # Guarantee a trailing empty AI bubble so streaming_text has a target.
+      if not (stream_msgs and stream_msgs[-1].type == "ai"):
+        stream_msgs.append(AIMessage(content="", timestamp=_now()))
+
+    async def _flush_text():
+      # Commit buffered narration into the trailing AI bubble (persisting it),
+      # or drop that bubble when the block produced no text.
+      nonlocal current_text
+      if stream_msgs and stream_msgs[-1].type == "ai":
+        if current_text.strip():
+          stream_msgs[-1].content = current_text
+          await engine.save_message(thread.id, "assistant", current_text)
+        else:
+          stream_msgs.pop()
+      current_text = ""
+
     try:
-      async for chunk in engine.stream_chat(
+      async for event in engine.stream_chat_events(
         content=content,
         thread_id=thread.id,
         workspace_id=workspace_id,
         attachments=attachments or [],
         model_cfg=selected_model_config or (model_configs[0] if model_configs else None),
       ):
-        logger.debug(f"AI Chunk: {chunk}")
-        full_response += chunk
-        # Updating a dedicated scalar state guarantees Flet detects the change
-        # and re-renders ChatWindow with the new streaming_text on every token.
-        set_streaming_text(full_response)
+        if isinstance(event, TextDelta):
+          _ensure_text_placeholder()
+          current_text += event.content
+          # A dedicated scalar guarantees Flet re-renders ChatWindow, which
+          # overlays streaming_text onto the trailing (empty) AI bubble.
+          set_streaming_text(current_text)
+
+        elif isinstance(event, ToolCallStarted):
+          # Capture args now; the matching result arrives as a later event.
+          pending_args[event.tool_call_id] = event.args
+
+        elif isinstance(event, ToolCallResult):
+          await _flush_text()
+          tool_json = tool_block_to_json(
+            tool_name=event.tool_name,
+            args=pending_args.pop(event.tool_call_id, None),
+            output=event.content,
+            tool_call_id=event.tool_call_id,
+            outcome=event.outcome,
+          )
+          await engine.save_message(thread.id, "tool", tool_json)
+          stream_msgs.append(ToolMessage(content=tool_json, timestamp=_now()))
+          set_streaming_text("")
+          set_messages(list(stream_msgs))
+
+        elif isinstance(event, ApprovalRequest):
+          # A gated tool is waiting: flush narration, then show an approval
+          # prompt whose buttons resolve the pending decision on the engine.
+          await _flush_text()
+          appr = ApprovalMessage(
+            tool_name=event.tool_name,
+            args=event.args,
+            tool_call_id=event.tool_call_id,
+            operation=event.operation,
+            engine=engine,
+            timestamp=_now(),
+          )
+          approval_msgs[event.tool_call_id] = appr
+          stream_msgs.append(appr)
+          set_streaming_text("")
+          set_messages(list(stream_msgs))
+
+        elif isinstance(event, ApprovalResolved):
+          appr = approval_msgs.get(event.tool_call_id)
+          if appr is not None:
+            appr.resolved = event.approved
+          set_messages(list(stream_msgs))
 
     except Exception as exc:
       logger.error(f"LLM stream error: {exc}")
-      full_response = f"⚠ Error reaching the model: {exc}"
-      set_streaming_text(full_response)
+      _ensure_text_placeholder()
+      current_text = (current_text + f"\n\n⚠ Error reaching the model: {exc}").strip()
+      set_streaming_text(current_text)
 
-    # Commit the final text into the messages list and clear the streaming slot.
-    ai_ui_msg.content = full_response
-    set_messages(list(streaming_messages))
+    # --- 7. Commit the final text block and persist it ---
+    await _flush_text()
+    set_messages(list(stream_msgs))
     set_streaming_text("")
-
-    # # Scroll the chat list to the bottom now that the full response is visible.
-    # if chat_scroll_ref[0] is not None:
-    #   await chat_scroll_ref[0].scroll_to(offset=-1, duration=300)
-
-    # --- 7. Persist the final AI message ---
-    if full_response:
-      await engine.save_message(thread.id, "assistant", full_response)
 
     # --- 8. Refresh thread list so new/renamed threads appear ---
     await load_threads(workspace_id)
@@ -547,6 +948,76 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     if msgs is not None:
       await msgs.scroll_to(offset=-1, duration=300)
 
+
+  def handle_workspace_tools_change(config):
+    """Persist the editing workspace's tool toggle config (defaults for its threads)."""
+    if not editing_workspace:
+      return
+    set_ws_tools_config(dict(config))
+    asyncio.create_task(engine.set_workspace_tools_config(editing_workspace.id, config))
+
+  def handle_workspace_skills_change(config):
+    """Persist the editing workspace's skill toggle config."""
+    if not editing_workspace:
+      return
+    set_ws_skills_config(dict(config))
+    asyncio.create_task(engine.set_workspace_skills_config(editing_workspace.id, config))
+
+  def handle_workspace_approval_change(config):
+    """Persist the editing workspace's HITL approval policy."""
+    if not editing_workspace:
+      return
+    set_ws_approval_config(dict(config))
+    asyncio.create_task(engine.set_workspace_approval_config(editing_workspace.id, config))
+
+  def handle_workspace_directories_change(directories):
+    """Persist the editing workspace's attached directory list and (re)index."""
+    if not editing_workspace:
+      return
+    set_ws_directories(list(directories))
+    asyncio.create_task(engine.set_workspace_directories(editing_workspace.id, directories))
+    # Kick off a background re-index so new directory contents become searchable
+    # (and removed directories get pruned). Progress shows in the notifications popup.
+    engine.reindex_workspace(editing_workspace.id, editing_workspace.name)
+
+  async def handle_open_thread_tools(e=None):
+    """Resolve the active thread's tool config and open the tools dialog."""
+    if not selected_thread:
+      return
+    ws_id = active_chat_workspace.id if active_chat_workspace else selected_thread.workspace_id
+    cfg = await engine.resolve_tools_config(ws_id, selected_thread.id)
+    acfg = await engine.resolve_approval_config(ws_id, selected_thread.id)
+    set_thread_dialog_cfg(cfg)
+    set_thread_dialog_approval_cfg(acfg)
+    set_thread_dialog_mode("tools")
+
+  async def handle_open_thread_skills(e=None):
+    """Resolve the active thread's skill config and open the skills dialog."""
+    if not selected_thread:
+      return
+    ws_id = active_chat_workspace.id if active_chat_workspace else selected_thread.workspace_id
+    cfg = await engine.resolve_skills_config(ws_id, selected_thread.id)
+    set_thread_dialog_cfg(cfg)
+    set_thread_dialog_mode("skills")
+
+  def close_thread_dialog(e=None):
+    set_thread_dialog_mode(None)
+
+  def handle_thread_tools_change(config):
+    """Persist a thread-level tools override."""
+    if selected_thread:
+      asyncio.create_task(engine.set_thread_tools_config(selected_thread.id, config))
+
+  def handle_thread_approval_change(config):
+    """Persist a thread-level HITL approval override."""
+    if selected_thread:
+      set_thread_dialog_approval_cfg(dict(config))
+      asyncio.create_task(engine.set_thread_approval_config(selected_thread.id, config))
+
+  def handle_thread_skills_change(config):
+    """Persist a thread-level skills override."""
+    if selected_thread:
+      asyncio.create_task(engine.set_thread_skills_config(selected_thread.id, config))
 
   async def handle_save_workspace(name, description, ws_id=None):
     async with engine.db.get_session() as session:
@@ -605,6 +1076,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   def toggle_context(e=None):
     set_context_visible(not context_visible)
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true" if not context_visible else "false"))
     
   def handle_context_width_change(delta_x):
     new_width = context_width + delta_x
@@ -612,19 +1084,31 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       set_context_width(new_width)
 
   async def switch_to_workspace(e=None):
+    set_context_visible(True)
     set_current_view("workspaces")
     set_current_context("workspaces")
-    set_context_visible(True)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true"))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "workspaces"))
 
   async def switch_to_threads(e=None):
+    set_context_visible(True)
     set_current_view("threads")
     set_current_context("threads")
-    set_context_visible(True)
+    set_chatbox_restore_token(chatbox_restore_token + 1)
+
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "threads"))
 
   def handle_chat_workspace_change(workspace):
     """Switch the active chat workspace and reset the all-threads view."""
     set_show_all_threads(False)
     set_active_chat_workspace(workspace)
+    asyncio.create_task(engine.save_ui_state("ui_active_workspace_id", str(workspace.id) if workspace else ""))
 
   async def switch_to_settings(e=None):
     set_settings_badge_dismissed(True)
@@ -632,12 +1116,159 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_context("settings")
     set_context_visible(True)
 
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "true"))
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "settings"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "settings"))
+
   async def switch_to_account(e=None):
     set_current_view("account")
     set_current_context("account")
     set_context_visible(False)
+    
+    # Save state
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "account"))
+    asyncio.create_task(engine.save_ui_state("ui_context_visible", "false"))
+    asyncio.create_task(engine.save_ui_state("ui_current_context", "account"))
+  
+  # Register window event callback
+  page.window.on_event = handle_window_event
 
-  return [
+  # Determine which workspace to surface in the chat header. When "All Workspaces"
+  # is active, reflect the workspace the selected thread actually belongs to
+  # instead of the (now ambiguous) active_chat_workspace.
+  if show_all_threads:
+    header_workspace = next(
+      (w for w in workspaces if selected_thread and w.id == selected_thread.workspace_id),
+      None,
+    )
+  else:
+    header_workspace = active_chat_workspace
+
+  # Thread-level Tools/Skills dialog. Kept mounted with a stable key and toggled
+  # via `open` rather than being added/removed from the tree — removing an open
+  # AlertDialog leaves it stuck on screen (the reported "Done does nothing" bug),
+  # whereas flipping `open` triggers a proper dismiss animation.
+  thread_dialog = None
+  if selected_thread is not None:
+    is_skills = thread_dialog_mode == "skills"
+    if is_skills:
+      dialog_title = "Thread Skills"
+      dialog_body: ft.Control = SkillToggleList(
+        skills=skill_configs,
+        config=thread_dialog_cfg,
+        on_change=handle_thread_skills_change,
+        sync_key=selected_thread.id,
+      )
+      dialog_height = 420
+    else:
+      dialog_title = "Thread Tools"
+      dialog_body = ToolToggleTree(
+        catalog=tool_catalog,
+        configured_tools=tool_configs,
+        config=thread_dialog_cfg,
+        on_change=handle_thread_tools_change,
+        approval_config=thread_dialog_approval_cfg,
+        on_approval_change=handle_thread_approval_change,
+        sync_key=selected_thread.id,
+      )
+      dialog_height = 520
+    thread_dialog = ft.AlertDialog(
+      key="thread-dialog",
+      open=thread_dialog_mode in ("tools", "skills"),
+      modal=False,
+      title=ft.Text(dialog_title),
+      content=ft.Container(
+        content=ft.Column([dialog_body], scroll=ft.ScrollMode.ADAPTIVE, tight=True),
+        width=420,
+        height=dialog_height,
+      ),
+      actions=[
+        ft.TextButton(
+          "Done",
+          on_click=close_thread_dialog,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+        ),
+      ],
+      actions_alignment=ft.MainAxisAlignment.END,
+      shape=ft.RoundedRectangleBorder(radius=3),
+      on_dismiss=close_thread_dialog,
+    )
+
+  # Background-jobs / notifications popup — shows ongoing work (e.g. indexing).
+  def _job_row(j: dict) -> ft.Control:
+    status = j.get("status", "running")
+    running = status == "running"
+    status_colours = {
+      "running":   ft.Colors.PRIMARY,
+      "completed": ft.Colors.GREEN,
+      "failed":    ft.Colors.ERROR,
+      "cancelled": ft.Colors.GREY,
+    }
+    indeterminate = running and not j.get("total")
+    body: list = [
+      ft.Row(
+        [
+          ft.Text(j.get("title", "Job"), weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
+          ft.Text(status.capitalize(), size=12, color=status_colours.get(status, ft.Colors.GREY)),
+        ],
+        spacing=8,
+      ),
+    ]
+    if running:
+      body.append(ft.ProgressBar(value=None if indeterminate else j.get("progress", 0.0)))
+    if j.get("message"):
+      body.append(
+        ft.Text(j["message"], size=12, color=ft.Colors.GREY, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+      )
+    return ft.Container(
+      content=ft.Column(body, spacing=6),
+      padding=ft.padding.all(10),
+      bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+      border_radius=ft.BorderRadius(3, 3, 3, 3),
+    )
+
+  job_controls = [_job_row(j) for j in jobs] if jobs else [
+    ft.Container(
+      content=ft.Text("No background jobs.", size=14, color=ft.Colors.GREY_600),
+      padding=ft.padding.all(10),
+    )
+  ]
+  active_jobs = sum(1 for j in jobs if j.get("status") == "running")
+
+  notifications_dialog = ft.AlertDialog(
+    key="notifications-dialog",
+    open=notifications_open,
+    modal=False,
+    title=ft.Row(
+      [
+        ft.Text("Background Jobs", expand=True),
+        ft.TextButton(
+          "Clear finished",
+          on_click=clear_finished_jobs,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+        ),
+      ],
+      spacing=8,
+    ),
+    content=ft.Container(
+      content=ft.Column(job_controls, scroll=ft.ScrollMode.ADAPTIVE, spacing=10, tight=True),
+      width=440,
+      height=420,
+    ),
+    actions=[
+      ft.TextButton(
+        "Close",
+        on_click=close_notifications,
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
+      ),
+    ],
+    actions_alignment=ft.MainAxisAlignment.END,
+    shape=ft.RoundedRectangleBorder(radius=3),
+    on_dismiss=close_notifications,
+  )
+
+  view = [
     TitleBar(dev=engine.config.dev),
     Frame(
       sidebar=Sidebar(
@@ -649,6 +1280,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         selected_view=current_context, # Use context to light up the sidebar icon correctly
         config=engine.config,
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
+        on_notifications_click=open_notifications,
+        active_jobs=active_jobs,
       ),
       contextlist=ContextList(
         visible=context_visible,
@@ -670,7 +1303,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         set_selected_setting=handle_settings_click,
         show_about_badge=bool(engine.update_available) and not about_badge_dismissed,
         show_all_threads=show_all_threads,
-        on_toggle_all_threads=lambda: set_show_all_threads(not show_all_threads)
+        on_toggle_all_threads=set_show_all_threads
       ),
       mainwindow=MainWindow(
         current_view=current_view,
@@ -706,6 +1339,22 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_update=engine.run_update,
         selected_model_config=selected_model_config,
         on_model_select=handle_model_select,
+        initial_chatbox_text=initial_chatbox_text,
+        initial_chatbox_attachments=initial_chatbox_attachments,
+        on_chatbox_change=handle_chatbox_change,
+        chatbox_restore_token=chatbox_restore_token,
+        active_workspace=header_workspace,
+        tool_catalog=tool_catalog,
+        workspace_tools_config=ws_tools_config,
+        workspace_skills_config=ws_skills_config,
+        workspace_directories=ws_directories,
+        on_workspace_tools_change=handle_workspace_tools_change,
+        on_workspace_skills_change=handle_workspace_skills_change,
+        workspace_approval_config=ws_approval_config,
+        on_workspace_approval_change=handle_workspace_approval_change,
+        on_workspace_directories_change=handle_workspace_directories_change,
+        on_open_thread_tools=handle_open_thread_tools,
+        on_open_thread_skills=handle_open_thread_skills,
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,
@@ -713,12 +1362,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     )
   ]
 
+  if thread_dialog is not None:
+    view.append(thread_dialog)
+
+  view.append(notifications_dialog)
+
+  return view
+
 async def main(page: ft.Page, engine):
   """ Application window config """
   page.padding = 0
   page.spacing = 0
-  page.window.width = 800
-  page.window.height = 800
   page.title = "Subconscious"
   page.window.min_width = 506
   page.window.min_height = 300
@@ -727,24 +1381,6 @@ async def main(page: ft.Page, engine):
   page.bgcolor = ft.Colors.SURFACE
   page.window.title_bar_hidden = True
   page.theme_mode = ft.ThemeMode.LIGHT
-  page.theme = ft.Theme(
-    color_scheme=ft.ColorScheme(
-      primary=ft.Colors.BLACK,
-      secondary=ft.Colors.GREY,
-      surface=ft.Colors.WHITE,
-      secondary_container=ft.Colors.GREY_300,
-      primary_container=ft.Colors.GREY_300
-    )
-  )
-  page.dark_theme = ft.Theme(
-    color_scheme=ft.ColorScheme(
-      primary=ft.Colors.WHITE,
-      secondary=ft.Colors.GREY_400,
-      surface=ft.Colors.GREY_900,
-      secondary_container=ft.Colors.GREY_800,
-      primary_container=ft.Colors.GREY_700
-    )
-  )
 
   # Could put load settings here
 

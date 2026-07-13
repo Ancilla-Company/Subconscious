@@ -9,7 +9,7 @@ Unicode True
 ; General configuration
 ;------------------------------------------------------------------
 !define APP_NAME        "Subconscious"
-!define APP_VERSION     "0.1.8"          ; updated by CI at build time
+!define APP_VERSION     "0.1.11"          ; updated by CI at build time
 !define PUBLISHER       "Ancilla"
 !define APP_URL         "https://subconscious.chat"
 !define EXE_NAME        "Subconscious.exe"

@@ -1,6 +1,6 @@
 import flet as ft
 
-from ..shared.buttons import IconButton, SidebarButton, Avatar
+from ..shared.buttons import IconButton, SidebarButton, Avatar, Badge
 
 @ft.component
 def Sidebar(
@@ -12,12 +12,23 @@ def Sidebar(
   config,
   selected_view="none",
   show_settings_badge: bool = False,
+  on_notifications_click=None,
+  active_jobs: int = 0,
   # Seed for the identicon — pass a username or UUID once accounts exist.
   # Defaults to a fixed string so the avatar is stable before login.
   avatar_seed: str = "subconscious-default-user",
 ) -> ft.Control:
   # Set personal icons
   personal_list = [
+    SidebarButton(
+      ft.Icons.NOTIFICATIONS_NONE_OUTLINED,
+      "Background Jobs",
+      "notifications",
+      selected_view,
+      on_notifications_click,
+      selectable=False,
+      badge=ft.Badge(text=str(active_jobs)) if active_jobs > 0 else None,
+    ),
     SidebarButton(
       ft.Icons.SETTINGS_OUTLINED,
       "Settings",

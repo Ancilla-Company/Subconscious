@@ -30,6 +30,8 @@ _PROVIDERS = [
   ft.dropdown.Option("LiteLLM"),
   ft.dropdown.Option("Nebius AI Studio"),
   ft.dropdown.Option("Ollama"),
+  ft.dropdown.Option("Custom"),
+  ft.dropdown.Option("LM Studio"),
   ft.dropdown.Option("Perplexity"),
   ft.dropdown.Option("SambaNova"),
   ft.dropdown.Option("Together AI"),
@@ -113,6 +115,21 @@ def ModelPanel(
   def handle_delete(e):
     if on_delete:
       on_delete(model_id)
+  
+  def local_endpoint(provider: str) -> str:
+    """ Returns to assumed local endpoint for the passed in provider.
+        Ofcourse, users can edit it for different or remote endpoints
+    """
+    endpoints = {
+      "Ollama": "http://localhost:11434/v1",
+      "LM Studio": "http://127.0.0.1:1234/v1"
+    }
+    return endpoints.get(provider, "")
+
+  def show_url(provider: str) -> bool:
+    """ Shows the base url field for special providers """
+    supported_providers = ["Ollama", "LM Studio", "Custom"]
+    return provider in supported_providers
 
   # Derive display title for the panel header
   if alias:
@@ -144,11 +161,11 @@ def ModelPanel(
         hint="Enter your API key"
       ),
       FormField(
-        label="Base URL",
-        value=base_url if base_url else ("http://localhost:11434/v1" if provider == "Ollama" else ""),
+        label="Base URL (Assumes OpenAI type API)" if show_url(provider) else "Base URL",
+        value=base_url if base_url else (local_endpoint(provider) if show_url(provider) else ""),
         on_change=handle_base_url_change,
-        hint="http://localhost:11434/v1",
-        visible=(provider == "Ollama"),
+        hint=local_endpoint(provider),
+        visible=(show_url(provider)),
       ),
       FormField(
         label="Alias",
@@ -211,18 +228,34 @@ def General(settings: Optional[dict] = None, on_setting_change=None) -> ft.Contr
     settings = {}
 
   tray = settings.get("tray", "True") == "True"
-  theme_mode = settings.get("mode", "auto")
+  light_option = settings.get("mode", "auto")
+  colour_theme = settings.get("colour", "white")
 
   async def handle_tray_change(e):
     await on_setting_change("tray", str(e.control.value), "system")
 
-  async def handle_theme_change(e):
+  async def handle_light_change(e):
     await on_setting_change("mode", e.control.value, "system")
 
-  _theme_options = [
+  async def handle_colour_change(e):
+    await on_setting_change("colour", e.control.value, "system")
+
+  _light_options = [
     ft.dropdown.Option("auto", "System Default"),
     ft.dropdown.Option("light", "Light"),
     ft.dropdown.Option("dark", "Dark"),
+  ]
+
+  _colour_themes = [
+    ft.dropdown.Option("purple", "Purple"),
+    ft.dropdown.Option("blue", "Blue"),
+    ft.dropdown.Option("teal", "Teal"),
+    ft.dropdown.Option("green", "Green"),
+    ft.dropdown.Option("yellow", "Yellow"),
+    ft.dropdown.Option("orange", "Orange"),
+    ft.dropdown.Option("red", "Red"),
+    ft.dropdown.Option("pink", "Pink"),
+    ft.dropdown.Option("default", "Default"),
   ]
 
   return ft.Container(
@@ -244,12 +277,19 @@ def General(settings: Optional[dict] = None, on_setting_change=None) -> ft.Contr
         ft.Column(
           [
             DropdownField(
-              label="Theme Mode",
-              values=_theme_options,
-              on_change=handle_theme_change,
-              value=theme_mode,
-              hint="Selecte theme mode"
-            )
+              label="Light Mode",
+              values=_light_options,
+              on_change=handle_light_change,
+              value=light_option,
+              hint="Select light mode"
+            ),
+            DropdownField(
+              label="Colour Theme",
+              values=_colour_themes,
+              on_change=handle_colour_change,
+              value=colour_theme,
+              hint="Select colour theme"
+            ),
           ],
           spacing=10,
           scroll=ft.ScrollMode.ADAPTIVE
@@ -1028,8 +1068,10 @@ def Tools(
 
 
 @ft.component
-def About(update_available: bool = False, on_update=None) -> ft.Control:
+def About(settings=None, update_available: bool = False, on_update=None) -> ft.Control:
   """ Renders the about settings panel """
+  # Set dummy state var to trigger state load
+  _, __ = ft.use_state(None)
 
   async def handle_update(_):
     if on_update:

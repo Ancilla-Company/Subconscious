@@ -53,6 +53,7 @@ def get_default_data_dir() -> pathlib.Path:
 
 @dataclass
 class Config:
+  api: bool = True
   dev: bool = False
   tui: bool = False
   gui: bool = False
