@@ -1,5 +1,8 @@
+import os
+import sys
 import uuid
 import asyncio
+import subprocess
 import flet as ft
 from typing import Optional, cast
 
@@ -222,7 +225,11 @@ def ModelPanel(
 
 
 @ft.component
-def General(settings: Optional[dict] = None, on_setting_change=None) -> ft.Control:
+def General(
+  settings: Optional[dict] = None,
+  on_setting_change=None,
+  data_dir=None,
+) -> ft.Control:
   """ Renders the general settings """
   if settings is None:
     settings = {}
@@ -230,6 +237,7 @@ def General(settings: Optional[dict] = None, on_setting_change=None) -> ft.Contr
   tray = settings.get("tray", "True") == "True"
   light_option = settings.get("mode", "auto")
   colour_theme = settings.get("colour", "white")
+  data_dir_str = str(data_dir) if data_dir else ""
 
   async def handle_tray_change(e):
     await on_setting_change("tray", str(e.control.value), "system")
@@ -239,6 +247,23 @@ def General(settings: Optional[dict] = None, on_setting_change=None) -> ft.Contr
 
   async def handle_colour_change(e):
     await on_setting_change("colour", e.control.value, "system")
+
+  async def handle_copy_data_dir(e):
+    await ft.Clipboard().set(data_dir_str)
+
+  def handle_open_data_dir(e):
+    """ Open the data folder in the OS file manager. """
+    if not data_dir_str:
+      return
+    try:
+      if sys.platform == "win32":
+        os.startfile(data_dir_str)  # type: ignore[attr-defined]
+      elif sys.platform == "darwin":
+        subprocess.run(["open", data_dir_str], check=False)
+      else:
+        subprocess.run(["xdg-open", data_dir_str], check=False)
+    except Exception:
+      pass
 
   _light_options = [
     ft.dropdown.Option("auto", "System Default"),
@@ -289,6 +314,53 @@ def General(settings: Optional[dict] = None, on_setting_change=None) -> ft.Contr
               on_change=handle_colour_change,
               value=colour_theme,
               hint="Select colour theme"
+            ),
+            ft.Column(
+              [
+                ft.Container(
+                  content=ft.Text(
+                    "Data Folder",
+                    size=15,
+                    color=ft.Colors.PRIMARY,
+                  ),
+                  height=25
+                ),
+                ft.Container(
+                  content=ft.Row(
+                    [
+                      ft.Text(
+                        data_dir_str,
+                        size=14,
+                        expand=True,
+                        selectable=True,
+                        tooltip=data_dir_str,
+                        no_wrap=True,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                      ),
+                      IconButton(
+                        on_click=handle_copy_data_dir,
+                        icon=ft.Icons.CONTENT_COPY,
+                        tooltip="Copy path"
+                      ),
+                      IconButton(
+                        on_click=handle_open_data_dir,
+                        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                        tooltip="Open folder"
+                      ),
+                    ],
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                  ),
+                  border=ft.border.all(1, ft.Colors.PRIMARY),
+                  border_radius=3,
+                  bgcolor=ft.Colors.SURFACE,
+                  padding=ft.padding.only(10, 0, 0, 0),
+                  height=40,
+                  clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                ),
+              ],
+              spacing=0,
+              visible=bool(data_dir_str),
             ),
           ],
           spacing=10,

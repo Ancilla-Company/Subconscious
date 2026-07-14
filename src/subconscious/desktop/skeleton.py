@@ -1355,6 +1355,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_workspace_directories_change=handle_workspace_directories_change,
         on_open_thread_tools=handle_open_thread_tools,
         on_open_thread_skills=handle_open_thread_skills,
+        data_dir=str(engine.config.data_dir),
       ),
       context_visible=context_visible,
       on_context_width_change=handle_context_width_change,

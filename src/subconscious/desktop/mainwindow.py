@@ -61,6 +61,7 @@ def MainWindow(
   on_workspace_directories_change=None,
   on_open_thread_tools=None,
   on_open_thread_skills=None,
+  data_dir=None,
 ) -> ft.Control:
   """ The main window for the UI """
   
@@ -114,7 +115,8 @@ def MainWindow(
             ResponsiveItem(
               General(
                 settings=settings,
-                on_setting_change=on_setting_change
+                on_setting_change=on_setting_change,
+                data_dir=data_dir
               )
             ),
           ]
