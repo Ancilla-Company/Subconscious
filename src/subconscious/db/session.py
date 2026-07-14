@@ -67,6 +67,25 @@ class Database:
       if "approval_config" not in ws_columns:
         await conn.execute(text("ALTER TABLE workspaces ADD COLUMN approval_config TEXT"))
 
+    # app_state: ensure a UNIQUE index on (key, tag) exists so the upserts in
+    # Engine.update_setting (ON CONFLICT ... DO UPDATE) can resolve to a single
+    # row. Older databases created the table without this constraint, which
+    # raised: "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE
+    # constraint" whenever a setting (e.g. theme colour) was changed.
+    async with self.engine.begin() as conn:
+      result = await conn.execute(text("PRAGMA index_list(app_state)"))
+      index_names = {row[1] for row in result.fetchall()}
+      if "uq_app_state_key_tag" not in index_names:
+        # Collapse any pre-existing duplicate (key, tag) rows first, keeping the
+        # lowest id, so the unique index can be created without conflict.
+        await conn.execute(text(
+          "DELETE FROM app_state WHERE id NOT IN "
+          "(SELECT MIN(id) FROM app_state GROUP BY key, tag)"
+        ))
+        await conn.execute(text(
+          "CREATE UNIQUE INDEX uq_app_state_key_tag ON app_state (key, tag)"
+        ))
+
     # Backfill UUIDs for rows created before the uuid columns existed. SQLite
     # can't generate per-row UUIDs in pure SQL, so do it in Python.
     async with self.engine.begin() as conn:

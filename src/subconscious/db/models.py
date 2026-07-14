@@ -98,6 +98,12 @@ class AppState(Base):
   value = Column(String, nullable=False)
   tag = Column(String, nullable=True) # To categorize state/settings
 
+  # A (key, tag) pair must be unique so upserts (ON CONFLICT) in
+  # Engine.update_setting resolve to a single row.
+  __table_args__ = (
+    UniqueConstraint('key', 'tag', name='uq_app_state_key_tag'),
+  )
+
 
 class TodoItem(Base):
   """
