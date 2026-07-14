@@ -1,0 +1,135 @@
+### Subconscious Engine API — manual smoke tests
+#
+# Usage (VS Code "REST Client" or JetBrains HTTP client):
+#   1. Start the engine so the API is listening:  `subconscious engine`
+#   2. Open the discovery file it writes to your data dir: `runtime.json`
+#      and copy the `port` and `token` values into the variables below.
+#   3. Click "Send Request" above each request.
+#
+# The API binds to loopback only (127.0.0.1) and every endpoint except
+# /health requires the bearer token from runtime.json.
+
+@host = 127.0.0.1
+@port = 8771
+@baseUrl = http://{{host}}:{{port}}/api/v1
+@token = PASTE_TOKEN_FROM_runtime.json_HERE
+
+
+### Health — no auth required. Should return 200 with status/version/node_id.
+# @name health
+GET {{baseUrl}}/health
+Accept: application/json
+
+
+### Health should still work even with a bogus token (endpoint is unauthenticated).
+GET {{baseUrl}}/health
+Authorization: Bearer not-a-real-token
+Accept: application/json
+
+
+### List configured models — requires auth. API keys are never returned.
+# The one flagged "is_default": true is used when chat.send omits model_id.
+# @name listModels
+GET {{baseUrl}}/models
+Authorization: Bearer {{token}}
+Accept: application/json
+
+
+### List workspaces — requires a valid token. Capture the first workspace uuid.
+# @name listWorkspaces
+GET {{baseUrl}}/workspaces
+Authorization: Bearer {{token}}
+Accept: application/json
+
+
+### Negative check: missing token should return 401.
+GET {{baseUrl}}/workspaces
+Accept: application/json
+
+
+### Negative check: wrong token should return 401.
+GET {{baseUrl}}/workspaces
+Authorization: Bearer wrong-token
+Accept: application/json
+
+
+# Pull the first workspace uuid from the listWorkspaces response above so the
+# following requests can reference it without manual copy/paste.
+@workspaceUuid = {{listWorkspaces.response.body.$[0].uuid}}
+
+
+### List threads in a workspace.
+# @name listThreads
+GET {{baseUrl}}/workspaces/{{workspaceUuid}}/threads
+Authorization: Bearer {{token}}
+Accept: application/json
+
+
+### Create a new thread in that workspace.
+# @name createThread
+POST {{baseUrl}}/threads
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "workspace_uuid": "{{workspaceUuid}}",
+  "title": "Smoke test thread",
+  "description": "Created via api.http"
+}
+
+
+# Reference the thread we just created.
+@threadUuid = {{createThread.response.body.uuid}}
+
+
+### Update the thread (rename + set a model id).
+PATCH {{baseUrl}}/threads/{{threadUuid}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "Smoke test thread (renamed)",
+  "default_model_id": "default"
+}
+
+
+### List messages for the thread (empty until a chat is run over the WebSocket).
+GET {{baseUrl}}/threads/{{threadUuid}}/messages
+Authorization: Bearer {{token}}
+Accept: application/json
+
+
+### Negative check: unknown workspace uuid should return 404.
+GET {{baseUrl}}/workspaces/00000000-0000-0000-0000-000000000000/threads
+Authorization: Bearer {{token}}
+Accept: application/json
+
+
+### Negative check: unknown thread uuid should return 404.
+GET {{baseUrl}}/threads/00000000-0000-0000-0000-000000000000/messages
+Authorization: Bearer {{token}}
+Accept: application/json
+
+
+### ---------------------------------------------------------------------------
+### WebSocket chat (not runnable from .http — documented for reference)
+### ---------------------------------------------------------------------------
+# Connect:  ws://{{host}}:{{port}}/api/v1/events?token={{token}}
+#
+# Send a chat message. `model_id` is optional — omit it to use the default
+# model (the one flagged is_default by GET /models). A supplied-but-unknown
+# id returns a chat.error frame.
+#
+#   {
+#     "v": 1,
+#     "type": "chat.send",
+#     "id": "client-correlation-id",
+#     "data": {
+#       "thread_uuid": "<thread uuid>",
+#       "content": "Hello!",
+#       "model_id": "<uuid from GET /models, optional>"
+#     }
+#   }
+#
+# Server replies stream back as chat.delta frames, then a final chat.done
+# (or chat.error on failure), each echoing the same "id".
