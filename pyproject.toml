@@ -33,7 +33,7 @@ dependencies = [
   "keyring",
   "flet_lottie",
   "pydantic-ai; sys_platform != 'android' and sys_platform != 'ios'",
-  "pydantic-ai-slim; sys_platform != 'android' and sys_platform != 'ios'",
+  "pydantic-ai-slim[bedrock]; sys_platform != 'android' and sys_platform != 'ios'",
   "pydantic; sys_platform != 'android' and sys_platform != 'ios'",
   "pydantic-graph; sys_platform != 'android' and sys_platform != 'ios'",
   "genai-prices; sys_platform != 'android' and sys_platform != 'ios'",
