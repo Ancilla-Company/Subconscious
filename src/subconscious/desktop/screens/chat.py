@@ -311,7 +311,15 @@ def ChatWindow(
     live = AIMessage(content=streaming_text, timestamp=last.timestamp)
     display_messages = display_messages[:-1] + [live]
 
-  _bubbles = [MessageBubble(m) for m in display_messages]
+  # Only the first bubble in a run of same-side messages (human = right,
+  # ai/tool/approval = left) keeps its pointer, so a block reads as one group.
+  def _is_right(m):
+    return m.type == 'human'
+
+  _bubbles = []
+  for i, m in enumerate(display_messages):
+    first_in_block = i == 0 or _is_right(display_messages[i - 1]) != _is_right(m)
+    _bubbles.append(MessageBubble(m, show_pointer=first_in_block))
 
   message_list = ft.ListView(
     controls=_bubbles,

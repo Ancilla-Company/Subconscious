@@ -202,9 +202,20 @@ def ChatWindow(thread=None, messages=None, on_send_message=None, is_streaming=Fa
     border=ft.border.only(bottom=ft.BorderSide(1, ft.Colors.SECONDARY_CONTAINER))
   )
 
-  # Message display logic — rebuild the list whenever messages changes so streaming updates render
+  # Message display logic — rebuild the list whenever messages changes so streaming updates render.
+  # Only the first bubble in a run of same-side messages keeps its pointer.
+  _msgs = messages or []
+
+  def _is_right(m):
+    return m.type == 'human'
+
+  _bubbles = []
+  for i, m in enumerate(_msgs):
+    first_in_block = i == 0 or _is_right(_msgs[i - 1]) != _is_right(m)
+    _bubbles.append(MessageBubble(m, show_pointer=first_in_block))
+
   message_list = ft.ListView(
-    controls=[MessageBubble(m) for m in (messages or [])],
+    controls=_bubbles,
     spacing=15,
     auto_scroll=True,
     expand=True,

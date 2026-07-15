@@ -73,11 +73,14 @@ class MessageBubble(ft.Row):
   """ A class to represent a message bubble in the chat.
       A message bubble is a single message displaying text
   """
-  def __init__(self, message):
+  def __init__(self, message, show_pointer: bool = True):
     super().__init__()
     self.wrap = True
     self.expand = True
     self.message = message
+    # Only the first bubble in a run of same-side messages shows the little
+    # tail/pointer; successive bubbles in the block omit it for a cleaner group.
+    self.show_pointer = show_pointer
     self.alignment = ft.MainAxisAlignment.CENTER
     self.parts = self.split_markdown_sections(self.message.content)
     self.message_content = ft.Text(self.message.content, size=14, color=ft.Colors.PRIMARY)
@@ -278,24 +281,29 @@ class MessageBubble(ft.Row):
       wrap=False
     )
     
+    # Message bubble body
+    bubble = ft.Container(
+      bgcolor=ft.Colors.PRIMARY_CONTAINER if self.message.type == 'human' else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+      border_radius = ft.BorderRadius(3, 3, 3, 3),
+      padding = ft.padding.only(10, 5, 10, 5),
+      content = self.bubble_content,
+      margin=ft.margin.only(right=7, left=7),
+    )
+
+    # Stack the pointer behind the bubble only for the first message in a block.
+    stack_controls = []
+    if self.show_pointer:
+      stack_controls.append(
+        self.sender_message_pointer() if self.message.type == 'human' else self.receiver_message_pointer()
+      )
+    stack_controls.append(bubble)
+
     self.controls = [
       ft.Row(
         [
           ft.Container(
             ft.Stack(
-              [
-                # Message pointer
-                self.sender_message_pointer() if self.message.type == 'human' else self.receiver_message_pointer(),
-
-                # Message bubble
-                ft.Container(
-                  bgcolor=ft.Colors.PRIMARY_CONTAINER if self.message.type == 'human' else ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                  border_radius = ft.BorderRadius(3, 3, 3, 3),
-                  padding = ft.padding.only(10, 5, 10, 5),
-                  content = self.bubble_content,
-                  margin=ft.margin.only(right=7, left=7),
-                )
-              ],
+              stack_controls,
               clip_behavior=ft.ClipBehavior.NONE),
               clip_behavior=ft.ClipBehavior.NONE, 
               padding=ft.padding.only(13, 0, 15, 0)
