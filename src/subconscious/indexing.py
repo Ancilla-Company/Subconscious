@@ -1,16 +1,4 @@
-""" Workspace directory indexing for retrieval (RAG Phase 1 + storage).
-
-    Walks the directories attached to a workspace, extracts text from supported
-    files, splits it into overlapping chunks and persists them to the
-    ``indexed_documents`` / ``document_chunks`` tables. Indexing is incremental:
-    a file is only re-chunked when its size+mtime (and, for smaller files, a
-    content hash) has changed since the last run.
-
-    This is the ingestion + storage layer. Embeddings/vector search (Phase 2)
-    slot in at the marked extension point: populate ``DocumentChunk.embedding``
-    during ``_index_file`` and swap ``Engine.search_workspace`` to do a vector
-    similarity query instead of the current keyword match.
-"""
+""" Workspace directory indexing for retrieval (RAG Phase 1 + storage) """
 from __future__ import annotations
 
 import hashlib

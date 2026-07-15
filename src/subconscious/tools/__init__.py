@@ -42,6 +42,9 @@ _MUTATION_TOOLS = frozenset({
   "create_file", "move_to_trash", "replace_in_file",
   # clipboard
   "write_clipboard",
+  # desktop automation (control the local machine's input devices)
+  "move_mouse", "click_mouse", "double_click_mouse", "drag_mouse",
+  "scroll_mouse", "type_text", "press_key", "press_hotkey",
 })
 
 _QUERY_TOOLS = frozenset({
@@ -65,6 +68,9 @@ _QUERY_TOOLS = frozenset({
   "list_directory", "get_file_info", "get_directory_tree", "find_symbol",
   # clipboard reads
   "read_clipboard",
+  # desktop automation reads (screen inspection, no side effects)
+  "get_screen_size", "get_mouse_position", "get_pixel_color",
+  "capture_screenshot", "locate_on_screen",
 })
 
 # Name-prefix heuristic for tools not in the explicit maps (e.g. user-added).

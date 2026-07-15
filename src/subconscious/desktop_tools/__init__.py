@@ -18,6 +18,7 @@ class ToolRegistry(BaseToolRegistry):
     - web_tools   – web browsing and scraping (httpx + beautifulsoup4)
     - images      – image inspection and processing
     - settings    – app settings read/write via DB
+    - automation  – mouse/keyboard/screen control via pyautogui
   """
 
   def __init__(self):
@@ -27,7 +28,7 @@ class ToolRegistry(BaseToolRegistry):
   def _load_desktop_tools(self):
     """Load desktop-specific tool modules."""
     from . import web_tools, filesystem, terminal
-    from . import clipboard, images, settings
+    from . import clipboard, images, settings, automation
 
     modules = {
       "web":        web_tools,
@@ -36,6 +37,7 @@ class ToolRegistry(BaseToolRegistry):
       "clipboard":  clipboard,
       "images":     images,
       "settings":   settings,
+      "automation": automation,
     }
 
     for slug, module in modules.items():
