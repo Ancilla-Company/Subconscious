@@ -192,3 +192,52 @@ def CheckBox(label, value, on_change) -> ft.Control:
   spacing=0,
   wrap=True
 )
+
+def ExpansionTile(label, on_change) -> ft.Control:
+  """ Expansion tile for hiding long vertical forms """
+  # the built-in / custom tool tiles.
+  tile = ft.ExpansionTile(
+    min_tile_height=36,
+    title=ft.Container(
+      content=ft.Column(
+        [
+          ft.Text(
+            size=15,
+            value="Installed Skills"
+          )
+        ],
+        spacing=0,
+      ),
+      padding=ft.Padding.only(top=-2, bottom=-2)
+    ),
+    dense=True,
+    expand=True,
+    expanded=False,
+    controls=[body],
+    visual_density=ft.VisualDensity.COMPACT
+  )
+
+  return ft.Column(
+    [
+      ft.Container(
+        height=25,
+        content=ft.Text(
+          size=15,
+          value="Skills",
+          color=ft.Colors.PRIMARY
+        ),
+      ),
+      ft.Container(
+        ft.Column(
+          spacing=0,
+          controls=[skills_tile]
+        ),
+        border_radius=3,
+        margin=ft.Margin.all(0),
+        padding=ft.Padding.all(0),
+        border=ft.border.all(1, ft.Colors.PRIMARY)
+      ),
+    ],
+    spacing=0,
+    scroll=ft.ScrollMode.ADAPTIVE
+  )

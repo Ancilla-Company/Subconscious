@@ -241,32 +241,35 @@ def MainWindow(
           content=ft.Row(
             [
               ft.Icon(ft.Icons.FOLDER_OUTLINED, size=16, color=ft.Colors.PRIMARY),
-              ft.Text(
-                path,
-                size=13,
-                expand=True,
-                tooltip=path,
-                color=ft.Colors.PRIMARY,
-                no_wrap=True,
-                overflow=ft.TextOverflow.ELLIPSIS,
+              ft.Container(
+                ft.Text(
+                  path,
+                  size=13,
+                  expand=True,
+                  tooltip=path,
+                  no_wrap=True,
+                  color=ft.Colors.PRIMARY,
+                  overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                expand=True
               ),
               ft.IconButton(
                 icon=ft.Icons.CLOSE,
                 icon_size=16,
-                height=30,
-                width=30,
-                padding=4,
+                height=40,
+                width=40,
+                padding=0,
                 tooltip="Remove directory",
                 on_click=lambda e, p=path: remove_directory(p),
                 style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
               ),
             ],
             spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER
           ),
-          bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+          padding=ft.padding.only(10, 0, 0, 0),
           border_radius=ft.BorderRadius(3, 3, 3, 3),
-          padding=ft.padding.only(10, 2, 2, 2),
+          bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST
         )
 
       directories_section = ft.Column(
@@ -279,16 +282,16 @@ def MainWindow(
             ),
             height=25
           ),
-          ft.Column(
-            [directory_row(d) for d in (workspace_directories or [])],
-            spacing=6,
-          ),
           WideTextButton(
             label="Add Directory",
             on_click=add_directory
+          ),
+          ft.Column(
+            [directory_row(d) for d in (workspace_directories or [])],
+            spacing=4,
           )
         ],
-        spacing=0
+        spacing=4
       )
         
       content = ft.Container(
@@ -363,7 +366,8 @@ def MainWindow(
             ]
           ]
         ),
-        expand=True
+        expand=True,
+        padding=ft.Padding.only(bottom=15)
       )
 
     else:

@@ -366,14 +366,24 @@ def SkillToggleList(skills=None, config=None, on_change=None, sync_key=None):
   # Collapsible tile so the whole skills section can expand/collapse, mirroring
   # the built-in / custom tool tiles.
   skills_tile = ft.ExpansionTile(
-    title=ft.Column(
-      [
-        ft.Text("Installed Skills", size=20),
-      ]
+    min_tile_height=36,
+    title=ft.Container(
+      content=ft.Column(
+        [
+          ft.Text(
+            size=15,
+            value="Installed Skills",
+          )
+        ],
+        spacing=0,
+      ),
+      padding=ft.Padding.only(top=-2, bottom=-2)
     ),
+    dense=True,
     expand=True,
     expanded=False,
     controls=[body],
+    visual_density=ft.VisualDensity.COMPACT
   )
 
   return ft.Column(
@@ -383,11 +393,16 @@ def SkillToggleList(skills=None, config=None, on_change=None, sync_key=None):
         content=ft.Text("Skills", size=15, color=ft.Colors.PRIMARY),
       ),
       ft.Container(
-        ft.Column([skills_tile], spacing=0),
+        ft.Column(
+          spacing=0,
+          controls=[skills_tile]
+        ),
         border_radius=3,
-        border=ft.border.all(1, ft.Colors.PRIMARY),
+        margin=ft.Margin.all(0),
+        padding=ft.Padding.all(0),
+        border=ft.border.all(1, ft.Colors.PRIMARY)
       ),
     ],
     spacing=0,
-    scroll=ft.ScrollMode.ADAPTIVE,
+    scroll=ft.ScrollMode.ADAPTIVE
   )
