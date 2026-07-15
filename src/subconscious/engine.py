@@ -771,6 +771,27 @@ class Engine:
         thread.title = title  # type: ignore[assignment]
         await session.commit()
 
+  async def update_thread_details(
+    self,
+    thread_id: int,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+  ) -> Optional[Thread]:
+    """ Update a thread's title and/or description and return the refreshed row.
+    """
+    async with self.db.get_session() as session:
+      thread = await session.get(Thread, thread_id)
+      if not thread:
+        return None
+      if title is not None:
+        thread.title = title  # type: ignore[assignment]
+      if description is not None:
+        thread.description = description  # type: ignore[assignment]
+      thread.updated_at = datetime.now()  # type: ignore[assignment]
+      await session.commit()
+      await session.refresh(thread)
+      return thread
+
   async def get_thread_model_id(self, thread_id: int) -> Optional[str]:
     """
     Return the persisted model ID for a thread, or None if not set.

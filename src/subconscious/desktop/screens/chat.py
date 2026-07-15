@@ -263,33 +263,13 @@ def ChatWindow(
     ft.Row(
       [
         ft.Text(chat_name, size=14, text_align=ft.TextAlign.LEFT, weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
-        # "More" menu — thread-level Tools & Skills configuration.
-        # Only shown for a saved thread (config is persisted against thread id).
-        PopupMenuButton(
-          icon=ft.Icons.MORE_VERT_ROUNDED,
-          tooltip="More",
-          menu_items=[
-            ft.PopupMenuItem(
-              content=ft.Row(
-                [
-                  ft.Icon(ft.Icons.BUILD_OUTLINED, size=16, color=ft.Colors.PRIMARY),
-                  ft.Text("Tools"),
-                ],
-                spacing=8,
-              ),
-              on_click=on_open_thread_tools,
-            ),
-            ft.PopupMenuItem(
-              content=ft.Row(
-                [
-                  ft.Icon(ft.Icons.EXTENSION_OUTLINED, size=16, color=ft.Colors.PRIMARY),
-                  ft.Text("Skills"),
-                ],
-                spacing=8,
-              ),
-              on_click=on_open_thread_skills,
-            ),
-          ],
+        # Settings button — opens the Thread Settings screen directly
+        # (name/description plus Tools & Skills toggles). Only shown for a saved
+        # thread (config is persisted against the thread id).
+        IconButton(
+          icon=ft.Icons.SETTINGS_OUTLINED,
+          tooltip="Thread settings",
+          on_click=on_open_thread_tools,
         ) if thread is not None else ft.Container(),
       ],
       height=40,

@@ -137,17 +137,21 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ws_approval_config, set_ws_approval_config = ft.use_state({})
   # Directories attached to the workspace currently being edited
   ws_directories, set_ws_directories = ft.use_state(list())
-  # Thread-level Tools/Skills dialog: mode is None | "tools" | "skills".
-  # Rendered declaratively in the reactive tree (see AppView return) so the
-  # toggle components run inside the renderer context.
-  thread_dialog_mode, set_thread_dialog_mode = ft.use_state(None)
-  thread_dialog_cfg, set_thread_dialog_cfg = ft.use_state({})
-  # Thread-level approval policy shown alongside the tools dialog.
-  thread_dialog_approval_cfg, set_thread_dialog_approval_cfg = ft.use_state({})
+  # Thread settings screen: resolved effective configs for the active thread,
+  # used to seed the Tools/Skills toggles on the "Thread Settings" view.
+  ts_tools_config, set_ts_tools_config = ft.use_state({})
+  ts_skills_config, set_ts_skills_config = ft.use_state({})
+  ts_approval_config, set_ts_approval_config = ft.use_state({})
 
   # Background jobs / notifications popup state
   notifications_open, set_notifications_open = ft.use_state(False)
   jobs, set_jobs = ft.use_state(list())
+
+  # Flet 0.84 has no declarative dialog hook (use_dialog arrived in 0.85), so an
+  # AlertDialog returned in the control tree is never shown. The notifications
+  # popup is driven imperatively via page.show_dialog(); this ref holds the
+  # shown instance so a use_effect can open/close it as state changes.
+  notifications_shown_ref, _ = ft.use_state([None])
 
   # Chatbox initial values restored from DB on startup
   initial_chatbox_text, set_initial_chatbox_text = ft.use_state("")
@@ -1118,28 +1122,33 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     # (and removed directories get pruned). Progress shows in the notifications popup.
     engine.reindex_workspace(editing_workspace.id, editing_workspace.name)
 
-  async def handle_open_thread_tools(e=None):
-    """Resolve the active thread's tool config and open the tools dialog."""
+  async def handle_open_thread_settings(e=None):
+    """Resolve the active thread's tool/skill/approval configs and open the
+    dedicated Thread Settings screen (name + description + toggles)."""
     if not selected_thread:
       return
     ws_id = active_chat_workspace.id if active_chat_workspace else selected_thread.workspace_id
-    cfg = await engine.resolve_tools_config(ws_id, selected_thread.id)
-    acfg = await engine.resolve_approval_config(ws_id, selected_thread.id)
-    set_thread_dialog_cfg(cfg)
-    set_thread_dialog_approval_cfg(acfg)
-    set_thread_dialog_mode("tools")
+    set_ts_tools_config(await engine.resolve_tools_config(ws_id, selected_thread.id))
+    set_ts_skills_config(await engine.resolve_skills_config(ws_id, selected_thread.id))
+    set_ts_approval_config(await engine.resolve_approval_config(ws_id, selected_thread.id))
+    set_current_view("thread_settings")
 
-  async def handle_open_thread_skills(e=None):
-    """Resolve the active thread's skill config and open the skills dialog."""
-    if not selected_thread:
-      return
-    ws_id = active_chat_workspace.id if active_chat_workspace else selected_thread.workspace_id
-    cfg = await engine.resolve_skills_config(ws_id, selected_thread.id)
-    set_thread_dialog_cfg(cfg)
-    set_thread_dialog_mode("skills")
+  def handle_thread_settings_back(e=None):
+    """Return from the Thread Settings screen to the chat view."""
+    set_current_view("threads")
+    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
 
-  def close_thread_dialog(e=None):
-    set_thread_dialog_mode(None)
+  async def handle_save_thread(name, description, thread_id):
+    """Persist the thread's name/description then refresh the list + selection."""
+    updated = await engine.update_thread_details(thread_id, title=name, description=description)
+    if show_all_threads:
+      await load_threads()
+    elif active_chat_workspace:
+      await load_threads(active_chat_workspace.id)
+    else:
+      await load_threads()
+    if updated:
+      set_selected_thread(updated)
 
   def handle_thread_tools_change(config):
     """Persist a thread-level tools override."""
@@ -1149,7 +1158,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   def handle_thread_approval_change(config):
     """Persist a thread-level HITL approval override."""
     if selected_thread:
-      set_thread_dialog_approval_cfg(dict(config))
       asyncio.create_task(engine.set_thread_approval_config(selected_thread.id, config))
 
   def handle_thread_skills_change(config):
@@ -1283,55 +1291,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   else:
     header_workspace = active_chat_workspace
 
-  # Thread-level Tools/Skills dialog. Kept mounted with a stable key and toggled
-  # via `open` rather than being added/removed from the tree — removing an open
-  # AlertDialog leaves it stuck on screen (the reported "Done does nothing" bug),
-  # whereas flipping `open` triggers a proper dismiss animation.
-  thread_dialog = None
-  if selected_thread is not None:
-    is_skills = thread_dialog_mode == "skills"
-    if is_skills:
-      dialog_title = "Thread Skills"
-      dialog_body: ft.Control = SkillToggleList(
-        skills=skill_configs,
-        config=thread_dialog_cfg,
-        on_change=handle_thread_skills_change,
-        sync_key=selected_thread.id,
-      )
-      dialog_height = 420
-    else:
-      dialog_title = "Thread Tools"
-      dialog_body = ToolToggleTree(
-        catalog=tool_catalog,
-        configured_tools=tool_configs,
-        config=thread_dialog_cfg,
-        on_change=handle_thread_tools_change,
-        approval_config=thread_dialog_approval_cfg,
-        on_approval_change=handle_thread_approval_change,
-        sync_key=selected_thread.id,
-      )
-      dialog_height = 520
-    thread_dialog = ft.AlertDialog(
-      key="thread-dialog",
-      open=thread_dialog_mode in ("tools", "skills"),
-      modal=False,
-      title=ft.Text(dialog_title),
-      content=ft.Container(
-        content=ft.Column([dialog_body], scroll=ft.ScrollMode.ADAPTIVE, tight=True),
-        width=420,
-        height=dialog_height,
-      ),
-      actions=[
-        ft.TextButton(
-          "Done",
-          on_click=close_thread_dialog,
-          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-        ),
-      ],
-      actions_alignment=ft.MainAxisAlignment.END,
-      shape=ft.RoundedRectangleBorder(radius=3),
-      on_dismiss=close_thread_dialog,
-    )
+  # Thread Tools/Skills are now edited on the dedicated "Thread Settings" screen
+  # (see MainWindow current_view == "thread_settings"), not a popup dialog.
 
   # Background-jobs / notifications popup — shows ongoing work (e.g. indexing).
   def _job_row(j: dict) -> ft.Control:
@@ -1376,7 +1337,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   notifications_dialog = ft.AlertDialog(
     key="notifications-dialog",
-    open=notifications_open,
     modal=False,
     title=ft.Row(
       [
@@ -1405,6 +1365,25 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     shape=ft.RoundedRectangleBorder(radius=3),
     on_dismiss=close_notifications,
   )
+
+  # --- Imperative dialog driver (Flet 0.84) ---------------------------------
+  # Show/close the notifications popup via page.show_dialog(); returning an
+  # AlertDialog in the tree does nothing on this version. The dialog is still
+  # built above during render, then shown here and closed when state clears.
+  def _sync_notifications_dialog():
+    shown = notifications_shown_ref[0]
+    if shown is not None:
+      try:
+        shown.open = False
+        shown.update()
+      except Exception:
+        pass
+      notifications_shown_ref[0] = None
+    if notifications_open:
+      page.show_dialog(notifications_dialog)
+      notifications_shown_ref[0] = notifications_dialog
+
+  ft.use_effect(_sync_notifications_dialog, [notifications_open])
 
   # Titlebar indicators: the workspace the user is working in and the active
   # model. These mirror what the chat header used to show so the context is
@@ -1514,8 +1493,16 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         workspace_approval_config=ws_approval_config,
         on_workspace_approval_change=handle_workspace_approval_change,
         on_workspace_directories_change=handle_workspace_directories_change,
-        on_open_thread_tools=handle_open_thread_tools,
-        on_open_thread_skills=handle_open_thread_skills,
+        on_open_thread_tools=handle_open_thread_settings,
+        on_open_thread_skills=handle_open_thread_settings,
+        on_save_thread=handle_save_thread,
+        on_thread_settings_back=handle_thread_settings_back,
+        thread_tools_config=ts_tools_config,
+        thread_skills_config=ts_skills_config,
+        thread_approval_config=ts_approval_config,
+        on_thread_tools_change=handle_thread_tools_change,
+        on_thread_skills_change=handle_thread_skills_change,
+        on_thread_approval_change=handle_thread_approval_change,
         data_dir=str(engine.config.data_dir),
       ),
       context_visible=context_visible,
@@ -1524,10 +1511,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     )
   ]
 
-  if thread_dialog is not None:
-    view.append(thread_dialog)
-
-  view.append(notifications_dialog)
+  # NOTE: notifications_dialog is shown via page.show_dialog() in the use_effect
+  # driver above — it is intentionally NOT appended to the view tree (returning
+  # an AlertDialog in the tree does nothing on Flet 0.84).
 
   return view
 

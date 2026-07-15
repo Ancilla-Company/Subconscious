@@ -53,6 +53,7 @@ dependencies = [
   "python-docx",
   "pystray; sys_platform != 'android' and sys_platform != 'ios'",
   "pyperclip; sys_platform != 'android' and sys_platform != 'ios'",
+  "pyautogui; sys_platform != 'android' and sys_platform != 'ios'",
   "send2trash; sys_platform != 'android' and sys_platform != 'ios'",
   "speedtest-cli; sys_platform != 'android' and sys_platform != 'ios'"
 ]
