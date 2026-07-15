@@ -259,19 +259,10 @@ def ChatWindow(
         await on_send_message(user_msg_content, current_attachments)
 
   chat_name = thread.title if thread else "New Thread"
-  workspace_name = active_workspace.name if active_workspace else "All Workspaces"
   chatwindow_header = ft.Container(
     ft.Row(
       [
         ft.Text(chat_name, size=14, text_align=ft.TextAlign.LEFT, weight=ft.FontWeight.W_500, expand=True, color=ft.Colors.PRIMARY),
-        ft.Row(
-          [
-            ft.Text(workspace_name, size=13, text_align=ft.TextAlign.RIGHT, color=ft.Colors.GREY_600),
-          ],
-          spacing=0,
-          alignment=ft.MainAxisAlignment.END,
-          vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
         # "More" menu — thread-level Tools & Skills configuration.
         # Only shown for a saved thread (config is persisted against thread id).
         PopupMenuButton(

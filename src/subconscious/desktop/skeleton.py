@@ -72,7 +72,17 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   threads, set_threads = ft.use_state(list())
   selected_thread, set_selected_thread = ft.use_state(None)
   messages, set_messages = ft.use_state(list())
-  is_streaming, set_is_streaming = ft.use_state(False)
+  # Set of thread ids currently streaming a response. Per-thread (rather than a
+  streaming_threads, set_streaming_threads = ft.use_state(set())
+  # Mutable mirror so async callbacks read/write the live set without a stale closure.
+  streaming_threads_ref, _ = ft.use_state([set()])
+  # Live, not-yet-final message buffers keyed by thread id: {thread_id: [msgs]}.
+  # A turn's in-progress bubbles (streamed text, tool results and — crucially —
+  # transient approval prompts) live here so navigating away and back to a
+  # thread that's still streaming or paused for approval restores them. The DB
+  # only holds finalized messages, so without this the approval bubble would
+  # vanish on switch-back. Cleared when the turn completes.
+  live_streams_ref, _ = ft.use_state([{}])
   # Mutable ref holder for the chat ListView so we can call scroll_to() imperatively.
   # Stored as a single-element list so mutations don't trigger re-renders.
   chat_scroll_ref, _ = ft.use_state([None])
@@ -90,6 +100,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   show_all_threads, set_show_all_threads = ft.use_state(False)
   # Currently active model config for the chat window
   selected_model_config, set_selected_model_config = ft.use_state(None)
+
+  # Thread ids with unread activity — a response finished streaming while the
+  unread_threads, set_unread_threads = ft.use_state(set())
+  # Mutable mirror so async callbacks read/update the live set without a stale
+  unread_threads_ref, _ = ft.use_state([set()])
+  # Live view/thread holder so the async streaming loop can tell whether the
+  view_ref, _ = ft.use_state([{"view": "none", "thread_id": None}])
 
   # Settings Management State
   settings, set_settings = ft.use_state({})
@@ -348,6 +365,23 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     show_all = ui.get("ui_show_all_threads", "false") == "true"
     if show_all:
       set_show_all_threads(True)
+
+    # --- Unread thread indicators ---
+    # Restore the persisted unread set, dropping ids for threads that no longer
+    # exist so a deleted thread can't leave the sidebar badge stuck lit.
+    try:
+      unread_ids = set(json.loads(ui.get("ui_unread_threads", "[]")))
+    except Exception:
+      unread_ids = set()
+    if unread_ids:
+      async with engine.db.get_session() as session:
+        existing = set(await session.scalars(select(Thread.id).where(Thread.id.in_(unread_ids))))
+      pruned = unread_ids & existing
+      unread_threads_ref[0] = pruned
+      set_unread_threads(pruned)
+      if pruned != unread_ids:
+        # Re-persist so the pruned stale ids don't linger in the DB.
+        await engine.save_ui_state("ui_unread_threads", json.dumps(sorted(pruned)))
 
     # --- Active workspace ---
     ws_id_str = ui.get("ui_active_workspace_id", "")
@@ -619,6 +653,53 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   
   ft.use_effect(on_workspace_change, [active_chat_workspace])
 
+  def _sync_view_ref():
+    """Keep view_ref current so async streaming can detect navigation away."""
+    view_ref[0] = {
+      "view": current_view,
+      "thread_id": selected_thread.id if selected_thread else None,
+    }
+
+  ft.use_effect(_sync_view_ref, [current_view, selected_thread])
+
+  def _set_thread_streaming(thread_id, streaming: bool):
+    """Add/remove a thread id from the live streaming set so the send button's
+    spinner tracks each thread independently."""
+    if thread_id is None:
+      return
+    updated = set(streaming_threads_ref[0])
+    if streaming:
+      updated.add(thread_id)
+    else:
+      updated.discard(thread_id)
+    streaming_threads_ref[0] = updated
+    set_streaming_threads(updated)
+
+  def _persist_unread(ids):
+    """Persist the unread-thread set to app_state so the indicators survive a
+    restart. Stored as a JSON list of thread ids under the ui_state tag."""
+    asyncio.create_task(engine.save_ui_state("ui_unread_threads", json.dumps(sorted(ids))))
+
+  def _mark_thread_unread(thread_id):
+    """Flag a thread as having unread activity (red dot + sidebar badge)."""
+    if thread_id is None or thread_id in unread_threads_ref[0]:
+      return
+    updated = set(unread_threads_ref[0])
+    updated.add(thread_id)
+    unread_threads_ref[0] = updated
+    set_unread_threads(updated)
+    _persist_unread(updated)
+
+  def _clear_thread_unread(thread_id):
+    """Clear a thread's unread flag once the user views it."""
+    if thread_id is None or thread_id not in unread_threads_ref[0]:
+      return
+    updated = set(unread_threads_ref[0])
+    updated.discard(thread_id)
+    unread_threads_ref[0] = updated
+    set_unread_threads(updated)
+    _persist_unread(updated)
+
   def on_show_all_threads_change():
     """Reload thread list when the all-threads toggle changes and persist the choice."""
     asyncio.create_task(engine.save_ui_state("ui_show_all_threads", "true" if show_all_threads else "false"))
@@ -632,6 +713,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ft.use_effect(on_show_all_threads_change, [show_all_threads])
 
   async def load_messages(thread_id):
+    # If a turn is still in progress for this thread, show its live buffer
+    # (which includes streamed text, tool results and pending approval prompts)
+    # rather than the DB, which only has finalized messages.
+    buffer = live_streams_ref[0].get(thread_id)
+    if buffer is not None:
+      set_messages(list(buffer))
+      return
     db_msgs = await engine.load_thread_messages(thread_id)
     ui_msgs = []
     for m in db_msgs:
@@ -735,6 +823,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_selected_thread(thread)
     set_current_view("threads")
     set_chatbox_restore_token(chatbox_restore_token + 1)
+    # Viewing the thread clears its unread-activity indicator.
+    _clear_thread_unread(thread.id)
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
@@ -749,13 +839,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     # ids pointing at a deleted model both fall back to the first config.
     set_selected_model_config(await resolve_thread_model(thread.id, model_configs))
 
-    # Load messages from DB and convert to UI message objects
-    db_msgs = await engine.load_thread_messages(thread.id)
-    ui_msgs = []
-    for m in db_msgs:
-      ts = m.created_at.replace(tzinfo=timezone.utc) if m.created_at else datetime.now(timezone.utc)
-      ui_msgs.append(_db_message_to_ui(m.role, m.content, ts))
-    set_messages(ui_msgs)
+    # Clear any leftover streaming overlay from the previously viewed thread so
+    # its in-flight text can't briefly bleed into this thread's last AI bubble.
+    set_streaming_text("")
+
+    # Prefer a live in-progress buffer (mid-stream or paused for approval) so
+    # the transient bubbles are restored; otherwise load finalized messages.
+    await load_messages(thread.id)
 
   def handle_model_select(model_cfg: dict):
     """Persist the selected model config for the current thread and update state."""
@@ -780,8 +870,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     if not content.strip():
       return
 
-    set_is_streaming(True)
-
     # --- 1. Resolve workspace ---
     workspace_id: int | None = active_chat_workspace.id if active_chat_workspace else None
     if workspace_id is None:
@@ -791,7 +879,6 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           workspace_id = first_ws.id
         else:
           logger.error("No workspace available to attach message to.")
-          set_is_streaming(False)
           return
 
     # --- 2. Get or create thread ---
@@ -801,6 +888,14 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       workspace_id=workspace_id,
       thread_id=selected_thread.id if selected_thread else None,
     )
+    # The thread this turn streams into
+    stream_thread_id = thread.id
+    # Flag this specific thread as streaming so only its send button spins.
+    _set_thread_streaming(stream_thread_id, True)
+
+    def _viewing_stream_thread() -> bool:
+      v = view_ref[0]
+      return v["view"] == "threads" and v["thread_id"] == stream_thread_id
 
     # --- 3. Persist user message (store original text, not the expanded prompt) ---
     user_db_msg = await engine.save_message(thread.id, "user", content)
@@ -815,6 +910,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     if is_new_thread:
       set_selected_thread(thread)
       set_current_view("threads")
+      # Reflect the new selection immediately so the streaming guard below sees
+      # it before the reactive effect re-syncs view_ref on the next render.
+      view_ref[0] = {"view": "threads", "thread_id": thread.id}
       # Seed the model for the new thread: always 'default' so it tracks the
       # first model config rather than being pinned to a specific UUID.
       asyncio.create_task(engine.set_thread_model_id(thread.id, "default"))
@@ -830,6 +928,9 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     ai_ui_msg = AIMessage(content="", timestamp=datetime.now().replace(tzinfo=timezone.utc))
     stream_msgs = new_messages + [ai_ui_msg]
     set_messages(list(stream_msgs))
+    # Register the live buffer so switching back to this thread mid-turn (or
+    # while it's paused for approval) restores the in-progress bubbles.
+    live_streams_ref[0][stream_thread_id] = stream_msgs
 
     # --- 6. Stream structured events, rendering a bubble per block ---
     # A single turn interleaves narration text, tool calls, and (when a tool is
@@ -843,6 +944,23 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
     def _now():
       return datetime.now().replace(tzinfo=timezone.utc)
+
+    def _push_messages():
+      # Only mutate the shared chat view when the user is still viewing this
+      # thread; otherwise the stream would overwrite whatever they navigated to.
+      if _viewing_stream_thread():
+        set_messages(list(stream_msgs))
+      else:
+        # Background activity (a tool result, or a pending approval prompt that
+        # stalls the turn) arrived on a thread the user isn't viewing — flag it
+        # so the sidebar/thread badge signals there's something new, even though
+        # the turn hasn't finished. The live buffer keeps the bubbles for when
+        # they switch back.
+        _mark_thread_unread(stream_thread_id)
+
+    def _push_stream_text(text: str):
+      if _viewing_stream_thread():
+        set_streaming_text(text)
 
     def _ensure_text_placeholder():
       # Guarantee a trailing empty AI bubble so streaming_text has a target.
@@ -874,7 +992,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           current_text += event.content
           # A dedicated scalar guarantees Flet re-renders ChatWindow, which
           # overlays streaming_text onto the trailing (empty) AI bubble.
-          set_streaming_text(current_text)
+          _push_stream_text(current_text)
 
         elif isinstance(event, ToolCallStarted):
           # Capture args now; the matching result arrives as a later event.
@@ -891,8 +1009,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           )
           await engine.save_message(thread.id, "tool", tool_json)
           stream_msgs.append(ToolMessage(content=tool_json, timestamp=_now()))
-          set_streaming_text("")
-          set_messages(list(stream_msgs))
+          _push_stream_text("")
+          _push_messages()
 
         elif isinstance(event, ApprovalRequest):
           # A gated tool is waiting: flush narration, then show an approval
@@ -908,34 +1026,54 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           )
           approval_msgs[event.tool_call_id] = appr
           stream_msgs.append(appr)
-          set_streaming_text("")
-          set_messages(list(stream_msgs))
+          _push_stream_text("")
+          _push_messages()
 
         elif isinstance(event, ApprovalResolved):
           appr = approval_msgs.get(event.tool_call_id)
           if appr is not None:
             appr.resolved = event.approved
-          set_messages(list(stream_msgs))
+          _push_messages()
 
     except Exception as exc:
       logger.error(f"LLM stream error: {exc}")
       _ensure_text_placeholder()
       current_text = (current_text + f"\n\n⚠ Error reaching the model: {exc}").strip()
-      set_streaming_text(current_text)
+      _push_stream_text(current_text)
 
     # --- 7. Commit the final text block and persist it ---
     await _flush_text()
-    set_messages(list(stream_msgs))
-    set_streaming_text("")
+    _push_messages()
+    _push_stream_text("")
 
     # --- 8. Refresh thread list so new/renamed threads appear ---
-    await load_threads(workspace_id)
-    # Re-select the thread so the context list highlights it correctly
-    set_selected_thread(thread)
-    # Keep workspace→thread map up-to-date
-    ws_key = active_chat_workspace.id if active_chat_workspace else None
-    set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
-    set_is_streaming(False)
+    # Respect the all-workspaces view: reloading with a single workspace_id here
+    # would silently narrow the list to that workspace and make it look like the
+    # streamed thread's workspace became active.
+    if show_all_threads:
+      await load_threads()
+    else:
+      await load_threads(workspace_id)
+    if _viewing_stream_thread():
+      # User is still on this thread: keep the view in sync and re-select it so
+      # the context list highlights it correctly.
+      set_selected_thread(thread)
+      ws_key = active_chat_workspace.id if active_chat_workspace else None
+      set_thread_by_workspace({**thread_by_workspace, ws_key: thread})
+    else:
+      # Activity finished on a thread the user isn't viewing: flag it with a red
+      # dot and fire an OS notification instead of hijacking their current view.
+      _mark_thread_unread(stream_thread_id)
+      asyncio.create_task(
+        engine.show_notification(
+          "New response",
+          f"{thread.title or 'Thread'} has a new message",
+        )
+      )
+    _set_thread_streaming(stream_thread_id, False)
+    # Turn finished: drop the live buffer so future views load finalized
+    # messages from the DB (the source of truth once streaming ends).
+    live_streams_ref[0].pop(stream_thread_id, None)
 
     # Scroll the chat list to the bottom now that the full response is visible.
     # asyncio.create_task(scroll_to_end(chat_scroll_ref[0]))
@@ -1268,8 +1406,29 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     on_dismiss=close_notifications,
   )
 
+  # Titlebar indicators: the workspace the user is working in and the active
+  # model. These mirror what the chat header used to show so the context is
+  # always visible regardless of the current view.
+  # Only show the send-button spinner when the thread the user is currently
+  # viewing is the one streaming. Other threads can stream concurrently without
+  # locking this thread's input.
+  view_is_streaming = bool(selected_thread and selected_thread.id in streaming_threads)
+
+  titlebar_workspace = header_workspace.name if header_workspace else "All Workspaces"
+  titlebar_model = ""
+  if selected_model_config:
+    titlebar_model = (
+      selected_model_config.get("alias")
+      or selected_model_config.get("model")
+      or selected_model_config.get("id", "")
+    )
+
   view = [
-    TitleBar(dev=engine.config.dev),
+    TitleBar(
+      dev=engine.config.dev,
+      workspace_name=titlebar_workspace,
+      model_name=titlebar_model,
+    ),
     Frame(
       sidebar=Sidebar(
         on_workspace_click=switch_to_workspace,
@@ -1282,6 +1441,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         show_settings_badge=bool(engine.update_available) and not settings_badge_dismissed,
         on_notifications_click=open_notifications,
         active_jobs=active_jobs,
+        show_threads_badge=bool(unread_threads),
       ),
       contextlist=ContextList(
         visible=context_visible,
@@ -1303,7 +1463,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         set_selected_setting=handle_settings_click,
         show_about_badge=bool(engine.update_available) and not about_badge_dismissed,
         show_all_threads=show_all_threads,
-        on_toggle_all_threads=set_show_all_threads
+        on_toggle_all_threads=set_show_all_threads,
+        unread_threads=unread_threads,
       ),
       mainwindow=MainWindow(
         current_view=current_view,
@@ -1317,7 +1478,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         streaming_text=streaming_text,
         on_list_mounted=on_list_mounted,
         on_send_message=handle_send_message,
-        is_streaming=is_streaming,
+        is_streaming=view_is_streaming,
         settings=settings,
         on_setting_change=handle_setting_change,
         model_configs=model_configs,

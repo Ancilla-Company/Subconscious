@@ -14,6 +14,7 @@ def Sidebar(
   show_settings_badge: bool = False,
   on_notifications_click=None,
   active_jobs: int = 0,
+  show_threads_badge: bool = False,
   # Seed for the identicon — pass a username or UUID once accounts exist.
   # Defaults to a fixed string so the avatar is stable before login.
   avatar_seed: str = "subconscious-default-user",
@@ -64,7 +65,10 @@ def Sidebar(
           controls=[
             SidebarButton(ft.Icons.MENU, "Toggle Context List", "toggle", selected_view, on_context_toggle, selectable=False),
             SidebarButton(ft.Icons.FOLDER_OPEN_OUTLINED, "Workspaces", "workspaces", selected_view, on_workspace_click),
-            SidebarButton(ft.Icons.CHAT_OUTLINED, "Threads", "threads", selected_view, on_threads_click),
+            SidebarButton(
+              ft.Icons.CHAT_OUTLINED, "Threads", "threads", selected_view, on_threads_click,
+              badge=Badge() if show_threads_badge else None,
+            ),
           ],
         ),
       ),

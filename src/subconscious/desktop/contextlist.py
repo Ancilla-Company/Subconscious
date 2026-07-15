@@ -24,7 +24,8 @@ def ContextList(
   set_selected_setting=None,
   show_about_badge: bool = False,
   show_all_threads: bool = False,
-  on_toggle_all_threads=None
+  on_toggle_all_threads=None,
+  unread_threads=None,
 ) -> ft.Control:
   """ Displays a list of items for the active view (Threads, Workspaces, Settings, etc.) """
   headers = []
@@ -35,6 +36,7 @@ def ContextList(
     if threads_list:
       for thread in threads_list:
         is_selected = selected_thread and thread.id == selected_thread.id
+        has_unread = bool(unread_threads) and thread.id in unread_threads
         list_items.append(
           ContextItem(
             key=thread.id,
@@ -42,7 +44,8 @@ def ContextList(
             description=thread.description,
             updated_at=thread.updated_at,
             on_click=lambda _, t=thread: on_thread_select(t) if on_thread_select else None,
-            selected=is_selected
+            selected=is_selected,
+            badge=Badge() if has_unread else None
           )
         )
     else:

@@ -2,8 +2,9 @@ import flet as ft
 
 
 @ft.component
-def TitleBar(dev: bool = False) -> ft.Control:
-  """ Creates application title bar with drag region and window controls """
+def TitleBar(dev: bool = False, workspace_name: str = "", model_name: str = "") -> ft.Control:
+  """ Creates application title bar with drag region and window controls.
+  """
 
   # Track maximize state locally to update tooltips/icons if needed
   is_maximized, set_is_maximized = ft.use_state(False)
@@ -50,6 +51,50 @@ def TitleBar(dev: bool = False) -> ft.Control:
         margin=ft.margin.only(left=15),
         padding=ft.padding.only(7, 0, 7, 3),
         border_radius=ft.BorderRadius.all(3)
+      )
+    )
+
+  # Spacer pushes the workspace/model indicator to the right edge of the drag area.
+  title_row_controls.append(ft.Container(expand=True))
+
+  # Workspace / model indicator — shown when either value is available.
+  indicator_parts: list[ft.Control] = []
+  if workspace_name:
+    indicator_parts.append(
+      ft.Row(
+        [
+          ft.Icon(ft.Icons.FOLDER_OUTLINED, size=14, color=ft.Colors.PRIMARY),
+          ft.Text(workspace_name, size=13, color=ft.Colors.PRIMARY),
+        ],
+        spacing=5,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+      )
+    )
+  if workspace_name and model_name:
+    indicator_parts.append(
+      ft.Text("•", size=13, color=ft.Colors.PRIMARY)
+    )
+  if model_name:
+    indicator_parts.append(
+      ft.Row(
+        [
+          ft.Image(src="/ai_sparkle.svg", width=14, height=14, color=ft.Colors.PRIMARY),
+          ft.Text(model_name, size=13, color=ft.Colors.PRIMARY),
+        ],
+        spacing=5,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+      )
+    )
+
+  if indicator_parts:
+    title_row_controls.append(
+      ft.Container(
+        content=ft.Row(
+          indicator_parts,
+          spacing=8,
+          vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.only(0, 0, 14, 0),
       )
     )
 
