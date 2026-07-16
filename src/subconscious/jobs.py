@@ -54,6 +54,13 @@ class JobManager:
   def __init__(self, events: EventBus):
     self._events = events
     self._jobs: dict[str, Job] = {}
+    # The main asyncio loop, captured at engine start. Lets mutations made from
+    # worker threads (e.g. the indexing thread) still fan out live events.
+    self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+  def set_loop(self, loop: "asyncio.AbstractEventLoop") -> None:
+    """Register the main event loop so thread-safe publishing works."""
+    self._loop = loop
 
   # ------------------------------------------------------------------
   # Mutations
@@ -135,10 +142,22 @@ class JobManager:
     self._publish({"type": "job.updated", "data": job.snapshot()})
 
   def _publish(self, event: dict) -> None:
-    """Fire-and-forget publish; safe to call with no running loop."""
+    """Fire-and-forget publish; safe from the loop thread or a worker thread."""
+    # Fast path: we're on a running loop (the loop thread) → schedule directly.
     try:
       asyncio.get_running_loop()
-    except RuntimeError:
-      # No event loop (e.g. called from sync context/tests) — skip live event.
+      asyncio.create_task(self._events.publish(event))
       return
-    asyncio.create_task(self._events.publish(event))
+    except RuntimeError:
+      pass
+    # Worker-thread path: marshal onto the captured main loop, if any.
+    loop = self._loop
+    if loop is None or loop.is_closed():
+      return
+    try:
+      loop.call_soon_threadsafe(
+        lambda: asyncio.ensure_future(self._events.publish(event))
+      )
+    except RuntimeError:
+      # Loop shut down between the check and the call — drop the event.
+      pass

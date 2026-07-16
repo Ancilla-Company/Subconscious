@@ -3,6 +3,7 @@ import asyncio
 import flet as ft
 
 from .screens.chat import ChatWindow
+from .screens.thread_settings import ThreadSettings
 from ..shared.buttons import TextButton, WideTextButton
 from ..shared.forms import FormField, TextArea, CheckBox
 from ..shared.layout import ResponsiveItem, ResponsiveParent
@@ -61,7 +62,9 @@ def MainWindow(
   on_workspace_directories_change=None,
   on_open_thread_tools=None,
   on_open_thread_skills=None,
-  # Thread settings screen (name/description + tools/skills toggles)
+  # Thread settings overlay (name/description + tools/skills toggles)
+  show_thread_settings=False,
+  thread_settings_open_token=0,
   on_save_thread=None,
   on_thread_settings_back=None,
   thread_tools_config=None,
@@ -95,7 +98,13 @@ def MainWindow(
   # Choose content based on navigation state
   content = default_content
   if current_view == "threads":
-    content = ft.Container(
+    # The chat and the Thread Settings screen are both kept mounted; we just
+    # toggle which one is visible (show/hide) instead of swapping views. Only
+    # one is visible at a time, and the hidden one takes no layout space, so the
+    # chat keeps its state while we retain direct control over the view.
+    settings_visible = bool(show_thread_settings) and thread is not None
+
+    chat_layer = ft.Container(
       content=ChatWindow(
         key=f"chatwindow-{chatbox_restore_token}",
         thread=thread,
@@ -114,104 +123,33 @@ def MainWindow(
         active_workspace=active_workspace,
         on_open_thread_tools=on_open_thread_tools,
         on_open_thread_skills=on_open_thread_skills,
-      )
+      ),
+      expand=True,
+      visible=not settings_visible,
     )
-  elif current_view == "thread_settings":
-    if thread is not None:
-      ts_name, set_ts_name = ft.use_state(thread.title if thread else "")
-      ts_description, set_ts_description = ft.use_state(thread.description if thread else "")
 
-      def sync_thread_state():
-        set_ts_name(thread.title if thread and thread.title else "")
-        set_ts_description(thread.description if thread and thread.description else "")
+    settings_layer = ft.Container(
+      content=ThreadSettings(
+        thread=thread,
+        open_token=thread_settings_open_token,
+        tool_catalog=tool_catalog,
+        tool_configs=tool_configs,
+        skill_configs=skill_configs,
+        tools_config=thread_tools_config,
+        skills_config=thread_skills_config,
+        approval_config=thread_approval_config,
+        on_save=on_save_thread,
+        on_back=on_thread_settings_back,
+        on_tools_change=on_thread_tools_change,
+        on_skills_change=on_thread_skills_change,
+        on_approval_change=on_thread_approval_change,
+      ) if thread is not None else ft.Container(),
+      expand=True,
+      visible=settings_visible,
+      bgcolor=ft.Colors.SURFACE,
+    )
 
-      ft.use_effect(sync_thread_state, [thread])
-
-      def save_ts(e):
-        if on_save_thread:
-          asyncio.create_task(on_save_thread(ts_name, ts_description, thread.id))
-
-      content = ft.Container(
-        content=ResponsiveParent(
-          [
-            ResponsiveItem(
-              ft.Container(
-                ft.Row(
-                  [
-                    ft.IconButton(
-                      icon=ft.Icons.ARROW_BACK,
-                      tooltip="Back to chat",
-                      on_click=on_thread_settings_back,
-                      style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
-                    ),
-                    ft.Text(
-                      "Thread Settings",
-                      size=20,
-                      weight=ft.FontWeight.W_500,
-                      color=ft.Colors.PRIMARY,
-                      expand=True,
-                    ),
-                  ],
-                  spacing=6,
-                  vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                height=40,
-                margin=ft.margin.only(0, 4, 0, 4),
-              )
-            ),
-            ResponsiveItem(
-              FormField(
-                label="Name",
-                value=ts_name,
-                on_change=lambda e: set_ts_name(e.control.value),
-                hint="Enter a name for this thread",
-              )
-            ),
-            ResponsiveItem(
-              TextArea(
-                label="Description",
-                value=ts_description,
-                on_change=lambda e: set_ts_description(e.control.value),
-                hint="Enter a description for this thread",
-              )
-            ),
-            ResponsiveItem(
-              ToolToggleTree(
-                catalog=tool_catalog or {},
-                configured_tools=tool_configs or [],
-                config=thread_tools_config or {},
-                on_change=on_thread_tools_change,
-                approval_config=thread_approval_config or {},
-                on_approval_change=on_thread_approval_change,
-                sync_key=thread.id,
-              )
-            ),
-            ResponsiveItem(
-              SkillToggleList(
-                skills=skill_configs or [],
-                config=thread_skills_config or {},
-                on_change=on_thread_skills_change,
-                sync_key=thread.id,
-              )
-            ),
-            ResponsiveItem(
-              ft.Row(
-                [TextButton(on_click=save_ts, text="Save")],
-                wrap=True,
-                spacing=4,
-              )
-            ),
-          ]
-        ),
-        expand=True,
-        padding=ft.Padding.only(bottom=15),
-      )
-    else:
-      content = ft.Container(
-        content=ft.Text("Select a thread to configure", size=16, color=ft.Colors.GREY_500),
-        alignment=ft.Alignment.CENTER,
-        expand=True,
-      )
+    content = ft.Column([chat_layer, settings_layer], expand=True, spacing=0)
   elif current_view == "settings":
     if settings_mode == "general":
       content = ft.Container(

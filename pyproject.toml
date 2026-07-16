@@ -70,6 +70,16 @@ images = [
   "cairosvg",
   "vtracer"
 ]
+rag = [
+  # Optional accelerators for the RAG stack. The default indexer/retriever work
+  # with zero extra dependencies (stdlib sqlite3 + an offline hashing embedder
+  # + pure-Python cosine). Install these to upgrade quality/speed:
+  #   * sqlite-vec         — native vector search extension (drop-in for the
+  #                          brute-force cosine in rag/sidecar.py).
+  #   * sentence-transformers — higher-quality local embeddings.
+  "sqlite-vec",
+  "sentence-transformers"
+]
 
 [project.scripts]
 subconscious = "subconscious.cli:main"

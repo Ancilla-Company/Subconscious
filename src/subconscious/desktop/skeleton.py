@@ -137,8 +137,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ws_approval_config, set_ws_approval_config = ft.use_state({})
   # Directories attached to the workspace currently being edited
   ws_directories, set_ws_directories = ft.use_state(list())
-  # Thread settings screen: resolved effective configs for the active thread,
-  # used to seed the Tools/Skills toggles on the "Thread Settings" view.
+  # Thread settings overlay: shown on top of the chat (within the threads view)
+  # rather than as a separate current_view, so the chat stays mounted and we
+  # keep full control over showing/hiding it. `ts_*_config` seed the toggles;
+  # `ts_open_token` bumps on each open so the (kept-mounted) settings screen
+  # re-seeds its fields from the freshly resolved configs.
+  show_thread_settings, set_show_thread_settings = ft.use_state(False)
+  ts_open_token, set_ts_open_token = ft.use_state(0)
   ts_tools_config, set_ts_tools_config = ft.use_state({})
   ts_skills_config, set_ts_skills_config = ft.use_state({})
   ts_approval_config, set_ts_approval_config = ft.use_state({})
@@ -814,6 +819,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   async def handle_new_thread(e=None):
     set_selected_thread(None)
     set_messages([])
+    set_show_thread_settings(False)
     set_current_view("threads")
     set_current_context("threads")
     set_chatbox_restore_token(chatbox_restore_token + 1)
@@ -825,6 +831,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   
   async def handle_thread_click(thread):
     set_selected_thread(thread)
+    set_show_thread_settings(False)
     set_current_view("threads")
     set_chatbox_restore_token(chatbox_restore_token + 1)
     # Viewing the thread clears its unread-activity indicator.
@@ -1131,12 +1138,18 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_ts_tools_config(await engine.resolve_tools_config(ws_id, selected_thread.id))
     set_ts_skills_config(await engine.resolve_skills_config(ws_id, selected_thread.id))
     set_ts_approval_config(await engine.resolve_approval_config(ws_id, selected_thread.id))
-    set_current_view("thread_settings")
+    # Bump the open token so the settings screen re-seeds from the fresh configs,
+    # then reveal the overlay (chat stays mounted underneath).
+    set_ts_open_token(ts_open_token + 1)
+    set_show_thread_settings(True)
 
-  def handle_thread_settings_back(e=None):
-    """Return from the Thread Settings screen to the chat view."""
-    set_current_view("threads")
-    asyncio.create_task(engine.save_ui_state("ui_current_view", "threads"))
+  async def handle_thread_settings_back(e=None):
+    """Hide the Thread Settings overlay and return to the chat view.
+
+    Async to match the (working) open handler. Controls are frozen in this Flet
+    build, so the only way to change the view is via state → re-render.
+    """
+    set_show_thread_settings(False)
 
   async def handle_save_thread(name, description, thread_id):
     """Persist the thread's name/description then refresh the list + selection."""
@@ -1241,6 +1254,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
 
   async def switch_to_threads(e=None):
     set_context_visible(True)
+    set_show_thread_settings(False)
     set_current_view("threads")
     set_current_context("threads")
     set_chatbox_restore_token(chatbox_restore_token + 1)
@@ -1495,6 +1509,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_workspace_directories_change=handle_workspace_directories_change,
         on_open_thread_tools=handle_open_thread_settings,
         on_open_thread_skills=handle_open_thread_settings,
+        show_thread_settings=show_thread_settings,
+        thread_settings_open_token=ts_open_token,
         on_save_thread=handle_save_thread,
         on_thread_settings_back=handle_thread_settings_back,
         thread_tools_config=ts_tools_config,

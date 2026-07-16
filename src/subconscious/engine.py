@@ -9,6 +9,7 @@ import zipfile
 import asyncio
 import logging
 import pathlib
+import threading
 import docx as _docx
 import pypdf as _pypdf
 import openpyxl as _openpyxl
@@ -31,6 +32,8 @@ from .api import APIService
 from .events import EventBus
 from .jobs import JobManager
 from .indexing import WorkspaceIndexer
+from .rag import WorkspaceRetriever, SidecarStore, get_default_embedder
+from .rag import graph as kg
 from .constants import VERSION
 from .db.session import Database
 from .agent import AgentManager, EchoProvider
@@ -43,7 +46,6 @@ from .desktop_tools import ToolRegistry, EngineContext
 from .db.models import (
   Workspace, Thread, Message, AppState, Networks,
   SkillRegistry, ToolRegistry as ToolRegistryModel,
-  IndexedDocument, DocumentChunk,
 )
 
 
@@ -80,6 +82,14 @@ class Engine:
     self._approval_inbox: dict = {}
     # Background job registry (indexing, etc.) with EventBus fan-out for the UI.
     self.jobs = JobManager(self.events)
+    # Main event loop, captured at start_engine so worker threads (indexing)
+    # can marshal callbacks/notifications back onto it.
+    self._loop: Optional[asyncio.AbstractEventLoop] = None
+    # Cooperative-cancel events for running index jobs, keyed by job id, plus
+    # a map of workspace_id → active index job id so a new re-index of the same
+    # workspace supersedes an in-flight one instead of racing it on the sidecar.
+    self._index_cancels: dict[str, threading.Event] = {}
+    self._index_active: dict[int, str] = {}
 
   def register_setting_callback(self, key: str, callback) -> None:
     """ Register an async callback to be invoked when *key* is updated via update_setting """
@@ -245,6 +255,12 @@ class Engine:
     self.config = config
     self.config.load()
 
+    # Capture the running loop so worker threads (e.g. indexing) can marshal
+    # progress events and notifications back onto it, and let the job manager
+    # publish live updates from those threads.
+    self._loop = asyncio.get_running_loop()
+    self.jobs.set_loop(self._loop)
+
     # Init the database
     self.db = Database(config)
     await self.db.init_models()
@@ -267,8 +283,14 @@ class Engine:
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
 
-    # Workspace directory indexer (RAG ingestion) — runs work as background jobs.
-    self.indexer = WorkspaceIndexer(self.db, self.jobs)
+    # Workspace directory indexer (RAG ingestion). Indexing runs synchronously
+    # inside a worker thread (see reindex_workspace) writing to per-directory
+    # sidecar stores, so the event loop / UI is never blocked. Retrieval fans
+    # out across those sidecars.
+    self.embedder = get_default_embedder()
+    cache_dir = str(self.config.data_dir)
+    self.indexer = WorkspaceIndexer(self.embedder, cache_dir=cache_dir)
+    self.retriever = WorkspaceRetriever(self.embedder, cache_dir=cache_dir)
 
     # Start the API background service
     self.api_service = APIService(self, self.config, preferred_port=8771)
@@ -857,74 +879,224 @@ class Engine:
       return self._parse_json_list(ws.directories) if ws else []
 
   async def set_workspace_directories(self, workspace_id: int, directories: list) -> None:
-    """Persist the list of directory paths attached to a workspace."""
+    """Persist the attached directory list; sever sidecars for detached dirs.
+
+    When a directory is removed from the workspace its per-directory sidecar
+    store (``<dir>/.subconscious/<workspace_uuid>/``) is deleted so its indexed
+    documents, chunks and knowledge graph are cleanly discarded with it.
+    """
+    workspace_uuid: Optional[str] = None
     async with self.db.get_session() as session:
       ws = await session.get(Workspace, workspace_id)
       if ws:
+        old_dirs = self._parse_json_list(ws.directories)
+        workspace_uuid = ws.uuid
         ws.directories = json.dumps(directories)
         await session.commit()
+      else:
+        return
+
+    removed = [d for d in old_dirs if d not in set(directories)]
+    if removed and workspace_uuid:
+      cache_dir = str(self.config.data_dir)
+      def _destroy():
+        for d in removed:
+          try:
+            SidecarStore.destroy(pathlib.Path(d), workspace_uuid, cache_dir=cache_dir)
+          except Exception as exc:
+            logger.warning("Failed to remove sidecar for detached dir %s: %s", d, exc)
+      # Filesystem work off the event loop.
+      loop = self._loop or asyncio.get_event_loop()
+      await loop.run_in_executor(None, _destroy)
+
+  async def _get_workspace_uuid(self, workspace_id: int) -> Optional[str]:
+    """Return the workspace's uuid (used to scope per-directory sidecars)."""
+    if not workspace_id:
+      return None
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return ws.uuid if ws else None
 
   # ------------------------------------------------------------------
   # Retrieval (RAG) — directory indexing + search
   # ------------------------------------------------------------------
 
   def reindex_workspace(self, workspace_id: int, workspace_name: str = "workspace") -> Optional[str]:
-    """Kick off (as a background job) an incremental re-index of a workspace's
-    attached directories. Returns the job id, or None when nothing to index.
+    """Kick off an incremental re-index of a workspace's attached directories.
+
+    The heavy work (walk, extract, hash, chunk, embed, KG, SQLite writes) runs
+    synchronously inside a worker thread via ``run_in_executor`` so the event
+    loop — and the UI's rendering — is never blocked. Returns the job id.
+
+    A re-index of a workspace that is already indexing supersedes the in-flight
+    one (its cancel event is set) to avoid two threads writing the same sidecar.
     """
     indexer = getattr(self, "indexer", None)
     if indexer is None:
       return None
 
+    # Supersede any in-flight index for this workspace.
+    prev_job_id = self._index_active.get(workspace_id)
+    if prev_job_id and prev_job_id in self._index_cancels:
+      self._index_cancels[prev_job_id].set()
+
     job = self.jobs.create("index", f"Indexing {workspace_name}")
+    cancel = threading.Event()
+    self._index_cancels[job.id] = cancel
+    self._index_active[workspace_id] = job.id
+    loop = self._loop or asyncio.get_event_loop()
 
     async def _run():
       try:
+        workspace_uuid = await self._get_workspace_uuid(workspace_id)
+        if not workspace_uuid:
+          self.jobs.fail(job, "Workspace not found")
+          return
         directories = await self.get_workspace_directories(workspace_id)
-        # Run even with no directories: the indexer prunes documents whose
-        # source directory was detached.
-        await indexer.reindex(workspace_id, directories, job)
-        self.jobs.complete(job, job.message or "Indexing complete")
-        await self.show_notification(
-          "Indexing complete", f"{workspace_name}: {job.message or 'done'}"
+
+        def _progress(current: int, total: int, message: str) -> None:
+          # Called from the worker thread; JobManager marshals the event.
+          self.jobs.update(job, current=current, total=total, message=message)
+
+        summary = await loop.run_in_executor(
+          None, indexer.reindex_sync, workspace_uuid, directories, cancel, _progress
         )
+
+        if summary.get("cancelled"):
+          self.jobs.update(job, message="Indexing superseded")
+          # A newer job took over; leave its state alone.
+          return
+        msg = f"Indexed {summary['indexed']} of {summary['total']} files"
+        self.jobs.complete(job, msg)
+        await self.show_notification("Indexing complete", f"{workspace_name}: {msg}")
       except Exception as exc:
         logger.error(f"Workspace indexing failed ({workspace_id}): {exc}")
         self.jobs.fail(job, str(exc))
         await self.show_notification("Indexing failed", str(exc))
+      finally:
+        self._index_cancels.pop(job.id, None)
+        if self._index_active.get(workspace_id) == job.id:
+          self._index_active.pop(workspace_id, None)
 
     asyncio.create_task(_run())
     return job.id
 
-  async def search_workspace(self, workspace_id: int, query: str, limit: int = 8) -> list[dict]:
+  async def search_workspace(
+    self, workspace_id: int, query: str, limit: int = 8, mode: str = "hybrid"
+  ) -> list[dict]:
     """Retrieve the most relevant indexed chunks for *query* within a workspace.
 
-    Baseline keyword retrieval over the chunk store. Phase 2 replaces this with
-    a vector similarity query once ``DocumentChunk.embedding`` is populated.
+    Hybrid keyword + vector retrieval fanned out across every attached
+    directory's sidecar store. Runs in a worker thread (sync SQLite) so the
+    loop stays free. *mode* ∈ {"keyword", "vector", "hybrid"}.
     """
     if not query or not query.strip() or not workspace_id:
       return []
-    like = f"%{query.strip()}%"
-    async with self.db.get_session() as session:
-      rows = await session.scalars(
-        select(DocumentChunk)
-        .where(
-          DocumentChunk.workspace_id == workspace_id,
-          DocumentChunk.content.like(like),
+    workspace_uuid = await self._get_workspace_uuid(workspace_id)
+    if not workspace_uuid:
+      return []
+    directories = await self.get_workspace_directories(workspace_id)
+    if not directories:
+      return []
+    loop = self._loop or asyncio.get_event_loop()
+    return await loop.run_in_executor(
+      None, self.retriever.search, workspace_uuid, directories, query, limit, mode
+    )
+
+  async def graph_search_workspace(
+    self, workspace_id: int, query: str, limit: int = 6
+  ) -> dict:
+    """GraphRAG retrieval: seed with hybrid search, then expand along the
+    knowledge graph to gather connected context. Returns
+    ``{"seeds", "related", "graph"}``.
+    """
+    empty = {"seeds": [], "related": [], "graph": {"nodes": [], "edges": []}}
+    if not query or not query.strip() or not workspace_id:
+      return empty
+    workspace_uuid = await self._get_workspace_uuid(workspace_id)
+    if not workspace_uuid:
+      return empty
+    directories = await self.get_workspace_directories(workspace_id)
+    if not directories:
+      return empty
+    loop = self._loop or asyncio.get_event_loop()
+    return await loop.run_in_executor(
+      None, self.retriever.graph_search, workspace_uuid, directories, query, limit
+    )
+
+  async def build_semantic_graph(
+    self,
+    workspace_id: int,
+    max_chunks: int = 100,
+    model_cfg: Optional[dict] = None,
+  ) -> dict:
+    """Tier-2 knowledge graph: use the LLM to extract semantic triples from
+    indexed chunks that haven't been processed yet, writing them back into each
+    directory's sidecar with chunk-level provenance.
+
+    This is opt-in (not run during normal indexing) because it costs model
+    calls. It processes at most *max_chunks* pending chunks per call and can be
+    invoked repeatedly to work through a large corpus incrementally.
+    """
+    result = {"processed": 0, "triples": 0, "chunks": 0}
+    if not workspace_id:
+      return result
+    workspace_uuid = await self._get_workspace_uuid(workspace_id)
+    if not workspace_uuid:
+      return result
+    directories = await self.get_workspace_directories(workspace_id)
+    if not directories:
+      return result
+
+    model_cfg = model_cfg or self.agent_manager.get_best_model_cfg()
+    if model_cfg is None:
+      raise ValueError("No model configured for semantic graph extraction.")
+    agent = self.agent_manager.build_agent(
+      model_cfg, tools=None, ambient_context=kg.SEMANTIC_SYSTEM_PROMPT
+    )
+
+    loop = self._loop or asyncio.get_event_loop()
+    remaining = max_chunks
+
+    for d in directories:
+      if remaining <= 0:
+        break
+      root = pathlib.Path(d)
+
+      # Open the sidecar (read pending chunks) in the executor.
+      def _open():
+        return SidecarStore.open(
+          root, workspace_uuid, self.embedder.name, str(self.config.data_dir)
         )
-        .limit(limit)
-      )
-      chunks = rows.all()
-      results: list[dict] = []
-      for c in chunks:
-        doc = await session.get(IndexedDocument, c.document_id)
-        results.append({
-          "path": doc.path if doc else "",
-          "start_line": c.start_line,
-          "end_line": c.end_line,
-          "content": c.content,
-        })
-      return results
+      store = await loop.run_in_executor(None, _open)
+      try:
+        pending = await loop.run_in_executor(
+          None, store.pending_semantic_chunks, remaining
+        )
+        for row in pending:
+          chunk_id = row["id"]
+          document_id = row["document_id"]
+          content = row["content"]
+          try:
+            run = await agent.run(kg.build_semantic_prompt(content))
+            raw = str(getattr(run, "output", "") or "")
+          except Exception as exc:
+            logger.debug("Semantic extraction failed for chunk %s: %s", chunk_id, exc)
+            raw = ""
+          triples = kg.parse_semantic_triples(raw, document_id, chunk_id)
+          if triples:
+            await loop.run_in_executor(None, store.add_triples, triples)
+            result["triples"] += len(triples)
+          await loop.run_in_executor(None, store.mark_semantic_done, [chunk_id])
+          result["chunks"] += 1
+          remaining -= 1
+          if remaining <= 0:
+            break
+        result["processed"] += 1
+      finally:
+        await loop.run_in_executor(None, store.close)
+
+    return result
 
   async def get_workspace_tools_config(self, workspace_id: int) -> dict:
     """Return the persisted tools_config for a workspace ({} if unset)."""
@@ -1143,6 +1315,11 @@ class Engine:
 
   async def stop_engine(self):
     """ Cleanup engine resources """
+    # Signal any running index worker threads to stop between files so their
+    # executor threads unwind promptly instead of hanging shutdown.
+    for cancel in list(self._index_cancels.values()):
+      cancel.set()
+
     # Stop the API service first so no new requests arrive during teardown.
     service = getattr(self, "api_service", None)
     if service is not None:

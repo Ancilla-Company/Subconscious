@@ -59,6 +59,8 @@ _QUERY_TOOLS = frozenset({
   "list_contacts", "find_contact",
   # web
   "fetch_page", "search_web", "check_connectivity", "speed_test",
+  # knowledge retrieval (RAG / GraphRAG) — read-only
+  "search_knowledge", "search_knowledge_graph",
   # terminal reads
   "get_env_var", "get_system_info",
   # settings reads
@@ -139,7 +141,7 @@ class BaseToolRegistry:
   def _load_base_tools(self):
     """Load tools that are safe on every platform (no OS/desktop APIs)."""
     from . import time_tools, calculator, weather
-    from . import todo, memory, notes, contacts
+    from . import todo, memory, notes, contacts, knowledge
 
     modules = {
       "time":       time_tools,
@@ -149,6 +151,7 @@ class BaseToolRegistry:
       "memory":     memory,
       "notes":      notes,
       "contacts":   contacts,
+      "knowledge":  knowledge,
     }
 
     for slug, module in modules.items():
