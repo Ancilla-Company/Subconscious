@@ -1,24 +1,4 @@
-""" Per-directory sidecar store.
-
-Each attached directory gets its own self-contained SQLite database at::
-
-    <attached_dir>/.subconscious/<workspace_uuid>/index.db
-
-It holds everything needed to search that directory for one workspace:
-documents, chunks, chunk vectors, and a knowledge graph (nodes + edges). Because
-the store lives *inside* the directory and is scoped by workspace uuid,
-detaching the directory from a workspace is a clean ``rmtree`` of one folder —
-no orphaned rows in a central database, and a directory shared by two
-workspaces keeps two independent, non-interfering stores.
-
-All access here is synchronous ``sqlite3`` so it can run inside the indexing
-worker thread without touching the asyncio event loop. Connections are opened
-with ``check_same_thread=False`` and guarded by a lock so a store may be handed
-between the indexing thread and a search executor thread safely.
-
-Paths are stored *relative* to the directory root so a store stays valid if the
-directory is moved.
-"""
+""" Per-directory sidecar store """
 from __future__ import annotations
 
 import os

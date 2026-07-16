@@ -27,8 +27,7 @@ def Sidebar(
       "notifications",
       selected_view,
       on_notifications_click,
-      selectable=False,
-      badge=ft.Badge(text=str(active_jobs)) if active_jobs > 0 else None,
+      selectable=False
     ),
     SidebarButton(
       ft.Icons.SETTINGS_OUTLINED,
@@ -36,7 +35,7 @@ def Sidebar(
       "settings",
       selected_view,
       on_settings_click,
-      badge=ft.Badge() if show_settings_badge else None,
+      badge=Badge() if show_settings_badge else None,
     ),
   ]
 

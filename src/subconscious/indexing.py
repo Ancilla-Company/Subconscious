@@ -1,16 +1,4 @@
-""" Workspace directory indexing for retrieval (RAG).
-
-The indexer walks a workspace's attached directories and ingests indexable
-files into a per-directory sidecar store
-(``<dir>/.subconscious/<workspace_uuid>/index.db``). For each file it extracts
-text, splits it into overlapping chunks, computes an embedding per chunk, and
-extracts a structural knowledge graph (imports / definitions).
-
-Everything here is **synchronous** and designed to run inside a worker thread
-(see :meth:`Engine.reindex_workspace`) so the asyncio event loop — and therefore
-the desktop UI's rendering — is never blocked by file I/O, PDF/Office parsing,
-hashing, or SQLite writes.
-"""
+""" Workspace directory indexing for retrieval (RAG) """
 from __future__ import annotations
 
 import os
@@ -20,11 +8,13 @@ import pathlib
 import threading
 from typing import Callable, Optional
 
-from .rag.sidecar import SidecarStore, SIDECAR_DIRNAME
-from .rag.embeddings import Embedder, pack_vector, get_default_embedder
 from .rag import graph as kg
+from .rag.sidecar import SidecarStore, SIDECAR_DIRNAME
+from .rag.ignore import IgnoreMatcher, IGNORE_FILENAME
+from .rag.embeddings import Embedder, pack_vector, get_default_embedder
 
 
+# Logging and ENV config
 logger = logging.getLogger("subconscious")
 
 
@@ -48,12 +38,14 @@ _CHUNK_OVERLAP = 200         # overlap between consecutive chunks
 _MAX_FILE_BYTES = 20_000_000  # skip files larger than 20 MB
 _HASH_LIMIT = 5_000_000       # only content-hash files up to 5 MB; larger rely on size+mtime
 
+_LOG_EVERY = 25               # emit a debug progress tally every N files
+
 
 ProgressCb = Callable[[int, int, str], None]
 
 
 class WorkspaceIndexer:
-  """Ingests workspace directories into per-directory sidecar stores."""
+  """ Ingests workspace directories into per-directory sidecar stores """
 
   def __init__(self, embedder: Optional[Embedder] = None, cache_dir: Optional[str] = None):
     self.embedder = embedder or get_default_embedder()
@@ -64,7 +56,6 @@ class WorkspaceIndexer:
   # ------------------------------------------------------------------
   # Public (synchronous — run me in a worker thread)
   # ------------------------------------------------------------------
-
   def reindex_sync(
     self,
     workspace_uuid: str,
@@ -72,23 +63,30 @@ class WorkspaceIndexer:
     cancel: Optional[threading.Event] = None,
     progress: Optional[ProgressCb] = None,
   ) -> dict:
-    """Incrementally (re)index every indexable file under *directories*.
-
-    Runs synchronously; safe to call via ``loop.run_in_executor``. Honors the
-    *cancel* event between files and reports via the *progress* callback.
-    """
+    """ Incrementally (re)index every indexable file under *directories* """
     cancel = cancel or threading.Event()
+
+    logger.debug(
+      "Indexing started for workspace %s across %d director%s: %s",
+      workspace_uuid, len(directories), "y" if len(directories) == 1 else "ies",
+      ", ".join(directories) if directories else "(none)",
+    )
 
     # Collect the full work list first so progress totals are accurate.
     tasks: list[tuple[pathlib.Path, pathlib.Path]] = []
     for d in directories:
       root = pathlib.Path(d)
       if not root.exists() or not root.is_dir():
+        logger.debug("Skipping missing/invalid directory: %s", d)
         continue
-      for p in self._walk(root):
+      matcher = self._base_ignore_matcher()
+      before = len(tasks)
+      for p in self._walk(root, matcher):
         tasks.append((root, p))
+      logger.debug("Discovered %d indexable file(s) under %s", len(tasks) - before, d)
 
     total = len(tasks)
+    logger.debug("Indexing %d candidate file(s) total", total)
     if progress:
       progress(0, total, f"Found {total} files")
 
@@ -129,8 +127,15 @@ class WorkspaceIndexer:
             store.mark_error(rel, str(exc))
           except Exception:
             pass
+
+        processed = i + 1
+        if processed % _LOG_EVERY == 0:
+          logger.debug(
+            "Indexing progress: %d/%d files scanned (%d (re)indexed)",
+            processed, total, indexed,
+          )
         if progress:
-          progress(i + 1, total, p.name)
+          progress(processed, total, p.name)
 
       # Prune documents whose files were removed (only for fully-scanned roots).
       if not cancel.is_set():
@@ -143,18 +148,52 @@ class WorkspaceIndexer:
           store.close()
 
     summary = {"indexed": indexed, "total": total, "cancelled": cancel.is_set()}
+    logger.debug(
+      "Indexing %s: %d/%d files (re)indexed for workspace %s",
+      "cancelled" if summary["cancelled"] else "complete",
+      indexed, total, workspace_uuid,
+    )
     return summary
 
   # ------------------------------------------------------------------
   # Walking & filtering
   # ------------------------------------------------------------------
 
-  def _walk(self, root: pathlib.Path):
-    """Yield indexable files under *root*, skipping noise directories."""
+  def _base_ignore_matcher(self) -> IgnoreMatcher:
+    """Seed a matcher with the global ignore file (per-directory files are
+    layered in during the walk)."""
+    matcher = IgnoreMatcher()
+    if self.cache_dir:
+      matcher.add_file(pathlib.Path(self.cache_dir) / IGNORE_FILENAME, base="")
+    return matcher
+
+  def _walk(self, root: pathlib.Path, matcher: IgnoreMatcher):
+    """Yield indexable files under *root*, honouring built-in skips and any
+    ``.subconsciousignore`` files (which cascade to their subtree)."""
     for dirpath, dirnames, filenames in os.walk(root):
-      # Prune skip dirs in-place so os.walk doesn't descend into them.
-      dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+      rel_dir = os.path.relpath(dirpath, root)
+      rel_dir = "" if rel_dir == "." else rel_dir.replace("\\", "/")
+
+      # Layer in this directory's ignore file (applies to it and its subtree).
+      ignore_file = pathlib.Path(dirpath) / IGNORE_FILENAME
+      if ignore_file.is_file():
+        matcher.add_file(ignore_file, base=rel_dir)
+
+      # Prune directories in-place: built-in noise dirs + ignore rules.
+      kept: list[str] = []
+      for d in dirnames:
+        if d in _SKIP_DIRS:
+          continue
+        child_rel = f"{rel_dir}/{d}" if rel_dir else d
+        if matcher.is_ignored(child_rel, is_dir=True):
+          continue
+        kept.append(d)
+      dirnames[:] = kept
+
       for name in filenames:
+        file_rel = f"{rel_dir}/{name}" if rel_dir else name
+        if matcher.is_ignored(file_rel, is_dir=False):
+          continue
         p = pathlib.Path(dirpath) / name
         if self._is_indexable(p):
           yield p

@@ -64,12 +64,7 @@ class SystemProfile:
 
 
 class SystemInformationService:
-  """ Collects, persists, and formats host system capability information.
-
-      The service is self-contained: it depends only on the standard library, an
-      optional ``psutil`` inspection library, and a ``data_dir`` path that locates
-      the ``System_Info_File``. It performs no DB or network access.
-  """
+  """ Collects, persists, and formats host system capability information  """
 
   def __init__(self, data_dir: str) -> None:
     """Store ``data_dir``, compute the ``System_Info_File`` path

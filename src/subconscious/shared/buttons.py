@@ -294,9 +294,10 @@ def WideTextButton(label, on_click) -> ft.Control:
     ]
   )
 
-def Badge() -> ft.Badge:
+def Badge(label=None) -> ft.Badge:
   """ Returns a standard badge for buttons """
   return ft.Badge(
+    label=label,
     small_size=10,
     alignment=ft.Alignment.TOP_RIGHT
   )

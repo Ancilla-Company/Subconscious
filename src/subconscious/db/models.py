@@ -48,6 +48,7 @@ class Workspace(Base):
   skills_config = Column(Text, nullable=True)
   directories = Column(Text, nullable=True)   # JSON list of absolute directory paths attached to the workspace
   approval_config = Column(Text, nullable=True)  # JSON {"query": bool, "mutation": bool} — HITL approval policy
+  rag_config = Column(Text, nullable=True)  # JSON {"semantic_graph": bool} — RAG/indexing options
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
   created_at = Column(DateTime, default=datetime.now)
 

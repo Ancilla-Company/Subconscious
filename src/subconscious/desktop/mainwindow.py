@@ -60,6 +60,10 @@ def MainWindow(
   on_workspace_approval_change=None,
   workspace_directories=None,
   on_workspace_directories_change=None,
+  on_workspace_directory_refresh=None,
+  on_workspace_directory_remove=None,
+  workspace_semantic_graph=False,
+  on_workspace_semantic_graph_change=None,
   on_open_thread_tools=None,
   on_open_thread_skills=None,
   # Thread settings overlay (name/description + tools/skills toggles)
@@ -275,9 +279,17 @@ def MainWindow(
         asyncio.create_task(_pick())
 
       def remove_directory(path):
+        # Prefer the confirm-gated remove handler; fall back to direct removal.
+        if on_workspace_directory_remove:
+          on_workspace_directory_remove(path)
+          return
         current = [d for d in (workspace_directories or []) if d != path]
         if on_workspace_directories_change:
           on_workspace_directories_change(current)
+
+      def refresh_directory(path):
+        if on_workspace_directory_refresh:
+          on_workspace_directory_refresh(path)
 
       def directory_row(path: str) -> ft.Control:
         return ft.Container(
@@ -294,7 +306,18 @@ def MainWindow(
                   color=ft.Colors.PRIMARY,
                   overflow=ft.TextOverflow.ELLIPSIS,
                 ),
-                expand=True
+                expand=True,
+                padding=ft.Padding.only(left=5)
+              ),
+              ft.IconButton(
+                icon=ft.Icons.REFRESH,
+                icon_size=16,
+                height=40,
+                width=40,
+                padding=0,
+                tooltip="Refresh index for this directory",
+                on_click=lambda e, p=path: refresh_directory(p),
+                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
               ),
               ft.IconButton(
                 icon=ft.Icons.CLOSE,
@@ -307,13 +330,17 @@ def MainWindow(
                 style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3)),
               ),
             ],
-            spacing=8,
+            spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.CENTER
           ),
           padding=ft.padding.only(10, 0, 0, 0),
           border_radius=ft.BorderRadius(3, 3, 3, 3),
           bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST
         )
+
+      def toggle_semantic_graph(e):
+        if on_workspace_semantic_graph_change:
+          on_workspace_semantic_graph_change(bool(e.control.value))
 
       directories_section = ft.Column(
         [
@@ -332,7 +359,32 @@ def MainWindow(
           ft.Column(
             [directory_row(d) for d in (workspace_directories or [])],
             spacing=4,
-          )
+          ),
+          ft.Container(
+            content=ft.Row(
+              [
+                ft.Column(
+                  [
+                    ft.Text("Build knowledge graph", size=14, color=ft.Colors.PRIMARY),
+                    ft.Text(
+                      "Use the model to extract entity relationships while indexing "
+                      "(improves graph search over documents; uses model calls).",
+                      size=11,
+                      color=ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                  ],
+                  spacing=2,
+                  expand=True,
+                ),
+                ft.Switch(
+                  value=bool(workspace_semantic_graph),
+                  on_change=toggle_semantic_graph,
+                ),
+              ],
+              vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.only(2, 8, 2, 0),
+          ),
         ],
         spacing=4
       )

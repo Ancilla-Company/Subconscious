@@ -60,6 +60,7 @@ def ModelPanel(
   api_key, set_api_key     = ft.use_state(model.get("api_key", ""))
   alias, set_alias         = ft.use_state(model.get("alias", ""))
   base_url, set_base_url   = ft.use_state(model.get("base_url", ""))
+  context_window, set_context_window = ft.use_state(str(model.get("context_window", "") or ""))
 
   # Dirty flag — True once any field differs from the persisted values
   dirty, set_dirty = ft.use_state(False)
@@ -75,6 +76,7 @@ def ModelPanel(
     set_api_key(model.get("api_key", ""))
     set_alias(model.get("alias", ""))
     set_base_url(model.get("base_url", ""))
+    set_context_window(str(model.get("context_window", "") or ""))
     set_dirty(False)
     set_synced_id(model_id)
 
@@ -103,6 +105,10 @@ def ModelPanel(
     set_base_url(e.control.value)
     set_dirty(True)
 
+  def handle_context_window_change(e):
+    set_context_window(e.control.value)
+    set_dirty(True)
+
   def handle_save(e):
     if on_save:
       asyncio.create_task(on_save({
@@ -112,6 +118,7 @@ def ModelPanel(
         "api_key": api_key,
         "alias": alias,
         "base_url": base_url,
+        "context_window": context_window,
       }))
     set_dirty(False)
 
@@ -175,6 +182,12 @@ def ModelPanel(
         value=alias,
         on_change=handle_alias_change,
         hint="Enter a memorable name for this configuration"
+      ),
+      FormField(
+        label="Context window (tokens)",
+        value=context_window,
+        on_change=handle_context_window_change,
+        hint="Max context tokens for this model (default 8192). Lower it if you hit context-limit errors.",
       ),
       ft.Row(
         [

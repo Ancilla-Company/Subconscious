@@ -137,6 +137,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ws_approval_config, set_ws_approval_config = ft.use_state({})
   # Directories attached to the workspace currently being edited
   ws_directories, set_ws_directories = ft.use_state(list())
+  # Whether the workspace builds a semantic knowledge graph while indexing
+  ws_semantic_graph, set_ws_semantic_graph = ft.use_state(False)
   # Thread settings overlay: shown on top of the chat (within the threads view)
   # rather than as a separate current_view, so the chat stays mounted and we
   # keep full control over showing/hiding it. `ts_*_config` seed the toggles;
@@ -365,6 +367,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
           set_ws_skills_config(Engine._parse_json_config(getattr(workspace_obj, "skills_config", None)))
           set_ws_approval_config(Engine._parse_json_config(getattr(workspace_obj, "approval_config", None)))
           set_ws_directories(Engine._parse_json_list(getattr(workspace_obj, "directories", None)))
+          set_ws_semantic_graph(
+            Engine._normalize_rag_config(
+              Engine._parse_json_config(getattr(workspace_obj, "rag_config", None))
+            )["semantic_graph"]
+          )
     
     # --- Selected account ---
 
@@ -745,25 +752,21 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ft.use_effect(on_mount, [])
 
   def subscribe_jobs():
-    """Subscribe to the engine EventBus and mirror background job state into the
-    UI so the notifications popup updates live as jobs progress."""
-    queue = engine.events.subscribe()
+    """ Mirror background job state into the UI via a direct JobManager listener """
     set_jobs(engine.jobs.list())
 
-    async def _consume():
-      try:
-        while True:
-          event = await queue.get()
-          if str(event.get("type", "")).startswith("job."):
-            set_jobs(engine.jobs.list())
-      except asyncio.CancelledError:
-        pass
+    async def _refresh_jobs():
+      # Runs inside the Flet page context so the state setter is valid.
+      set_jobs(engine.jobs.list())
 
-    task = asyncio.create_task(_consume())
+    def _on_job_change(_data=None):
+      # Job mutations can originate off the UI (indexing worker thread, engine
+      page.run_task(_refresh_jobs)
+
+    engine.jobs.add_listener(_on_job_change)
 
     def cleanup():
-      engine.events.unsubscribe(queue)
-      task.cancel()
+      engine.jobs.remove_listener(_on_job_change)
 
     return cleanup
 
@@ -789,6 +792,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_ws_skills_config({})
     set_ws_approval_config({})
     set_ws_directories([])
+    set_ws_semantic_graph(False)
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", ""))
@@ -804,6 +808,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_ws_skills_config(Engine._parse_json_config(getattr(workspace, "skills_config", None)))
     set_ws_approval_config(Engine._parse_json_config(getattr(workspace, "approval_config", None)))
     set_ws_directories(Engine._parse_json_list(getattr(workspace, "directories", None)))
+    set_ws_semantic_graph(
+      Engine._normalize_rag_config(
+        Engine._parse_json_config(getattr(workspace, "rag_config", None))
+      )["semantic_graph"]
+    )
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
@@ -1128,6 +1137,66 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     # Kick off a background re-index so new directory contents become searchable
     # (and removed directories get pruned). Progress shows in the notifications popup.
     engine.reindex_workspace(editing_workspace.id, editing_workspace.name)
+
+  def handle_workspace_semantic_graph_change(enabled):
+    """Persist the workspace's semantic-graph toggle. When enabled, a build is
+    kicked off now; when disabled, the graph is simply never (re)built."""
+    if not editing_workspace:
+      return
+    set_ws_semantic_graph(bool(enabled))
+    asyncio.create_task(
+      engine.set_workspace_rag_config(editing_workspace.id, {"semantic_graph": bool(enabled)})
+    )
+    if enabled:
+      # Build over already-indexed content immediately (gated internally too).
+      asyncio.create_task(
+        engine._run_semantic_graph_job(editing_workspace.id, editing_workspace.name)
+      )
+
+  def handle_workspace_directory_refresh(path):
+    """Refresh (incrementally re-index) a single attached directory. Also
+    (re)builds its sidecar if one doesn't exist yet."""
+    if not editing_workspace:
+      return
+    engine.reindex_workspace(editing_workspace.id, editing_workspace.name, directories=[path])
+
+  def handle_workspace_directory_remove(path):
+    """Confirm before detaching a directory (its index data is deleted with it)."""
+    if not editing_workspace:
+      return
+
+    def close_dlg(e=None):
+      dlg.open = False
+      page.update()
+
+    def do_remove(e):
+      close_dlg()
+      current = [d for d in (ws_directories or []) if d != path]
+      handle_workspace_directories_change(current)
+
+    dlg = ft.AlertDialog(
+      modal=True,
+      title=ft.Text("Remove Directory"),
+      content=ft.Text(
+        "Remove this directory from the workspace? Its indexed data "
+        f"(documents, chunks, knowledge graph) will be deleted.\n\n{path}"
+      ),
+      actions=[
+        ft.TextButton(
+          "Remove", on_click=do_remove,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+        ft.TextButton(
+          "Cancel", on_click=close_dlg,
+          style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=3))
+        ),
+      ],
+      actions_alignment=ft.MainAxisAlignment.END,
+      shape=ft.RoundedRectangleBorder(radius=3),
+    )
+    page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
 
   async def handle_open_thread_settings(e=None):
     """Resolve the active thread's tool/skill/approval configs and open the
@@ -1507,6 +1576,10 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         workspace_approval_config=ws_approval_config,
         on_workspace_approval_change=handle_workspace_approval_change,
         on_workspace_directories_change=handle_workspace_directories_change,
+        on_workspace_directory_refresh=handle_workspace_directory_refresh,
+        on_workspace_directory_remove=handle_workspace_directory_remove,
+        workspace_semantic_graph=ws_semantic_graph,
+        on_workspace_semantic_graph_change=handle_workspace_semantic_graph_change,
         on_open_thread_tools=handle_open_thread_settings,
         on_open_thread_skills=handle_open_thread_settings,
         show_thread_settings=show_thread_settings,

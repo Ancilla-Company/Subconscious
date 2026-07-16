@@ -1,24 +1,19 @@
-""" In-process background job registry.
-
-    Long-running, non-chat operations (directory indexing, future sync, bulk
-    imports, etc.) are tracked here so the UI can show what's happening in the
-    background. Every state change is published on the shared EventBus as a
-    ``job.updated`` event so the desktop UI (and any other subscriber) can
-    reflect progress live without polling.
-"""
+""" In-process background job registry """
 from __future__ import annotations
 
 import time
 import uuid
 import asyncio
 import logging
+from typing import Callable, Optional
 from dataclasses import dataclass, field, asdict
-from typing import Optional
-
-from .events import EventBus
 
 
 logger = logging.getLogger("subconscious")
+
+# A job listener receives the changed job's snapshot (or None for bulk changes
+# like clear_finished). It should be cheap and non-blocking.
+JobListener = Callable[[Optional[dict]], None]
 
 
 class JobStatus:
@@ -49,18 +44,36 @@ class Job:
 
 
 class JobManager:
-  """Registry of background jobs with EventBus fan-out for the UI."""
+  """Registry of background jobs with direct listener callbacks for the UI."""
 
-  def __init__(self, events: EventBus):
-    self._events = events
+  def __init__(self):
     self._jobs: dict[str, Job] = {}
+    # In-process listeners notified on any job change (the UI registers here).
+    self._listeners: list[JobListener] = []
     # The main asyncio loop, captured at engine start. Lets mutations made from
-    # worker threads (e.g. the indexing thread) still fan out live events.
+    # worker threads (e.g. the indexing thread) marshal listener calls back
+    # onto the loop so UI state updates are thread-safe.
     self._loop: Optional[asyncio.AbstractEventLoop] = None
 
   def set_loop(self, loop: "asyncio.AbstractEventLoop") -> None:
-    """Register the main event loop so thread-safe publishing works."""
+    """Register the main event loop so listener dispatch is thread-safe."""
     self._loop = loop
+
+  # ------------------------------------------------------------------
+  # Listeners
+  # ------------------------------------------------------------------
+
+  def add_listener(self, callback: JobListener) -> None:
+    """Register a callback invoked (on the main loop) whenever a job changes."""
+    if callback not in self._listeners:
+      self._listeners.append(callback)
+
+  def remove_listener(self, callback: JobListener) -> None:
+    """Remove a previously registered listener."""
+    try:
+      self._listeners.remove(callback)
+    except ValueError:
+      pass
 
   # ------------------------------------------------------------------
   # Mutations
@@ -116,8 +129,8 @@ class JobManager:
     self._jobs = {
       k: v for k, v in self._jobs.items() if v.status == JobStatus.RUNNING
     }
-    # Publish a generic refresh so the UI re-reads the list.
-    self._publish({"type": "job.cleared", "data": {}})
+    # Notify listeners to re-read the list (bulk change → no single job).
+    self._notify(None)
 
   # ------------------------------------------------------------------
   # Queries
@@ -139,25 +152,36 @@ class JobManager:
   # ------------------------------------------------------------------
 
   def _emit(self, job: Job) -> None:
-    self._publish({"type": "job.updated", "data": job.snapshot()})
+    self._notify(job.snapshot())
 
-  def _publish(self, event: dict) -> None:
-    """Fire-and-forget publish; safe from the loop thread or a worker thread."""
-    # Fast path: we're on a running loop (the loop thread) → schedule directly.
+  def _notify(self, data: Optional[dict]) -> None:
+    """Deliver a job change to every listener, on the main loop thread."""
+    if not self._listeners:
+      return
+    for cb in list(self._listeners):
+      self._dispatch(cb, data)
+
+  def _dispatch(self, cb: JobListener, data: Optional[dict]) -> None:
+    # Already on the loop thread → call directly. Otherwise (worker thread)
+    # marshal onto the captured main loop so UI state updates stay thread-safe.
     try:
       asyncio.get_running_loop()
-      asyncio.create_task(self._events.publish(event))
+      self._safe_call(cb, data)
       return
     except RuntimeError:
       pass
-    # Worker-thread path: marshal onto the captured main loop, if any.
     loop = self._loop
     if loop is None or loop.is_closed():
       return
     try:
-      loop.call_soon_threadsafe(
-        lambda: asyncio.ensure_future(self._events.publish(event))
-      )
+      loop.call_soon_threadsafe(self._safe_call, cb, data)
     except RuntimeError:
-      # Loop shut down between the check and the call — drop the event.
+      # Loop shut down between the check and the call — drop the notification.
       pass
+
+  @staticmethod
+  def _safe_call(cb: JobListener, data: Optional[dict]) -> None:
+    try:
+      cb(data)
+    except Exception as exc:
+      logger.warning("Job listener error: %s", exc)

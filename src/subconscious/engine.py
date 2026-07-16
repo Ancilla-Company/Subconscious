@@ -3,6 +3,7 @@ import re
 import sys
 import uuid
 import json
+import time
 import httpx
 import shutil
 import zipfile
@@ -62,6 +63,27 @@ class Engine:
   # Could be an issue for slow systems where nothing is wrong but response takes very long
   _DEFAULT_STREAM_TIMEOUT = 90.0
 
+  # ---- Context-window management -----------------------------------------
+  # Conservative default window (tokens) when a model config doesn't specify
+  # one. 8k covers most local/older models; users can raise it per-model.
+  _DEFAULT_CONTEXT_WINDOW = 8192
+  # Never budget below this — guards against absurdly small configured values.
+  _MIN_CONTEXT_WINDOW = 1024
+  # Share of the window reserved for the model's response (input can't use it).
+  _OUTPUT_RESERVE_RATIO = 0.25
+  # Hard cap on reserved output tokens so huge windows still allow big inputs.
+  _MAX_OUTPUT_RESERVE = 4096
+  # Fixed safety margin (tokens) for message framing / tool schemas we can't
+  # measure precisely from here.
+  _CONTEXT_SAFETY_MARGIN = 512
+  # Rough chars-per-token used by the heuristic token estimator.
+  _CHARS_PER_TOKEN = 4
+
+  # ---- Directory change detection ----------------------------------------
+  _DEFAULT_INDEX_INTERVAL_MIN = 15.0
+  # Background indexing only needs an occasional heartbeat,
+  _PROGRESS_MIN_INTERVAL = 10  # seconds between progress events
+
   # In-memory cache of the `share_system_context` privacy toggle. Seeded at
   _share_system_context: bool = True
 
@@ -80,8 +102,9 @@ class Engine:
     self._pending_approvals: dict = {}
     # Decisions that arrived before a waiter was registered (race guard).
     self._approval_inbox: dict = {}
-    # Background job registry (indexing, etc.) with EventBus fan-out for the UI.
-    self.jobs = JobManager(self.events)
+    # Background job registry (indexing, etc.). Notifies the UI via direct
+    # in-process listeners — not the EventBus, which is for cross-instance sync.
+    self.jobs = JobManager()
     # Main event loop, captured at start_engine so worker threads (indexing)
     # can marshal callbacks/notifications back onto it.
     self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -90,6 +113,9 @@ class Engine:
     # workspace supersedes an in-flight one instead of racing it on the sidecar.
     self._index_cancels: dict[str, threading.Event] = {}
     self._index_active: dict[int, str] = {}
+    # Periodic change-detection task: re-scans attached directories while the
+    # app is open so edits made mid-session are picked up without a restart.
+    self._watch_task: Optional[asyncio.Task] = None
 
   def register_setting_callback(self, key: str, callback) -> None:
     """ Register an async callback to be invoked when *key* is updated via update_setting """
@@ -283,14 +309,14 @@ class Engine:
     # Initialize Tool Registry
     self.tool_registry = ToolRegistry()
 
-    # Workspace directory indexer (RAG ingestion). Indexing runs synchronously
-    # inside a worker thread (see reindex_workspace) writing to per-directory
-    # sidecar stores, so the event loop / UI is never blocked. Retrieval fans
-    # out across those sidecars.
+    # Workspace directory indexer (RAG ingestion)
     self.embedder = get_default_embedder()
     cache_dir = str(self.config.data_dir)
     self.indexer = WorkspaceIndexer(self.embedder, cache_dir=cache_dir)
     self.retriever = WorkspaceRetriever(self.embedder, cache_dir=cache_dir)
+
+    # Periodic incremental re-index of attached directories (change detection).
+    self._watch_task = asyncio.create_task(self._directory_watch_loop())
 
     # Start the API background service
     self.api_service = APIService(self, self.config, preferred_port=8771)
@@ -474,22 +500,29 @@ class Engine:
       approval_config=await self.resolve_approval_config(workspace_id, thread_id),
     )
 
-    # Build an attachment context block and prepend it to the user prompt
-    prompt = self._build_prompt_with_attachments(content, attachments or [])
+    # ---- Fit everything within the model's context window ------------------
+    # Budget = window − reserved output − (system prompt + ambient + margin).
+    # Attachments get a share of the remaining input budget (degrading their
+    # inlining tier to fit), then history is trimmed oldest-first to whatever
+    # is left. Smaller configured windows simply trim more aggressively — the
+    # "course of action" when a user lowers the limit to avoid overruns.
+    system_prompt = (model_cfg.get("system_prompt") or "") if model_cfg else ""
+    input_budget = self._input_token_budget(model_cfg, system_prompt, ambient_context)
+
+    # Reserve up to ~60% of the input budget for the new prompt + attachments;
+    # the user's own message is always kept in full.
+    attachment_token_budget = max(0, int(input_budget * 0.6) - self._estimate_tokens(content))
+    prompt = self._build_prompt_with_attachments(
+      content, attachments or [], char_budget=attachment_token_budget * self._CHARS_PER_TOKEN
+    )
+
+    # Remaining budget goes to conversation history (trim oldest-first to fit).
+    history_budget = max(0, input_budget - self._estimate_tokens(prompt))
+    history = self._fit_history_to_budget(history, history_budget)
 
     # Stream with an inactivity timeout. `asyncio.timeout` bounds the wait for
-    # the stream to start (connection + first token); the deadline is then
-    # rescheduled after every chunk so a legitimately long — but steadily
-    # streaming — response is never cut off, while a provider that stalls
-    # (no output, no error) is aborted with a clear error.
     #
     # We drive the full agent graph with `agent.iter()` rather than
-    # `agent.run_stream()`: run_stream stops at the first text output and
-    # skips any tool calls the model makes afterwards, which breaks
-    # multi-step flows (e.g. "read these files then rename them") where the
-    # model narrates a plan before calling tools. Iterating the graph lets
-    # every model-request/tool-call round run to completion while we stream
-    # text deltas from each model-request node.
     timeout_s = self._resolve_stream_timeout(model_cfg)
     loop = asyncio.get_running_loop()
     timeout_s = self._resolve_stream_timeout(model_cfg)
@@ -656,7 +689,101 @@ class Engine:
       val = self._DEFAULT_STREAM_TIMEOUT
     return val if val > 0 else self._DEFAULT_STREAM_TIMEOUT
 
-  def _build_prompt_with_attachments(self, content: str, attachments: list[dict]) -> str:
+  # ------------------------------------------------------------------
+  # Context-window budgeting
+  # ------------------------------------------------------------------
+
+  def _resolve_context_window(self, model_cfg: Optional[dict]) -> int:
+    """Resolve the model's context window (tokens).
+
+    Precedence: ``model_cfg['context_window']`` → ``SUBCONSCIOUS_CONTEXT_WINDOW``
+    env var → ``_DEFAULT_CONTEXT_WINDOW``. Values are clamped to a sane floor so
+    a mistyped tiny value can't make budgeting nonsensical.
+    """
+    raw = model_cfg.get("context_window") if model_cfg else None
+    if raw in (None, ""):
+      raw = os.environ.get("SUBCONSCIOUS_CONTEXT_WINDOW")
+    try:
+      val = int(float(raw)) if raw not in (None, "") else self._DEFAULT_CONTEXT_WINDOW
+    except (TypeError, ValueError):
+      val = self._DEFAULT_CONTEXT_WINDOW
+    return max(self._MIN_CONTEXT_WINDOW, val)
+
+  def _estimate_tokens(self, text: Optional[str]) -> int:
+    """Heuristic token count (~4 chars/token). Cheap and dependency-free.
+
+    Deliberately conservative: we round up so we under-fill rather than
+    overrun the real tokenizer.
+    """
+    if not text:
+      return 0
+    return (len(text) // self._CHARS_PER_TOKEN) + 1
+
+  def _input_token_budget(
+    self,
+    model_cfg: Optional[dict],
+    system_prompt: Optional[str],
+    ambient_context: Optional[str],
+  ) -> int:
+    """Tokens available for prompt + attachments + history for this request."""
+    window = self._resolve_context_window(model_cfg)
+    output_reserve = min(int(window * self._OUTPUT_RESERVE_RATIO), self._MAX_OUTPUT_RESERVE)
+    overhead = (
+      self._estimate_tokens(system_prompt)
+      + self._estimate_tokens(ambient_context)
+      + self._CONTEXT_SAFETY_MARGIN
+    )
+    budget = window - output_reserve - overhead
+    # Always leave room for at least a modest prompt even on tiny windows.
+    return max(256, budget)
+
+  @staticmethod
+  def _message_text(msg: ModelMessage) -> str:
+    """Best-effort extraction of the text content of a history message."""
+    parts = getattr(msg, "parts", None) or []
+    chunks: list[str] = []
+    for part in parts:
+      content = getattr(part, "content", None)
+      if isinstance(content, str):
+        chunks.append(content)
+      elif content is not None:
+        chunks.append(str(content))
+    return "\n".join(chunks)
+
+  def _fit_history_to_budget(
+    self, history: list[ModelMessage], budget_tokens: int
+  ) -> list[ModelMessage]:
+    """Trim conversation history to fit *budget_tokens*, dropping oldest first.
+
+    Preserves the most recent exchanges (which matter most for coherence) and
+    discards the oldest messages until the estimated total fits. Returns the
+    kept messages in their original chronological order.
+    """
+    if not history or budget_tokens <= 0:
+      return [] if budget_tokens <= 0 else history
+
+    kept_reversed: list[ModelMessage] = []
+    used = 0
+    for msg in reversed(history):
+      cost = self._estimate_tokens(self._message_text(msg))
+      # Keep a contiguous suffix of recent messages: stop at the first message
+      # that would overflow (once at least the latest message is retained), so
+      # history stays gap-free for coherence.
+      if used + cost > budget_tokens and kept_reversed:
+        break
+      used += cost
+      kept_reversed.append(msg)
+    dropped = len(history) - len(kept_reversed)
+    if dropped:
+      logger.info(
+        "Context budget: dropped %d oldest history message(s) to fit ~%d tokens",
+        dropped, budget_tokens,
+      )
+    return list(reversed(kept_reversed))
+
+  def _build_prompt_with_attachments(
+    self, content: str, attachments: list[dict], char_budget: Optional[int] = None
+  ) -> str:
     """
     Given a list of attachment dicts (each with 'path', 'type', 'name') build a
     context preamble that inlines file contents or directory listings using a
@@ -668,14 +795,22 @@ class Engine:
       > 10 MB  — RAG hint: only metadata is inlined; the model should use
                  search_in_file() then read_range() to access content.
 
-    Directories are always listed one level deep.
-    The original user message is appended at the end.
+    When *char_budget* is provided the tiers also scale to the model's context
+    window: a running budget of characters is tracked and each attachment is
+    degraded (full → skeleton → RAG hint) as needed so the inlined content
+    never blows the window. This is what lets a small-context model handle a
+    lot of attached data — it falls back to on-demand retrieval instead of
+    stuffing everything in. Directories are always listed one level deep and
+    the original user message is appended at the end.
     """
     _FULL_LIMIT    =  2_000_000   #  2 MB
     _CHUNKED_LIMIT = 10_000_000   # 10 MB
 
     if not attachments:
       return content
+
+    # None → unbounded (legacy behaviour); otherwise chars still available.
+    remaining: Optional[int] = char_budget
 
     sections: list[str] = []
     for a in attachments:
@@ -721,8 +856,21 @@ class Engine:
 
           char_count = len(text)
 
-          if char_count <= _FULL_LIMIT:
-            sections.append(f"### File: {name}\n```\n{text}\n```")
+          # Full load only when it fits both the absolute cap and the remaining
+          # budget (if budgeting is active).
+          fits_budget = (remaining is None) or (char_count <= remaining)
+          rag_hint = (
+            f"### File: {name}\n"
+            f"[RAG MODE — file is {size_bytes:,} bytes. "
+            f"Use search_in_file(path='{path}', query='...') to find relevant lines, "
+            f"then read_range(path='{path}', start_line=N, end_line=M) to read them.]"
+          )
+
+          if char_count <= _FULL_LIMIT and fits_budget:
+            section = f"### File: {name}\n```\n{text}\n```"
+            sections.append(section)
+            if remaining is not None:
+              remaining = max(0, remaining - char_count)
 
           elif char_count <= _CHUNKED_LIMIT:
             # Skeleton: structural lines + head + tail
@@ -745,15 +893,20 @@ class Engine:
               f"── Structural lines ({len(skeleton)} found) ──\n" + "\n".join(skeleton) + "\n\n"
               "── Last 20 lines ──\n" + "\n".join(tail)
             )
-            sections.append(f"### File: {name}\n{body}")
+            # If even the skeleton overflows the remaining budget, fall back to
+            # a RAG hint (cheap) so a small window isn't blown by one file.
+            if remaining is not None and len(body) > remaining:
+              sections.append(rag_hint)
+              remaining = max(0, remaining - len(rag_hint))
+            else:
+              sections.append(f"### File: {name}\n{body}")
+              if remaining is not None:
+                remaining = max(0, remaining - len(body))
 
           else:
-            sections.append(
-              f"### File: {name}\n"
-              f"[RAG MODE — file is {size_bytes:,} bytes (> 10 MB). "
-              f"Use search_in_file(path='{path}', query='...') to find relevant lines, "
-              f"then read_range(path='{path}', start_line=N, end_line=M) to read them.]"
-            )
+            sections.append(rag_hint)
+            if remaining is not None:
+              remaining = max(0, remaining - len(rag_hint))
 
         except Exception as exc:
           sections.append(f"### File: {name}\n[Error reading file: {exc}]")
@@ -921,65 +1074,133 @@ class Engine:
   # Retrieval (RAG) — directory indexing + search
   # ------------------------------------------------------------------
 
-  def reindex_workspace(self, workspace_id: int, workspace_name: str = "workspace") -> Optional[str]:
-    """Kick off an incremental re-index of a workspace's attached directories.
+  def reindex_workspace(
+    self,
+    workspace_id: int,
+    workspace_name: str = "workspace",
+    directories: Optional[list] = None,
+    notify: bool = True,
+    track: bool = True,
+  ) -> Optional[str]:
+    """ Kick off an incremental re-index of a workspace's attached directories.
 
-    The heavy work (walk, extract, hash, chunk, embed, KG, SQLite writes) runs
-    synchronously inside a worker thread via ``run_in_executor`` so the event
-    loop — and the UI's rendering — is never blocked. Returns the job id.
-
-    A re-index of a workspace that is already indexing supersedes the in-flight
-    one (its cancel event is set) to avoid two threads writing the same sidecar.
+    When *track* is True a background Job is created and its progress is
+    published on the EventBus for the notifications UI. Background/periodic
+    scans pass ``track=False``: they run silently and publish no job events.
+    This matters at cold start — a job event arriving while the Flet UI is
+    still mounting forces a full re-render that drops the state the mount is
+    applying, so the automatic startup scan must stay event-silent.
     """
     indexer = getattr(self, "indexer", None)
     if indexer is None:
       return None
 
     # Supersede any in-flight index for this workspace.
-    prev_job_id = self._index_active.get(workspace_id)
-    if prev_job_id and prev_job_id in self._index_cancels:
-      self._index_cancels[prev_job_id].set()
+    prev_id = self._index_active.get(workspace_id)
+    if prev_id and prev_id in self._index_cancels:
+      self._index_cancels[prev_id].set()
 
-    job = self.jobs.create("index", f"Indexing {workspace_name}")
+    job = self.jobs.create("index", f"Indexing {workspace_name}") if track else None
     cancel = threading.Event()
-    self._index_cancels[job.id] = cancel
-    self._index_active[workspace_id] = job.id
+    # A stable id for the cancel/active registries — the job id when tracked,
+    # otherwise a synthetic one so supersede + shutdown cancellation still work.
+    run_id = job.id if job else uuid.uuid4().hex
+    self._index_cancels[run_id] = cancel
+    self._index_active[workspace_id] = run_id
     loop = self._loop or asyncio.get_event_loop()
 
     async def _run():
       try:
         workspace_uuid = await self._get_workspace_uuid(workspace_id)
         if not workspace_uuid:
-          self.jobs.fail(job, "Workspace not found")
+          if job:
+            self.jobs.fail(job, "Workspace not found")
           return
-        directories = await self.get_workspace_directories(workspace_id)
+        # Subset (refresh one dir) or all attached directories.
+        if directories is None:
+          dirs = await self.get_workspace_directories(workspace_id)
+        else:
+          dirs = list(directories)
 
-        def _progress(current: int, total: int, message: str) -> None:
-          # Called from the worker thread; JobManager marshals the event.
-          self.jobs.update(job, current=current, total=total, message=message)
+        # Only publish progress when tracked. Throttle to avoid flooding the UI.
+        _progress = None
+        if job is not None:
+          _last = {"t": 0.0}
+
+          def _progress(current: int, total: int, message: str) -> None:
+            now = time.monotonic()
+            is_edge = current == 0 or current >= total
+            if is_edge or now - _last["t"] >= self._PROGRESS_MIN_INTERVAL:
+              _last["t"] = now
+              self.jobs.update(job, current=current, total=total, message=message)
 
         summary = await loop.run_in_executor(
-          None, indexer.reindex_sync, workspace_uuid, directories, cancel, _progress
+          None, indexer.reindex_sync, workspace_uuid, dirs, cancel, _progress
         )
 
         if summary.get("cancelled"):
-          self.jobs.update(job, message="Indexing superseded")
-          # A newer job took over; leave its state alone.
+          if job:
+            self.jobs.update(job, message="Indexing superseded")
+          # A newer run took over; leave its state alone.
           return
-        msg = f"Indexed {summary['indexed']} of {summary['total']} files"
-        self.jobs.complete(job, msg)
-        await self.show_notification("Indexing complete", f"{workspace_name}: {msg}")
+        if job:
+          msg = f"Indexed {summary['indexed']} of {summary['total']} files"
+          self.jobs.complete(job, msg)
+          if notify:
+            await self.show_notification("Indexing complete", f"{workspace_name}: {msg}")
+        # If the workspace opted into semantic-graph building, run it now as a
+        # follow-on job (it costs model calls, hence gated by the toggle). Only
+        # when something actually changed, to avoid needless model calls on
+        # periodic no-op scans.
+        if summary.get("indexed"):
+          rag_cfg = await self.get_workspace_rag_config(workspace_id)
+          if rag_cfg.get("semantic_graph"):
+            asyncio.create_task(self._run_semantic_graph_job(workspace_id, workspace_name))
       except Exception as exc:
         logger.error(f"Workspace indexing failed ({workspace_id}): {exc}")
-        self.jobs.fail(job, str(exc))
-        await self.show_notification("Indexing failed", str(exc))
+        if job:
+          self.jobs.fail(job, str(exc))
+          if notify:
+            await self.show_notification("Indexing failed", str(exc))
       finally:
-        self._index_cancels.pop(job.id, None)
-        if self._index_active.get(workspace_id) == job.id:
+        self._index_cancels.pop(run_id, None)
+        if self._index_active.get(workspace_id) == run_id:
           self._index_active.pop(workspace_id, None)
 
     asyncio.create_task(_run())
-    return job.id
+    return run_id
+
+  # ------------------------------------------------------------------
+  # Periodic change detection for indexing
+  # ------------------------------------------------------------------
+  async def _directory_watch_loop(self) -> None:
+    """ Periodically re-index attached directories """
+    logger.debug("Directory change-detection every %.0fs", self._DEFAULT_INDEX_INTERVAL_MIN)
+    try:
+      while True:
+        try:
+          async with self.db.get_session() as session:
+            rows = await session.scalars(select(Workspace))
+            workspaces = [
+              (w.id, w.name, self._parse_json_list(w.directories)) for w in rows.all()
+            ]
+
+          for wid, name, dirs in workspaces:
+            if not dirs:
+              continue
+
+            # Don't pile onto a workspace that's already (re)indexing.
+            if wid in self._index_active: continue
+            # Background scan: silent + untracked so no job events fire (which
+            # would disrupt the UI mount at cold start).
+            self.reindex_workspace(wid, name, notify=False, track=True)
+        except Exception as e:
+          logger.debug("Periodic directory scan failed: %s", e)
+
+        # Sleep for designated interval
+        await asyncio.sleep(self._DEFAULT_INDEX_INTERVAL_MIN * 60)  # @IgnoreException
+    except asyncio.CancelledError:
+      pass
 
   async def search_workspace(
     self, workspace_id: int, query: str, limit: int = 8, mode: str = "hybrid"
@@ -1038,8 +1259,14 @@ class Engine:
     calls. It processes at most *max_chunks* pending chunks per call and can be
     invoked repeatedly to work through a large corpus incrementally.
     """
-    result = {"processed": 0, "triples": 0, "chunks": 0}
+    result = {"processed": 0, "triples": 0, "chunks": 0, "skipped": False}
     if not workspace_id:
+      return result
+    # Gate on the workspace's opt-in toggle: when disabled the semantic graph
+    # is never built (only the free structural graph from indexing remains).
+    rag_cfg = await self.get_workspace_rag_config(workspace_id)
+    if not rag_cfg.get("semantic_graph"):
+      result["skipped"] = True
       return result
     workspace_uuid = await self._get_workspace_uuid(workspace_id)
     if not workspace_uuid:
@@ -1097,6 +1324,73 @@ class Engine:
         await loop.run_in_executor(None, store.close)
 
     return result
+
+  async def _run_semantic_graph_job(self, workspace_id: int, workspace_name: str = "workspace") -> None:
+    """Build the semantic knowledge graph as a tracked background job.
+
+    Processes pending chunks in batches until none remain (bounded by a safety
+    cap). No-ops immediately when the workspace's toggle is disabled.
+    """
+    rag_cfg = await self.get_workspace_rag_config(workspace_id)
+    if not rag_cfg.get("semantic_graph"):
+      return
+
+    job = self.jobs.create("semantic_graph", f"Building knowledge graph: {workspace_name}")
+    total_chunks = 0
+    total_triples = 0
+    try:
+      batch = 50
+      max_batches = 200  # safety cap: at most 10k chunks per run
+      for _ in range(max_batches):
+        result = await self.build_semantic_graph(workspace_id, max_chunks=batch)
+        if result.get("skipped"):
+          break
+        processed = result.get("chunks", 0)
+        total_chunks += processed
+        total_triples += result.get("triples", 0)
+        self.jobs.update(
+          job, message=f"{total_chunks} chunks, {total_triples} facts extracted"
+        )
+        if processed < batch:
+          break  # drained the pending queue
+      self.jobs.complete(
+        job, f"Knowledge graph updated: {total_triples} facts from {total_chunks} chunks"
+      )
+    except Exception as exc:
+      logger.error(f"Semantic graph build failed ({workspace_id}): {exc}")
+      self.jobs.fail(job, str(exc))
+
+  # ------------------------------------------------------------------
+  # RAG / indexing options (per workspace)
+  # ------------------------------------------------------------------
+
+  # Semantic-graph building defaults OFF: it costs model calls, so it only runs
+  # when a workspace explicitly opts in.
+  _DEFAULT_RAG_CONFIG = {"semantic_graph": False}
+
+  @classmethod
+  def _normalize_rag_config(cls, cfg: Optional[dict]) -> dict:
+    base = dict(cls._DEFAULT_RAG_CONFIG)
+    if isinstance(cfg, dict) and "semantic_graph" in cfg:
+      base["semantic_graph"] = bool(cfg["semantic_graph"])
+    return base
+
+  async def get_workspace_rag_config(self, workspace_id: int) -> dict:
+    """Return the workspace RAG options (defaults when unset)."""
+    if not workspace_id:
+      return dict(self._DEFAULT_RAG_CONFIG)
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      raw = self._parse_json_config(ws.rag_config) if ws else {}
+    return self._normalize_rag_config(raw)
+
+  async def set_workspace_rag_config(self, workspace_id: int, config: dict) -> None:
+    """Persist the workspace RAG options."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.rag_config = json.dumps(self._normalize_rag_config(config))
+        await session.commit()
 
   async def get_workspace_tools_config(self, workspace_id: int) -> dict:
     """Return the persisted tools_config for a workspace ({} if unset)."""
@@ -1263,14 +1557,7 @@ class Engine:
   # ---------------------------------------------------------------------
 
   async def _await_approval(self, tool_call_id: str) -> bool:
-    """Suspend until the UI resolves the approval for *tool_call_id*.
-
-    Robust to ordering: if :meth:`resolve_approval` was already called for this
-    id (decision landed in the inbox before we started waiting), the stored
-    decision is used immediately. Otherwise a Future is registered and awaited.
-    This closes a race where an approval decision could be lost — leaving the
-    turn hung after the narration text with the tool never executing.
-    """
+    """ Suspend until the UI resolves the approval for *tool_call_id* """
     if tool_call_id in self._approval_inbox:
       return self._approval_inbox.pop(tool_call_id)
     loop = asyncio.get_running_loop()
@@ -1283,13 +1570,7 @@ class Engine:
       self._approval_inbox.pop(tool_call_id, None)
 
   def resolve_approval(self, tool_call_id: str, approved: bool) -> bool:
-    """Resolve a pending tool-approval request from the UI.
-
-    Always returns True: if a waiter is registered its Future is completed;
-    otherwise the decision is stored in the inbox so a subsequent
-    :meth:`_await_approval` picks it up (guards against the UI resolving before
-    the engine registers its waiter).
-    """
+    """ Resolve a pending tool-approval request from the UI """
     fut = self._pending_approvals.get(tool_call_id)
     if fut is not None and not fut.done():
       fut.set_result(bool(approved))
@@ -1315,6 +1596,14 @@ class Engine:
 
   async def stop_engine(self):
     """ Cleanup engine resources """
+    # Stop the periodic directory watcher.
+    if self._watch_task is not None and not self._watch_task.done():
+      self._watch_task.cancel()
+      try:
+        await self._watch_task
+      except asyncio.CancelledError:
+        pass
+
     # Signal any running index worker threads to stop between files so their
     # executor threads unwind promptly instead of hanging shutdown.
     for cancel in list(self._index_cancels.values()):
@@ -1487,57 +1776,6 @@ class Engine:
     status = "pending"
     required_tools_json = ""
     version = ""
-
-    # try:
-    #   if source_type == "folder":
-    #     src = pathlib.Path(source)
-    #     if not (src.exists() and src.is_dir()):
-    #       raise FileNotFoundError(f"Folder not found: {source}")
-    #     if install_path.exists():
-    #       shutil.rmtree(install_path)
-    #     shutil.copytree(src, install_path)
-
-    #   elif source_type == "zip":
-    #     src = pathlib.Path(source)
-    #     if not (src.exists() and src.suffix == ".zip"):
-    #       raise FileNotFoundError(f"Zip not found: {source}")
-    #     if install_path.exists():
-    #       shutil.rmtree(install_path)
-    #     install_path.mkdir(parents=True, exist_ok=True)
-    #     with zipfile.ZipFile(src, "r") as zf:
-    #       zf.extractall(install_path)
-
-    #   elif source_type == "url":
-    #     if install_path.exists():
-    #       shutil.rmtree(install_path)
-    #     install_path.mkdir(parents=True, exist_ok=True)
-    #     zip_dest = install_path / "download.zip"
-    #     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-    #       resp = await client.get(source)
-    #       resp.raise_for_status()
-    #       zip_dest.write_bytes(resp.content)
-    #     with zipfile.ZipFile(zip_dest, "r") as zf:
-    #       zf.extractall(install_path)
-    #     zip_dest.unlink(missing_ok=True)
-
-    #   else:
-    #     raise ValueError(f"Unknown source_type: {source_type}")
-
-    #   # Validate: look for skill.json manifest
-    #   manifest_candidates = list(install_path.rglob("skill.json"))
-    #   if manifest_candidates:
-    #     manifest = json.loads(manifest_candidates[0].read_text(encoding="utf-8"))
-    #     required_tools_json = json.dumps(manifest.get("required_tools", []))
-    #     version = manifest.get("version", "")
-    #     status = "valid"
-    #   else:
-    #     # Fallback: any directory with Python files is accepted as a basic skill
-    #     py_files = list(install_path.rglob("*.py"))
-    #     status = "valid" if py_files else "invalid"
-
-    # except Exception as exc:
-    #   logger.error(f"Skill install error for {skill_uuid}: {exc}")
-    #   status = "error"
 
     async with self.db.get_session() as session:
       row = await session.scalar(
