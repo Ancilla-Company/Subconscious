@@ -241,3 +241,14 @@ def ExpansionTile(label, on_change) -> ft.Control:
     spacing=0,
     scroll=ft.ScrollMode.ADAPTIVE
   )
+
+def Switch(disabled, value, tooltip, label, on_change=None) -> ft.Control:
+  """ Platform styled switch """
+  return ft.Switch(
+    height=30,
+    value=value,
+    on_change=None,
+    tooltip=tooltip,
+    disabled=disabled,
+    label=ft.Text(label, size=20, expand=True)
+  )

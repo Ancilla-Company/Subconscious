@@ -144,13 +144,17 @@ def ToolToggleTree(
           ),
           ft.Switch(
             height=30,
+            disabled=True,
             value=appr.get("query", True),
+            active_color=ft.Colors.SURFACE,
+            active_track_color=ft.Colors.PRIMARY,
             label=ft.Text("Reads / queries", size=18, expand=True),
             on_change=lambda e: toggle_approval("query", e.control.value),
           ),
           ft.Switch(
             height=30,
             value=appr.get("mutation", True),
+            active_color=ft.Colors.SECONDARY_CONTAINER,
             label=ft.Text("Writes / mutations", size=18, expand=True),
             on_change=lambda e: toggle_approval("mutation", e.control.value),
           ),
@@ -204,10 +208,15 @@ def ToolToggleTree(
         expand=True,
         expanded=False,
         controls=[
-          ft.Container(
-            ft.Column(subs, spacing=0),
-            padding=ft.padding.only(left=30),
-          )
+          # ExpansionTile centers content-sized children; wrap in a full-width
+          # Row so the indented Column stays left-aligned under its parent.
+          ft.Row([
+            ft.Container(
+              ft.Column(subs, spacing=0),
+              padding=ft.padding.only(left=30),
+              expand=True,
+            )
+          ])
         ],
       )
     )
@@ -221,10 +230,13 @@ def ToolToggleTree(
     ]
   else:
     builtin_controls = [
-      ft.Container(
-        ft.Text("No tools available.", size=13, color=ft.Colors.GREY),
-        padding=ft.padding.only(left=30),
-      )
+      ft.Row([
+        ft.Container(
+          ft.Text("No tools available.", size=13, color=ft.Colors.GREY),
+          padding=ft.padding.only(left=30),
+          expand=True,
+        )
+      ])
     ]
 
   # Master toggle for all built-in (default) tools, wrapping every slug tile.
@@ -236,6 +248,8 @@ def ToolToggleTree(
             height=30,
             value=builtin_master,
             label="Builtin Tools",
+            active_color=ft.Colors.SURFACE,
+            active_track_color=ft.Colors.PRIMARY,
             label_text_style=ft.TextStyle(size=20),
             on_change=lambda e: toggle_builtin_master(e.control.value),
           )
@@ -259,6 +273,8 @@ def ToolToggleTree(
           height=30,
           disabled=not configured_master,
           value=configured.get(uuid, True),
+          active_color=ft.Colors.SURFACE,
+          active_track_color=ft.Colors.PRIMARY,
           label=ft.Text(label, size=20, expand=True),
           on_change=lambda e, u=uuid: toggle_configured(u, e.control.value),
         )
@@ -279,10 +295,13 @@ def ToolToggleTree(
         expand=True,
         expanded=False,
         controls=[
-          ft.Container(
-            ft.Column(custom_switches, spacing=0),
-            padding=ft.padding.only(left=30),
-          )
+          ft.Row([
+            ft.Container(
+              ft.Column(custom_switches, spacing=0),
+              padding=ft.padding.only(left=30),
+              expand=True,
+            )
+          ])
         ],
       )
     )
@@ -353,15 +372,21 @@ def SkillToggleList(skills=None, config=None, on_change=None, sync_key=None):
           on_change=lambda e, u=uuid: toggle(u, e.control.value),
         )
       )
-    body = ft.Container(
-      ft.Column(skill_switches, spacing=0),
-      padding=ft.padding.only(left=30),
-    )
+    body = ft.Row([
+      ft.Container(
+        ft.Column(skill_switches, spacing=0),
+        padding=ft.padding.only(left=30),
+        expand=True,
+      )
+    ])
   else:
-    body = ft.Container(
-      ft.Text("No skills installed.", size=13, color=ft.Colors.GREY),
-      padding=ft.padding.only(left=30),
-    )
+    body = ft.Row([
+      ft.Container(
+        ft.Text("No skills installed.", size=13, color=ft.Colors.GREY),
+        padding=ft.padding.only(left=30),
+        expand=True,
+      )
+    ])
 
   # Collapsible tile so the whole skills section can expand/collapse, mirroring
   # the built-in / custom tool tiles.

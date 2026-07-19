@@ -68,7 +68,7 @@
       "module": "subconscious.cli",
       "args": [
         "engine",
-        // "--dev"
+        "--dev"
       ],
       "cwd": "${workspaceFolder}",
       "env": {

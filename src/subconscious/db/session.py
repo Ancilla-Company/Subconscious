@@ -68,6 +68,8 @@ class Database:
         await conn.execute(text("ALTER TABLE workspaces ADD COLUMN approval_config TEXT"))
       if "rag_config" not in ws_columns:
         await conn.execute(text("ALTER TABLE workspaces ADD COLUMN rag_config TEXT"))
+      if "default_model_id" not in ws_columns:
+        await conn.execute(text("ALTER TABLE workspaces ADD COLUMN default_model_id VARCHAR"))
 
     # app_state: ensure a UNIQUE index on (key, tag) exists so the upserts in
     # Engine.update_setting (ON CONFLICT ... DO UPDATE) can resolve to a single

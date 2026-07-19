@@ -62,6 +62,7 @@ class HealthResponse(BaseModel):
 class ModelConfigDTO(BaseModel):
   """ A configured model, safe for the wire (the API key is never included). """
   id: str
+  alias: Optional[str] = None
   provider: Optional[str] = None
   model: Optional[str] = None
   system_prompt: Optional[str] = None

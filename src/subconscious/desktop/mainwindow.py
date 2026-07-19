@@ -5,10 +5,10 @@ import flet as ft
 from .screens.chat import ChatWindow
 from .screens.thread_settings import ThreadSettings
 from ..shared.buttons import TextButton, WideTextButton
-from ..shared.forms import FormField, TextArea, CheckBox
 from ..shared.layout import ResponsiveItem, ResponsiveParent
 from ..shared.tool_config import ToolToggleTree, SkillToggleList
 from ..shared.settings import Models, About, General, Tools, Skills
+from ..shared.forms import FormField, TextArea, CheckBox, DropdownField
 
 
 @ft.component
@@ -64,6 +64,8 @@ def MainWindow(
   on_workspace_directory_remove=None,
   workspace_semantic_graph=False,
   on_workspace_semantic_graph_change=None,
+  workspace_default_model=None,
+  on_workspace_default_model_change=None,
   on_open_thread_tools=None,
   on_open_thread_skills=None,
   # Thread settings overlay (name/description + tools/skills toggles)
@@ -422,7 +424,27 @@ def MainWindow(
                   on_change=lambda e: set_ws_description(e.control.value),
                   hint="Enter a description for your workspace"
                 )
-              )
+              ),
+              ResponsiveItem(
+                DropdownField(
+                  label="Default model",
+                  values=[
+                    ft.dropdown.Option(
+                      c.get("id"),
+                      c.get("alias") or c.get("model") or c.get("id"),
+                    )
+                    for c in (model_configs or [])
+                  ],
+                  # Fall back to the first config so the control always shows
+                  # the model new threads will actually use.
+                  value=workspace_default_model
+                    or ((model_configs or [{}])[0].get("id") if model_configs else None),
+                  on_change=(
+                    lambda e: on_workspace_default_model_change(e.control.value)
+                  ) if on_workspace_default_model_change else (lambda e: None),
+                  hint="Model used for new threads in this workspace",
+                )
+              ) if (workspace_mode == "edit" and model_configs) else ResponsiveItem(ft.Container()),
             ],
             *[
               ResponsiveItem(directories_section)

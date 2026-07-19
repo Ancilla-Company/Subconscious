@@ -139,6 +139,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
   ws_directories, set_ws_directories = ft.use_state(list())
   # Whether the workspace builds a semantic knowledge graph while indexing
   ws_semantic_graph, set_ws_semantic_graph = ft.use_state(False)
+  # Default model id for new threads in the workspace being edited ("" = first)
+  ws_default_model, set_ws_default_model = ft.use_state("")
   # Thread settings overlay: shown on top of the chat (within the threads view)
   # rather than as a separate current_view, so the chat stays mounted and we
   # keep full control over showing/hiding it. `ts_*_config` seed the toggles;
@@ -252,13 +254,31 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       )
     return loaded
 
+  async def resolve_workspace_default_model(workspace_id, configs=None):
+    """Map a workspace's default model id to a config dict.
+
+    NULL / 'default' — or an id pointing at a since-deleted model — falls back
+    to the first available config so a model is always resolved.
+    """
+    cfgs = configs if configs else build_model_configs()
+    if not cfgs:
+      return None
+    if workspace_id:
+      ws_model_id = await engine.get_workspace_default_model_id(workspace_id)
+      if ws_model_id and ws_model_id != "default":
+        match = next((c for c in cfgs if c.get("id") == ws_model_id), None)
+        if match:
+          return match
+    return cfgs[0]
+
   async def resolve_thread_model(thread_id, configs=None):
     """Map a thread's persisted model id to a config dict.
 
-    A stored value of 'default'/NULL — or an id pointing at a since-deleted
-    model — falls back to the first available config so the selector is never
-    left empty. Pass `configs` to reuse an already-loaded list; otherwise the
-    configs are read fresh from storage (needed during startup restore).
+    Resolution order: the thread's own pinned model → the workspace's default
+    model → the first available config. A stored 'default'/NULL, or an id
+    pointing at a since-deleted model, falls through to the next level so the
+    selector is never left empty. Pass `configs` to reuse an already-loaded
+    list; otherwise configs are read fresh (needed during startup restore).
     """
     cfgs = configs if configs else build_model_configs()
     if not cfgs:
@@ -268,7 +288,12 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       match = next((c for c in cfgs if c.get("id") == db_model_id), None)
       if match:
         return match
-    return cfgs[0]
+    # Inherit the workspace default (which itself falls back to the first config).
+    ws_id = None
+    async with engine.db.get_session() as session:
+      th = await session.get(Thread, thread_id)
+      ws_id = th.workspace_id if th else None
+    return await resolve_workspace_default_model(ws_id, cfgs)
 
   async def load_settings():
     # Register the UI-only callback so tool-driven setting changes are
@@ -372,6 +397,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
               Engine._parse_json_config(getattr(workspace_obj, "rag_config", None))
             )["semantic_graph"]
           )
+          set_ws_default_model(getattr(workspace_obj, "default_model_id", None) or "")
     
     # --- Selected account ---
 
@@ -793,6 +819,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_ws_approval_config({})
     set_ws_directories([])
     set_ws_semantic_graph(False)
+    set_ws_default_model("")
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_selected_workspace_id", ""))
@@ -813,6 +840,7 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         Engine._parse_json_config(getattr(workspace, "rag_config", None))
       )["semantic_graph"]
     )
+    set_ws_default_model(getattr(workspace, "default_model_id", None) or "")
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_current_view", "workspaces"))
@@ -832,6 +860,11 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
     set_current_view("threads")
     set_current_context("threads")
     set_chatbox_restore_token(chatbox_restore_token + 1)
+
+    # New threads default to the active workspace's configured default model
+    # (falls back to the first available config).
+    ws_id = active_chat_workspace.id if active_chat_workspace else None
+    set_selected_model_config(await resolve_workspace_default_model(ws_id, model_configs))
 
     # Save state
     asyncio.create_task(engine.save_ui_state("ui_selected_thread_id", ""))
@@ -933,9 +966,19 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       # Reflect the new selection immediately so the streaming guard below sees
       # it before the reactive effect re-syncs view_ref on the next render.
       view_ref[0] = {"view": "threads", "thread_id": thread.id}
-      # Seed the model for the new thread: always 'default' so it tracks the
-      # first model config rather than being pinned to a specific UUID.
-      asyncio.create_task(engine.set_thread_model_id(thread.id, "default"))
+
+      # Seed the new thread's model. If the selection matches the workspace
+      # default, store "default" so the thread keeps inheriting that setting;
+      # if the user picked a different model, pin that specific choice.
+      async def _seed_thread_model():
+        ws_default = await resolve_workspace_default_model(workspace_id, model_configs)
+        chosen = selected_model_config or ws_default
+        if chosen and ws_default and chosen.get("id") == ws_default.get("id"):
+          model_id_to_store = "default"
+        else:
+          model_id_to_store = chosen.get("id", "default") if chosen else "default"
+        await engine.set_thread_model_id(thread.id, model_id_to_store)
+      asyncio.create_task(_seed_thread_model())
 
     new_messages = list(messages) + [user_ui_msg]
     set_messages(new_messages)
@@ -1152,6 +1195,13 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
       asyncio.create_task(
         engine._run_semantic_graph_job(editing_workspace.id, editing_workspace.name)
       )
+
+  def handle_workspace_default_model_change(model_id):
+    """Persist the workspace's default model for new threads."""
+    if not editing_workspace:
+      return
+    set_ws_default_model(model_id or "")
+    asyncio.create_task(engine.set_workspace_default_model_id(editing_workspace.id, model_id or None))
 
   def handle_workspace_directory_refresh(path):
     """Refresh (incrementally re-index) a single attached directory. Also
@@ -1580,6 +1630,8 @@ def AppView(page: ft.Page, engine) -> list[ft.Control]:
         on_workspace_directory_remove=handle_workspace_directory_remove,
         workspace_semantic_graph=ws_semantic_graph,
         on_workspace_semantic_graph_change=handle_workspace_semantic_graph_change,
+        workspace_default_model=ws_default_model,
+        on_workspace_default_model_change=handle_workspace_default_model_change,
         on_open_thread_tools=handle_open_thread_settings,
         on_open_thread_skills=handle_open_thread_settings,
         show_thread_settings=show_thread_settings,

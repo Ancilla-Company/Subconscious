@@ -86,6 +86,7 @@
     "Get-ChildItem *",
     "powershell *",
     "conda run *",
-    "set *"
+    "set *",
+    "conda activate *"
   ]
 }

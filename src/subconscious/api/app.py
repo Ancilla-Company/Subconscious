@@ -14,6 +14,12 @@ from fastapi import FastAPI, Depends, HTTPException, Header, WebSocket, WebSocke
 
 from ..constants import VERSION
 from ..db.models import Workspace, Thread, Message
+from ..stream_events import (
+  TextDelta,
+  ToolCallStarted,
+  ToolCallResult,
+  tool_block_to_json,
+)
 from .schemas import (
   ThreadDTO,
   MessageDTO,
@@ -135,6 +141,7 @@ def create_app(engine: Engine, token: str) -> FastAPI:
     return [
       ModelConfigDTO(
         id=c["id"],
+        alias=c.get("alias"),
         provider=c.get("provider"),
         model=c.get("model"),
         system_prompt=c.get("system_prompt"),
@@ -305,19 +312,47 @@ async def _handle_chat_send(ws: WebSocket, engine: Engine, frame: dict) -> None:
 
   await engine.save_message(thread_id, "user", content)
 
-  reply_parts: list[str] = []
+  # Stream the STRUCTURED event feed (like the desktop UI) so tool calls are
+  # surfaced to the client as `role="tool"` messages rather than being flattened
+  # into text. Narration is streamed as `chat.delta` and flushed to an
+  # `assistant` message before each tool result, so the persisted transcript
+  # interleaves text blocks and tool cards in order. Tools are auto-approved on
+  # this loopback path (the extension has its own approval model for its tools).
+  current_text = ""
+  pending_args: dict = {}
   try:
-    async for chunk in engine.stream_chat(
+    async for event in engine.stream_chat_events(
       content, thread_id, workspace_id=workspace_id, model_cfg=model_cfg,
+      auto_approve=True,
     ):
-      reply_parts.append(chunk)
-      await ws.send_json({"v": 1, "type": "chat.delta", "id": corr, "data": {"delta": chunk}})
+      if isinstance(event, TextDelta):
+        current_text += event.content
+        await ws.send_json(
+          {"v": 1, "type": "chat.delta", "id": corr, "data": {"delta": event.content}}
+        )
+      elif isinstance(event, ToolCallStarted):
+        # Capture the args now; the matching result arrives as a later event.
+        pending_args[event.tool_call_id] = event.args
+      elif isinstance(event, ToolCallResult):
+        # Flush any narration that preceded this tool call as its own message,
+        # then persist the tool call+result as a `role="tool"` row (which
+        # publishes a message.created event the client renders as a tool card).
+        if current_text.strip():
+          await engine.save_message(thread_id, "assistant", current_text)
+          current_text = ""
+        tool_json = tool_block_to_json(
+          tool_name=event.tool_name,
+          args=pending_args.pop(event.tool_call_id, None),
+          output=event.content,
+          tool_call_id=event.tool_call_id,
+          outcome=event.outcome,
+        )
+        await engine.save_message(thread_id, "tool", tool_json)
   except Exception as exc:  # surface model/config errors to the client
     logger.exception("chat.send stream failed")
     await ws.send_json({"v": 1, "type": "chat.error", "id": corr, "data": {"error": str(exc)}})
     return
 
-  full = "".join(reply_parts)
-  if full:
-    await engine.save_message(thread_id, "agent", full)
+  if current_text.strip():
+    await engine.save_message(thread_id, "assistant", current_text)
   await ws.send_json({"v": 1, "type": "chat.done", "id": corr, "data": {}})

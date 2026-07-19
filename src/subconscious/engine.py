@@ -1392,6 +1392,26 @@ class Engine:
         ws.rag_config = json.dumps(self._normalize_rag_config(config))
         await session.commit()
 
+  async def get_workspace_default_model_id(self, workspace_id: int) -> Optional[str]:
+    """Return the workspace's default model id for new threads.
+
+    NULL / "default" means "use the first available model config"; the UI
+    resolves that fallback.
+    """
+    if not workspace_id:
+      return None
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      return ws.default_model_id if ws else None
+
+  async def set_workspace_default_model_id(self, workspace_id: int, model_id: Optional[str]) -> None:
+    """Persist the workspace's default model id for new threads."""
+    async with self.db.get_session() as session:
+      ws = await session.get(Workspace, workspace_id)
+      if ws:
+        ws.default_model_id = model_id or None
+        await session.commit()
+
   async def get_workspace_tools_config(self, workspace_id: int) -> dict:
     """Return the persisted tools_config for a workspace ({} if unset)."""
     if not workspace_id:
