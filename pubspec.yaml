@@ -1,0 +1,16 @@
+name: subconscious_workspace
+description: Open-source multi-platform Subconscious workspace.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: '>=3.13.2 <4.0.0'
+
+workspace:
+  - apps/core_business_logic
+  - apps/shared_ui_kit
+  - apps/unified_app
+  - apps/tui_app
+
+dev_dependencies:
+  lints: 6.1.0

@@ -1,0 +1,16 @@
+name: shared_ui_kit
+description: Shared Flutter design tokens, themes, and brand assets.
+publish_to: none
+version: 0.1.0
+resolution: workspace
+
+environment:
+  sdk: '>=3.13.2 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  assets:
+    - assets/branding/logo.svg

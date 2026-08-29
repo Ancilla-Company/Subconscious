@@ -1,0 +1,16 @@
+name: tui_app
+description: Pure Dart terminal presentation for Subconscious.
+publish_to: none
+version: 0.1.0
+resolution: workspace
+
+environment:
+  sdk: '>=3.13.2 <4.0.0'
+
+dependencies:
+  core_business_logic:
+    path: ../core_business_logic
+  dart_tui: 2.0.0
+
+executables:
+  subconscious: main

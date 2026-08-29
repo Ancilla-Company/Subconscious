@@ -1,0 +1,19 @@
+name: unified_app
+description: Adaptive Subconscious Flutter application.
+publish_to: none
+version: 0.1.0+1
+resolution: workspace
+
+environment:
+  sdk: '>=3.13.2 <4.0.0'
+
+dependencies:
+  core_business_logic:
+    path: ../core_business_logic
+  flutter:
+    sdk: flutter
+  shared_ui_kit:
+    path: ../shared_ui_kit
+
+flutter:
+  uses-material-design: true
