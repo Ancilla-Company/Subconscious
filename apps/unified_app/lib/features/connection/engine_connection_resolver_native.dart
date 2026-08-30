@@ -18,7 +18,7 @@ Future<EngineRepository?> resolveEngineRepository({
   required bool preferDev,
 }) async {
   Object? discoveryError;
-  final String? directory = _dataDirectory(preferDev);
+  final String? directory = engineDataDirectory(preferDev: preferDev);
   if (directory != null) {
     try {
       final EngineRuntimeInfo runtime = await EngineDiscovery(
@@ -85,17 +85,14 @@ EngineRepository? _repositoryFromExplicit(Uri? endpoint, String token) {
   );
 }
 
-String? _dataDirectory(bool dev) {
+String? engineDataDirectory({required bool preferDev}) {
+  final bool dev = preferDev;
   final Map<String, String> environment = Platform.environment;
   String? baseDirectory;
   if (Platform.isWindows) {
-    baseDirectory = environment['APPDATA'];
-    final String? userProfile = environment['USERPROFILE'];
-    baseDirectory ??= userProfile == null
-        ? null
-        : _join(_join(userProfile, 'AppData'), 'Roaming');
-    if (baseDirectory != null) {
-      baseDirectory = _join(baseDirectory, 'Subconscious');
+    final String? applicationData = environment['APPDATA'];
+    if (applicationData != null && applicationData.trim().isNotEmpty) {
+      baseDirectory = _join(applicationData, 'Subconscious');
     }
   } else if (Platform.isMacOS) {
     final String? home = environment['HOME'];
@@ -141,4 +138,27 @@ final class _FileRuntimeInfoLoader implements RuntimeInfoLoader {
       return null;
     }
   }
+}
+
+Future<void> openEngineDataDirectory(String path) async {
+  final Directory directory = Directory(path);
+  if (!await directory.exists()) {
+    throw FileSystemException(
+      'The engine data directory does not exist.',
+      path,
+    );
+  }
+  if (Platform.isWindows) {
+    await Process.start('explorer.exe', <String>[path], runInShell: false);
+    return;
+  }
+  if (Platform.isMacOS) {
+    await Process.start('open', <String>[path], runInShell: false);
+    return;
+  }
+  if (Platform.isLinux) {
+    await Process.start('xdg-open', <String>[path], runInShell: false);
+    return;
+  }
+  throw UnsupportedError('Opening the engine data directory is unavailable.');
 }

@@ -8,11 +8,46 @@ final class EngineLlmProvider extends ChangeNotifier
     required this.repository,
     this.threadUuid,
     this.workspaceUuid,
+    this.modelId,
   });
   final core.EngineRepository repository;
   final String? threadUuid;
   final String? workspaceUuid;
+  String? modelId;
   final List<toolkit.ChatMessage> _history = <toolkit.ChatMessage>[];
+  final Map<toolkit.ChatMessage, DateTime?> _timestamps =
+      <toolkit.ChatMessage, DateTime?>{};
+
+  DateTime? timestampFor(toolkit.ChatMessage message) => _timestamps[message];
+
+  void selectModel(String? value) {
+    modelId = value;
+    notifyListeners();
+  }
+
+  void replaceEngineHistory(Iterable<core.ChatMessage> messages) {
+    _history.clear();
+    _timestamps.clear();
+    for (final core.ChatMessage message in messages) {
+      toolkit.ChatMessage? converted;
+      switch (message.role.toLowerCase()) {
+        case 'user':
+          converted = toolkit.ChatMessage.user(
+            message.content,
+            const <toolkit.Attachment>[],
+          );
+        case 'assistant':
+          final toolkit.ChatMessage response = toolkit.ChatMessage.llm();
+          response.append(message.content);
+          converted = response;
+      }
+      if (converted != null) {
+        _history.add(converted);
+        _timestamps[converted] = message.createdAt;
+      }
+    }
+    notifyListeners();
+  }
 
   @override
   Iterable<toolkit.ChatMessage> get history =>
@@ -23,6 +58,7 @@ final class EngineLlmProvider extends ChangeNotifier
     _history
       ..clear()
       ..addAll(value);
+    _timestamps.clear();
     notifyListeners();
   }
 
@@ -39,9 +75,15 @@ final class EngineLlmProvider extends ChangeNotifier
     String prompt, {
     Iterable<toolkit.Attachment> attachments = const <toolkit.Attachment>[],
   }) async* {
-    _history.add(toolkit.ChatMessage.user(prompt, attachments));
+    final toolkit.ChatMessage user = toolkit.ChatMessage.user(
+      prompt,
+      attachments,
+    );
+    _history.add(user);
+    _timestamps[user] = DateTime.now();
     final toolkit.ChatMessage response = toolkit.ChatMessage.llm();
     _history.add(response);
+    _timestamps[response] = DateTime.now();
     notifyListeners();
     try {
       await for (final String delta in _stream(prompt)) {
@@ -51,6 +93,7 @@ final class EngineLlmProvider extends ChangeNotifier
       }
     } on Object {
       _history.remove(response);
+      _timestamps.remove(response);
       notifyListeners();
       rethrow;
     }
@@ -60,5 +103,6 @@ final class EngineLlmProvider extends ChangeNotifier
     content: prompt,
     threadUuid: threadUuid,
     workspaceUuid: workspaceUuid,
+    modelId: modelId,
   );
 }

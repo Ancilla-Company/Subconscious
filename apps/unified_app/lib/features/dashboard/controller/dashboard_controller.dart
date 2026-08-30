@@ -67,9 +67,11 @@ final class DashboardController extends ChangeNotifier {
   Object? error;
   Object? workspacesError;
   Object? threadsError;
+  Object? chatError;
   Object? filesError;
   bool isLoadingWorkspaces = false;
   bool isLoadingThreads = false;
+  bool isLoadingChat = false;
   bool isLoadingFile = false;
   bool isSavingFile = false;
   OpenWorkspaceFile? openFile;
@@ -81,6 +83,7 @@ final class DashboardController extends ChangeNotifier {
   bool _connectionCheckInProgress = false;
   bool _disposed = false;
   int _threadRequestVersion = 0;
+  int _chatRequestVersion = 0;
   int _fileRequestVersion = 0;
 
   bool get isConnected => connectionStatus == EngineConnectionStatus.connected;
@@ -177,6 +180,8 @@ final class DashboardController extends ChangeNotifier {
 
   Future<void> _closeRepository(EngineRepository repositoryToClose) async {
     if (identical(_repository, repositoryToClose)) _repository = null;
+    _chatRequestVersion++;
+    isLoadingChat = false;
     chatProvider?.dispose();
     chatProvider = null;
     try {
@@ -228,7 +233,10 @@ final class DashboardController extends ChangeNotifier {
     threadsError = null;
     _threadRequestVersion++;
     _clearFiles();
-    _setChatScope(workspaceUuid: workspace?.uuid);
+    _setChatScope(
+      workspaceUuid: workspace?.uuid,
+      modelId: workspace?.defaultModelId,
+    );
     notifyListeners();
     if (workspace == null || repository == null || !isConnected) return;
 
@@ -251,10 +259,48 @@ final class DashboardController extends ChangeNotifier {
     }
   }
 
-  void selectThread(ThreadInfo thread) {
+  Future<void> selectThread(ThreadInfo thread) async {
+    final EngineRepository? currentRepository = repository;
+    final int requestVersion = ++_chatRequestVersion;
     selectedThread = thread;
-    _setChatScope(threadUuid: thread.uuid);
+    chatProvider?.dispose();
+    chatProvider = null;
+    chatError = null;
+    isLoadingChat = true;
     notifyListeners();
+    if (currentRepository == null || !isConnected) {
+      isLoadingChat = false;
+      chatError = StateError('The Subconscious engine is not connected.');
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final List<ChatMessage> messages = await currentRepository
+          .listMessages(thread.uuid)
+          .timeout(requestTimeout);
+      if (_disposed ||
+          requestVersion != _chatRequestVersion ||
+          selectedThread?.uuid != thread.uuid) {
+        return;
+      }
+      final EngineLlmProvider provider = EngineLlmProvider(
+        repository: currentRepository,
+        threadUuid: thread.uuid,
+        modelId: thread.defaultModelId ?? selectedWorkspace?.defaultModelId,
+      );
+      provider.replaceEngineHistory(messages);
+      chatProvider = provider;
+    } on Object catch (caughtError) {
+      if (!_disposed && requestVersion == _chatRequestVersion) {
+        chatError = caughtError;
+      }
+    } finally {
+      if (!_disposed && requestVersion == _chatRequestVersion) {
+        isLoadingChat = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> createWorkspace({
@@ -448,8 +494,15 @@ final class DashboardController extends ChangeNotifier {
     await loadDirectory(rootIndex, parent);
   }
 
-  void _setChatScope({String? workspaceUuid, String? threadUuid}) {
+  void _setChatScope({
+    String? workspaceUuid,
+    String? threadUuid,
+    String? modelId,
+  }) {
+    _chatRequestVersion++;
     chatProvider?.dispose();
+    chatError = null;
+    isLoadingChat = false;
     final EngineRepository? currentRepository = repository;
     chatProvider =
         currentRepository == null ||
@@ -459,6 +512,7 @@ final class DashboardController extends ChangeNotifier {
             repository: currentRepository,
             workspaceUuid: workspaceUuid,
             threadUuid: threadUuid,
+            modelId: modelId,
           );
   }
 

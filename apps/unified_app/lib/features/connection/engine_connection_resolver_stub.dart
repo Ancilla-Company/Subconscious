@@ -23,3 +23,9 @@ Future<EngineRepository?> resolveEngineRepository({
     socket: WebSocketEngineClient(endpoint: webSocketUri),
   );
 }
+
+String? engineDataDirectory({required bool preferDev}) => null;
+
+Future<void> openEngineDataDirectory(String path) async {
+  throw UnsupportedError('Opening the engine data directory is unavailable.');
+}

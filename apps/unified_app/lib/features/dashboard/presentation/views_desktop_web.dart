@@ -1,8 +1,8 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_ai_toolkit/flutter_ai_toolkit.dart';
 
 import '../../chat/engine_llm_provider.dart';
+import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
@@ -118,20 +118,27 @@ final class _DesktopWebDashboardViewState
                     child: AnimatedBuilder(
                       animation: widget.controller,
                       builder: (BuildContext context, Widget? child) {
-                        if (widget.controller.isLoading) {
+                        if (widget.controller.isLoading ||
+                            widget.controller.isLoadingChat) {
                           return const Center(
                             child: CircularProgressIndicator(),
                           );
                         }
+                        if (widget.controller.chatError
+                            case final Object error) {
+                          return _Unavailable(error: error);
+                        }
                         final EngineLlmProvider? provider =
                             widget.controller.chatProvider;
                         if (provider != null && widget.controller.isConnected) {
-                          return LlmChatView(
+                          return EngineChatPanel(
+                            key: ValueKey<String>(
+                              provider.threadUuid ??
+                                  provider.workspaceUuid ??
+                                  'chat',
+                            ),
                             provider: provider,
-                            welcomeMessage:
-                                'Connected to your Subconscious engine.',
-                            enableAttachments: false,
-                            enableVoiceNotes: false,
+                            title: widget.controller.selectedThread?.title,
                           );
                         }
                         return _Unavailable(error: widget.controller.error);

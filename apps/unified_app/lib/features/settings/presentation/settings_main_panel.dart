@@ -1,8 +1,10 @@
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../connection/engine_connection_resolver.dart';
 import '../controller/settings_controller.dart';
 
 final class SettingsMainPanel extends StatelessWidget {
@@ -13,15 +15,24 @@ final class SettingsMainPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
-    builder: (BuildContext context, Widget? child) => ColoredBox(
-      color: Colors.white,
-      child: switch (controller.activePage) {
-        SettingsPage.general => _GeneralSettingsPage(controller: controller),
-        SettingsPage.models => _ModelsSettingsPage(controller: controller),
-        SettingsPage.tools => _ToolsSettingsPage(controller: controller),
-        SettingsPage.skills => const _SkillsSettingsPage(),
-        SettingsPage.about => const _AboutSettingsPage(),
-      },
+    builder: (BuildContext context, Widget? child) => Theme(
+      data: !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+          ? _windowsSettingsTheme(context)
+          : Theme.of(context),
+      child: SizedBox.expand(
+        child: ColoredBox(
+          color: Colors.white,
+          child: switch (controller.activePage) {
+            SettingsPage.general => _GeneralSettingsPage(
+              controller: controller,
+            ),
+            SettingsPage.models => _ModelsSettingsPage(controller: controller),
+            SettingsPage.tools => _ToolsSettingsPage(controller: controller),
+            SettingsPage.skills => const _SkillsSettingsPage(),
+            SettingsPage.about => const _AboutSettingsPage(),
+          },
+        ),
+      ),
     ),
   );
 }
@@ -109,13 +120,7 @@ final class _GeneralSettingsPage extends StatelessWidget {
             controller.updateGeneralSetting('panel_configuration', value),
       ),
       const _FieldLabel('Data Folder'),
-      const TextField(
-        enabled: false,
-        decoration: InputDecoration(
-          hintText: 'Managed by the connected .NET engine',
-          prefixIcon: Icon(FluentIcons.folder_20_regular),
-        ),
-      ),
+      const _DataDirectoryField(),
     ],
   );
 }
@@ -971,4 +976,126 @@ final class _CopyLink extends StatelessWidget {
 String? _nullIfEmpty(String value) {
   final String trimmed = value.trim();
   return trimmed.isEmpty ? null : trimmed;
+}
+
+ThemeData _windowsSettingsTheme(BuildContext context) {
+  final ThemeData base = Theme.of(context);
+  const RoundedRectangleBorder buttonShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.all(Radius.circular(3)),
+  );
+  return base.copyWith(
+    visualDensity: VisualDensity.compact,
+    inputDecorationTheme: const InputDecorationTheme(
+      isDense: true,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: Color(0xFFB8B8B8)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: Color(0xFFB8B8B8)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: Color(0xFF0067C0), width: 1.5),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(shape: buttonShape),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(shape: buttonShape),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(shape: buttonShape),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(shape: buttonShape),
+    ),
+  );
+}
+
+final class _DataDirectoryField extends StatelessWidget {
+  const _DataDirectoryField();
+
+  @override
+  Widget build(BuildContext context) {
+    const bool preferDev = bool.fromEnvironment('SUBCONSCIOUS_ENGINE_DEV');
+    final String? path = engineDataDirectory(preferDev: preferDev);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: TextFormField(
+            key: ValueKey<String?>(path),
+            initialValue: path ?? 'Unavailable on this platform',
+            readOnly: true,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(FluentIcons.folder_20_regular, size: 17),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _WindowsIconButton(
+          tooltip: 'Copy data folder path',
+          icon: FluentIcons.copy_20_regular,
+          onPressed: path == null
+              ? null
+              : () async {
+                  await Clipboard.setData(ClipboardData(text: path));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Data folder path copied')),
+                    );
+                  }
+                },
+        ),
+        const SizedBox(width: 6),
+        _WindowsIconButton(
+          tooltip: 'Open data folder',
+          icon: FluentIcons.folder_open_20_regular,
+          onPressed: path == null
+              ? null
+              : () async {
+                  try {
+                    await openEngineDataDirectory(path);
+                  } on Object catch (error) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text('$error')));
+                    }
+                  }
+                },
+        ),
+      ],
+    );
+  }
+}
+
+final class _WindowsIconButton extends StatelessWidget {
+  const _WindowsIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 36,
+    child: IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        backgroundColor: Colors.white,
+        side: const BorderSide(color: Color(0xFFB8B8B8)),
+      ),
+      icon: Icon(icon, size: 17),
+    ),
+  );
 }

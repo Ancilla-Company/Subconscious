@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_ai_toolkit/flutter_ai_toolkit.dart';
 
 import '../../chat/engine_llm_provider.dart';
+import '../../chat/presentation/engine_chat_panel.dart';
 import '../controller/dashboard_controller.dart';
 
 final class MobileDashboardView extends StatelessWidget {
@@ -26,15 +26,25 @@ final class MobileDashboardView extends StatelessWidget {
   );
 
   Widget _body() {
-    if (controller.isLoading)
+    if (controller.isLoading || controller.isLoadingChat) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (controller.chatError case final Object error) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('$error'),
+        ),
+      );
+    }
     final EngineLlmProvider? provider = controller.chatProvider;
     if (provider != null && controller.isConnected) {
-      return LlmChatView(
+      return EngineChatPanel(
+        key: ValueKey<String>(
+          provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
+        ),
         provider: provider,
-        welcomeMessage: 'Your local engine is ready.',
-        enableAttachments: false,
-        enableVoiceNotes: false,
+        title: controller.selectedThread?.title,
       );
     }
     return Center(
