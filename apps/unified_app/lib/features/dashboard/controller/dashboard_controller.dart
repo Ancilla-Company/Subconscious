@@ -325,8 +325,9 @@ final class DashboardController extends ChangeNotifier {
     required String name,
     String? description,
   }) async {
-    final RestEngineClient? client = repository?.rest;
-    if (client == null) return;
+    final RestEngineClient client =
+        repository?.rest ??
+        (throw StateError('The Subconscious engine is not connected.'));
     final Workspace updated = await client
         .updateWorkspace(
           workspaceUuid: workspace.uuid,
@@ -344,6 +345,26 @@ final class DashboardController extends ChangeNotifier {
         .toList(growable: false);
     if (selectedWorkspace?.uuid == updated.uuid) selectedWorkspace = updated;
     notifyListeners();
+  }
+
+  Future<void> deleteWorkspace(Workspace workspace) async {
+    final RestEngineClient client =
+        repository?.rest ??
+        (throw StateError('The Subconscious engine is not connected.'));
+    await client.deleteWorkspace(workspace.uuid).timeout(requestTimeout);
+
+    final bool wasSelected = selectedWorkspace?.uuid == workspace.uuid;
+    workspaces = workspaces
+        .where((Workspace item) => item.uuid != workspace.uuid)
+        .toList(growable: false);
+    if (!wasSelected) {
+      notifyListeners();
+      return;
+    }
+
+    final Workspace? nextWorkspace = workspaces.firstOrNull;
+    if (nextWorkspace == null) settings.showUtility();
+    await selectWorkspace(nextWorkspace);
   }
 
   List<WorkspaceFileEntry>? directoryEntries(int rootIndex, String path) =>

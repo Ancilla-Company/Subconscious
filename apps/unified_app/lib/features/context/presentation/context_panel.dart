@@ -307,35 +307,16 @@ final class _WorkspacesSection extends StatelessWidget {
           const SizedBox(height: 8),
       itemBuilder: (BuildContext context, int index) {
         final Workspace workspace = controller.workspaces[index];
-        return Stack(
-          children: <Widget>[
-            _NavigationRow(
-              selected: controller.selectedWorkspace?.uuid == workspace.uuid,
-              label: workspace.name,
-              subtitle: workspace.description?.trim().isEmpty ?? true
-                  ? null
-                  : workspace.description,
-              onTap: () => controller.selectWorkspace(workspace),
-            ),
-            Positioned(
-              right: 2,
-              top: 2,
-              child: IconButton(
-                constraints: const BoxConstraints.tightFor(
-                  width: 28,
-                  height: 28,
-                ),
-                padding: EdgeInsets.zero,
-                tooltip: 'Edit workspace',
-                icon: const Icon(FluentIcons.edit_20_regular, size: 15),
-                onPressed: () => _showWorkspaceDialog(
-                  context,
-                  controller,
-                  workspace: workspace,
-                ),
-              ),
-            ),
-          ],
+        return _NavigationRow(
+          selected: controller.selectedWorkspace?.uuid == workspace.uuid,
+          label: workspace.name,
+          subtitle: workspace.description?.trim().isEmpty ?? true
+              ? null
+              : workspace.description,
+          onTap: () {
+            controller.selectWorkspace(workspace);
+            controller.settings.showWorkspace();
+          },
         );
       },
     );
@@ -344,19 +325,14 @@ final class _WorkspacesSection extends StatelessWidget {
 
 Future<void> _showWorkspaceDialog(
   BuildContext context,
-  DashboardController controller, {
-  Workspace? workspace,
-}) async {
-  final TextEditingController nameController = TextEditingController(
-    text: workspace?.name,
-  );
-  final TextEditingController descriptionController = TextEditingController(
-    text: workspace?.description,
-  );
+  DashboardController controller,
+) async {
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController descriptionController = TextEditingController();
   final _WorkspaceDraft? draft = await showDialog<_WorkspaceDraft>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
-      title: Text(workspace == null ? 'New workspace' : 'Edit workspace'),
+      title: const Text('New workspace'),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -384,13 +360,14 @@ Future<void> _showWorkspaceDialog(
         FilledButton(
           onPressed: () {
             final String name = nameController.text.trim();
-            if (name.isNotEmpty)
+            if (name.isNotEmpty) {
               Navigator.pop(
                 context,
                 _WorkspaceDraft(name, descriptionController.text.trim()),
               );
+            }
           },
-          child: const Text('Save'),
+          child: const Text('Create'),
         ),
       ],
     ),
@@ -399,23 +376,17 @@ Future<void> _showWorkspaceDialog(
   descriptionController.dispose();
   if (draft == null || !context.mounted) return;
   try {
-    if (workspace == null) {
-      await controller.createWorkspace(
-        name: draft.name,
-        description: draft.description.isEmpty ? null : draft.description,
-      );
-    } else {
-      await controller.updateWorkspace(
-        workspace,
-        name: draft.name,
-        description: draft.description.isEmpty ? null : draft.description,
+    await controller.createWorkspace(
+      name: draft.name,
+      description: draft.description.isEmpty ? null : draft.description,
+    );
+    controller.settings.showWorkspace();
+  } on Object catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Couldn't create workspace: $error")),
       );
     }
-  } on Object catch (error) {
-    if (context.mounted)
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Couldn't save workspace: $error")),
-      );
   }
 }
 
