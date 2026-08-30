@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dart Engine Host (Port 7331)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/engine_app/bin/main.dart",
+      "cwd": "${workspaceFolder}",
+      "toolArgs": [
+        "--define=SUBCONSCIOUS_ENGINE_PORT=7331"
+      ],
+      "env": {
+        "SUBCONSCIOUS_RUNTIME_DIRECTORY": "${workspaceFolder}/.dart_tool/runtime"
+      },
+      "console": "terminal"
+    },
+    {
+      "name": "Unified Flutter App (Connected)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
+      "cwd": "${workspaceFolder}/apps/unified_app",
+      "deviceId": "windows",
+      "toolArgs": [
+        "--dart-define=SUBCONSCIOUS_ENGINE_URL=http://127.0.0.1:7331",
+        "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token",
+        "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default"
+      ],
+      "flutterMode": "debug",
+      "console": "terminal"
+    },
+    {
+      "name": "Unified Flutter App (Standalone)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
+      "cwd": "${workspaceFolder}/apps/unified_app",
+      "deviceId": "windows",
+      "flutterMode": "debug",
+      "console": "terminal"
+    },
+    {
+      "name": "TUI App (Connected)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/tui_app/bin/main.dart",
+      "cwd": "${workspaceFolder}",
+      "toolArgs": [
+        "--define=SUBCONSCIOUS_ENGINE_URL=http://127.0.0.1:7331",
+        "--define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token"
+      ],
+      "console": "terminal"
+    }
+  ]
+}

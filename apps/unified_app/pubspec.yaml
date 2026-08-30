@@ -12,8 +12,11 @@ dependencies:
     path: ../core_business_logic
   flutter:
     sdk: flutter
+  fluentui_system_icons: 1.1.273
+  flutter_ai_toolkit: 1.0.0
   shared_ui_kit:
     path: ../shared_ui_kit
+  window_manager: 0.5.2
 
 flutter:
   uses-material-design: true

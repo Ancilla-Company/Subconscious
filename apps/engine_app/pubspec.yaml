@@ -1,0 +1,16 @@
+name: engine_app
+description: Standalone pure Dart Subconscious engine host.
+publish_to: none
+version: 0.1.0
+resolution: workspace
+
+environment:
+  sdk: '>=3.13.2 <4.0.0'
+
+dependencies:
+  core_business_logic:
+    path: ../core_business_logic
+  shelf: 1.4.2
+
+executables:
+  subconscious_engine: main

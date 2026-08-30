@@ -1,3 +1,13 @@
 export 'api/dashboard_api.dart';
+export 'api/engine_exception.dart';
+export 'api/rest_engine_client.dart';
+export 'api/web_socket_engine_client.dart';
+export 'connection/engine_discovery.dart';
+export 'engine/echo_model_provider.dart';
+export 'engine/genkit_model_provider.dart';
+export 'engine/in_memory_engine.dart';
+export 'features/chat_session.dart';
 export 'models/dashboard_summary.dart';
+export 'models/engine_models.dart';
 export 'repositories/dashboard_repository.dart';
+export 'repositories/engine_repository.dart';
