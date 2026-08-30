@@ -1,0 +1,25 @@
+import 'package:core_business_logic/core_business_logic.dart';
+
+Future<EngineRepository?> resolveEngineRepository({
+  required Uri? explicitEndpoint,
+  required String explicitToken,
+  required bool preferDev,
+}) async {
+  final Uri? endpoint = explicitEndpoint;
+  if (endpoint == null || endpoint.host.isEmpty || explicitToken.isEmpty) {
+    return null;
+  }
+  final Uri baseUri = endpoint.replace(
+    path: '/api/v1/',
+    queryParameters: const <String, String>{},
+  );
+  final Uri webSocketUri = endpoint.replace(
+    scheme: endpoint.scheme == 'https' ? 'wss' : 'ws',
+    path: '/api/v1/events',
+    queryParameters: <String, String>{'token': explicitToken},
+  );
+  return EngineRepository(
+    rest: RestEngineClient(baseUri: baseUri, token: explicitToken),
+    socket: WebSocketEngineClient(endpoint: webSocketUri),
+  );
+}

@@ -3,6 +3,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 
 import '../../dashboard/controller/dashboard_controller.dart';
+import '../../settings/controller/settings_controller.dart';
 
 enum ContextPanelScreen { threads, files, workspaces, settings, account }
 
@@ -27,7 +28,9 @@ final class ContextPanel extends StatelessWidget {
         ContextPanelScreen.workspaces => _WorkspacesSection(
           controller: controller,
         ),
-        ContextPanelScreen.settings => const _SettingsSection(),
+        ContextPanelScreen.settings => _SettingsSection(
+          controller: controller.settings,
+        ),
         ContextPanelScreen.account => const _AccountSection(),
       },
     ),
@@ -713,45 +716,50 @@ final class _FileEntryDraft {
   final String path;
 }
 
-final class _SettingsSection extends StatefulWidget {
-  const _SettingsSection();
+final class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({required this.controller});
 
-  @override
-  State<_SettingsSection> createState() => _SettingsSectionState();
-}
+  final DashboardSettingsController controller;
 
-final class _SettingsSectionState extends State<_SettingsSection> {
-  String _selectedPage = 'General Settings';
-
-  static const List<(String, IconData)> _pages = <(String, IconData)>[
-    ('General Settings', FluentIcons.settings_20_regular),
-    ('Models', FluentIcons.bot_20_regular),
-    ('Tools', FluentIcons.toolbox_20_regular),
-    ('Skills', FluentIcons.book_toolbox_20_regular),
-    ('About', FluentIcons.info_20_regular),
-  ];
-
-  @override
-  Widget build(BuildContext context) => Column(
-    children: <Widget>[
-      const _SectionHeader(title: 'Settings'),
-      Expanded(
-        child: ListView.separated(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          itemCount: _pages.length,
-          separatorBuilder: (BuildContext context, int index) =>
-              const SizedBox(height: 8),
-          itemBuilder: (BuildContext context, int index) {
-            final (String, IconData) page = _pages[index];
-            return _NavigationRow(
-              selected: _selectedPage == page.$1,
-              label: page.$1,
-              onTap: () => setState(() => _selectedPage = page.$1),
-            );
-          },
+  static const List<(String, IconData, SettingsPage)> _pages =
+      <(String, IconData, SettingsPage)>[
+        (
+          'General Settings',
+          FluentIcons.settings_20_regular,
+          SettingsPage.general,
         ),
-      ),
-    ],
+        ('Models', FluentIcons.bot_20_regular, SettingsPage.models),
+        ('Tools', FluentIcons.toolbox_20_regular, SettingsPage.tools),
+        ('Skills', FluentIcons.book_toolbox_20_regular, SettingsPage.skills),
+        ('About', FluentIcons.info_20_regular, SettingsPage.about),
+      ];
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (BuildContext context, Widget? child) => Column(
+      children: <Widget>[
+        const _SectionHeader(title: 'Settings'),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            itemCount: _pages.length,
+            separatorBuilder: (BuildContext context, int index) =>
+                const SizedBox(height: 8),
+            itemBuilder: (BuildContext context, int index) {
+              final (String, IconData, SettingsPage) page = _pages[index];
+              return _NavigationRow(
+                selected:
+                    controller.destination == MainPanelDestination.settings &&
+                    controller.activePage == page.$3,
+                label: page.$1,
+                onTap: () => controller.openSettingsPage(page.$3),
+              );
+            },
+          ),
+        ),
+      ],
+    ),
   );
 }
 

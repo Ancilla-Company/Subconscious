@@ -5,6 +5,7 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../chat/engine_llm_provider.dart';
+import '../../settings/controller/settings_controller.dart';
 
 enum EngineConnectionStatus { disconnected, connecting, connected }
 
@@ -37,15 +38,25 @@ final class OpenWorkspaceFile {
   String get name => path.replaceAll('\\', '/').split('/').last;
 }
 
+typedef EngineRepositoryResolver = Future<EngineRepository?> Function();
+
 /// Shared engine and context-panel state consumed by every Flutter layout.
 final class DashboardController extends ChangeNotifier {
-  DashboardController({required this.repository, this.initialWorkspaceUuid});
+  DashboardController(this._repositoryResolver, {this.initialWorkspaceUuid}) {
+    settings = DashboardSettingsController(
+      repositoryProvider: () => repository,
+    );
+  }
 
   static const Duration reconnectInterval = Duration(seconds: 3);
   static const Duration requestTimeout = Duration(seconds: 5);
 
-  final EngineRepository? repository;
+  final EngineRepositoryResolver _repositoryResolver;
   final String? initialWorkspaceUuid;
+  late final DashboardSettingsController settings;
+  EngineRepository? _repository;
+
+  EngineRepository? get repository => _repository;
 
   EngineLlmProvider? chatProvider;
   EngineConnectionStatus connectionStatus = EngineConnectionStatus.connecting;
@@ -79,8 +90,9 @@ final class DashboardController extends ChangeNotifier {
 
   List<WorkspaceDirectoryRoot> get fileRoots {
     final String? rawDirectories = selectedWorkspace?.directories;
-    if (rawDirectories == null || rawDirectories.trim().isEmpty)
+    if (rawDirectories == null || rawDirectories.trim().isEmpty) {
       return const <WorkspaceDirectoryRoot>[];
+    }
     try {
       final Object? decoded = jsonDecode(rawDirectories);
       if (decoded is! List<Object?>) return const <WorkspaceDirectoryRoot>[];
@@ -110,40 +122,72 @@ final class DashboardController extends ChangeNotifier {
 
   Future<void> _checkConnection({bool forceConnectingState = false}) async {
     if (_connectionCheckInProgress || _disposed) return;
-    final EngineRepository? currentRepository = repository;
-    if (currentRepository == null) {
-      connectionStatus = EngineConnectionStatus.disconnected;
-      error = StateError(
-        'Configure SUBCONSCIOUS_ENGINE_URL and SUBCONSCIOUS_ENGINE_TOKEN to connect.',
-      );
-      notifyListeners();
-      return;
-    }
-
     _connectionCheckInProgress = true;
-    if (!isConnected ||
-        !currentRepository.socket.isConnected ||
-        forceConnectingState) {
+    final EngineRepository? currentRepository = _repository;
+    final bool canReuseCurrent =
+        !forceConnectingState && currentRepository != null && isConnected;
+    if (!canReuseCurrent || !currentRepository.socket.isConnected) {
       connectionStatus = EngineConnectionStatus.connecting;
       notifyListeners();
     }
+
     try {
-      await currentRepository.rest.health().timeout(requestTimeout);
-      if (!currentRepository.socket.isConnected) {
-        await currentRepository.connect().timeout(requestTimeout);
+      if (canReuseCurrent) {
+        try {
+          await currentRepository.rest.health().timeout(requestTimeout);
+          if (!currentRepository.socket.isConnected) {
+            await currentRepository.connect().timeout(requestTimeout);
+          }
+          connectionStatus = EngineConnectionStatus.connected;
+          error = null;
+          notifyListeners();
+          if (workspaces.isEmpty) await loadWorkspaces();
+          return;
+        } on Object {
+          await _closeRepository(currentRepository);
+        }
+      } else if (currentRepository != null) {
+        await _closeRepository(currentRepository);
       }
-      final bool recovered = !isConnected;
+
+      final EngineRepository? discoveredRepository = await _repositoryResolver()
+          .timeout(requestTimeout);
+      if (discoveredRepository == null) {
+        throw StateError(
+          'No reachable Subconscious engine was discovered. Start the engine or configure an explicit endpoint.',
+        );
+      }
+      _repository = discoveredRepository;
+      await discoveredRepository.rest.health().timeout(requestTimeout);
+      await discoveredRepository.connect().timeout(requestTimeout);
       connectionStatus = EngineConnectionStatus.connected;
       error = null;
       notifyListeners();
-      if (recovered || workspaces.isEmpty) await loadWorkspaces();
+      await loadWorkspaces();
     } on Object catch (caughtError) {
+      final EngineRepository? failedRepository = _repository;
+      if (failedRepository != null) await _closeRepository(failedRepository);
       connectionStatus = EngineConnectionStatus.disconnected;
       error = caughtError;
-      await currentRepository.socket.close();
       notifyListeners();
     } finally {
       _connectionCheckInProgress = false;
+    }
+  }
+
+  Future<void> _closeRepository(EngineRepository repositoryToClose) async {
+    if (identical(_repository, repositoryToClose)) _repository = null;
+    chatProvider?.dispose();
+    chatProvider = null;
+    try {
+      await repositoryToClose.socket.dispose();
+    } on Object {
+      // Best effort while replacing a failed connection.
+    }
+    try {
+      await repositoryToClose.rest.close();
+    } on Object {
+      // Best effort while replacing a failed connection.
     }
   }
 
@@ -434,6 +478,7 @@ final class DashboardController extends ChangeNotifier {
     _disposed = true;
     _reconnectTimer?.cancel();
     chatProvider?.dispose();
+    settings.dispose();
     unawaited(repository?.socket.dispose());
     unawaited(repository?.rest.close());
     super.dispose();

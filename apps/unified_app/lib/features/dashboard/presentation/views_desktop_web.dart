@@ -5,6 +5,7 @@ import 'package:flutter_ai_toolkit/flutter_ai_toolkit.dart';
 import '../../chat/engine_llm_provider.dart';
 import '../../context/presentation/context_panel.dart';
 import '../controller/dashboard_controller.dart';
+import 'dashboard_main_panel.dart';
 import 'window_composition_bar.dart';
 
 const Color _dividerColor = Color(0xFFE0E0E0);
@@ -46,6 +47,16 @@ final class _DesktopWebDashboardViewState
       _selectedPanel = panel;
       _isContextPanelVisible = true;
     });
+    switch (panel) {
+      case ContextPanelScreen.files:
+        widget.controller.settings.showFiles();
+      case ContextPanelScreen.settings:
+        widget.controller.settings.showSettings();
+      case ContextPanelScreen.threads:
+      case ContextPanelScreen.workspaces:
+      case ContextPanelScreen.account:
+        widget.controller.settings.showUtility();
+    }
   }
 
   @override
@@ -140,7 +151,7 @@ final class _DesktopWebDashboardViewState
                     },
                   ),
                   Expanded(
-                    child: WorkspaceFileEditor(controller: widget.controller),
+                    child: DashboardMainPanel(controller: widget.controller),
                   ),
                   if (_isContextPanelVisible) ...<Widget>[
                     _PanelResizeDivider(
