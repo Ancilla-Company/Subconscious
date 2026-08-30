@@ -19,7 +19,7 @@ final class ContextPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     child: AnimatedBuilder(
       animation: controller,
       builder: (BuildContext context, Widget? child) => switch (screen) {
@@ -832,14 +832,15 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
   @override
   Widget build(BuildContext context) {
     final OpenWorkspaceFile? file = widget.controller.openFile;
-    if (widget.controller.isLoadingFile)
-      return const ColoredBox(
-        color: Colors.white,
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+    if (widget.controller.isLoadingFile) {
+      return ColoredBox(
+        color: Theme.of(context).colorScheme.surface,
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
+    }
     if (file == null) {
       return ColoredBox(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -862,7 +863,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       );
     }
     return ColoredBox(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Column(
         children: <Widget>[
           SizedBox(

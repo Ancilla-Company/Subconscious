@@ -144,6 +144,9 @@ final class DashboardController extends ChangeNotifier {
           connectionStatus = EngineConnectionStatus.connected;
           error = null;
           notifyListeners();
+          if (!settings.hasLoadedGeneralSettings) {
+            await settings.loadGeneralSettings();
+          }
           if (workspaces.isEmpty) await loadWorkspaces();
           return;
         } on Object {
@@ -163,6 +166,7 @@ final class DashboardController extends ChangeNotifier {
       _repository = discoveredRepository;
       await discoveredRepository.rest.health().timeout(requestTimeout);
       await discoveredRepository.connect().timeout(requestTimeout);
+      await settings.loadGeneralSettings(force: true);
       connectionStatus = EngineConnectionStatus.connected;
       error = null;
       notifyListeners();

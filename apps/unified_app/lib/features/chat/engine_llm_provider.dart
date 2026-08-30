@@ -1,24 +1,42 @@
 import 'package:core_business_logic/core_business_logic.dart' as core;
 import 'package:flutter/foundation.dart';
-import 'package:flutter_ai_toolkit/flutter_ai_toolkit.dart' as toolkit;
 
-final class EngineLlmProvider extends ChangeNotifier
-    implements toolkit.LlmProvider {
+enum EngineChatMessageOrigin { user, assistant }
+
+final class EngineChatMessage {
+  EngineChatMessage.user(String text)
+    : origin = EngineChatMessageOrigin.user,
+      _text = text;
+
+  EngineChatMessage.assistant([String text = ''])
+    : origin = EngineChatMessageOrigin.assistant,
+      _text = text;
+
+  final EngineChatMessageOrigin origin;
+  String _text;
+
+  String get text => _text;
+
+  void append(String value) => _text += value;
+}
+
+final class EngineLlmProvider extends ChangeNotifier {
   EngineLlmProvider({
     required this.repository,
     this.threadUuid,
     this.workspaceUuid,
     this.modelId,
   });
+
   final core.EngineRepository repository;
   final String? threadUuid;
   final String? workspaceUuid;
   String? modelId;
-  final List<toolkit.ChatMessage> _history = <toolkit.ChatMessage>[];
-  final Map<toolkit.ChatMessage, DateTime?> _timestamps =
-      <toolkit.ChatMessage, DateTime?>{};
+  final List<EngineChatMessage> _history = <EngineChatMessage>[];
+  final Map<EngineChatMessage, DateTime?> _timestamps =
+      <EngineChatMessage, DateTime?>{};
 
-  DateTime? timestampFor(toolkit.ChatMessage message) => _timestamps[message];
+  DateTime? timestampFor(EngineChatMessage message) => _timestamps[message];
 
   void selectModel(String? value) {
     modelId = value;
@@ -29,18 +47,11 @@ final class EngineLlmProvider extends ChangeNotifier
     _history.clear();
     _timestamps.clear();
     for (final core.ChatMessage message in messages) {
-      toolkit.ChatMessage? converted;
-      switch (message.role.toLowerCase()) {
-        case 'user':
-          converted = toolkit.ChatMessage.user(
-            message.content,
-            const <toolkit.Attachment>[],
-          );
-        case 'assistant':
-          final toolkit.ChatMessage response = toolkit.ChatMessage.llm();
-          response.append(message.content);
-          converted = response;
-      }
+      final EngineChatMessage? converted = switch (message.role.toLowerCase()) {
+        'user' => EngineChatMessage.user(message.content),
+        'assistant' => EngineChatMessage.assistant(message.content),
+        _ => null,
+      };
       if (converted != null) {
         _history.add(converted);
         _timestamps[converted] = message.createdAt;
@@ -49,12 +60,10 @@ final class EngineLlmProvider extends ChangeNotifier
     notifyListeners();
   }
 
-  @override
-  Iterable<toolkit.ChatMessage> get history =>
-      List<toolkit.ChatMessage>.unmodifiable(_history);
+  Iterable<EngineChatMessage> get history =>
+      List<EngineChatMessage>.unmodifiable(_history);
 
-  @override
-  set history(Iterable<toolkit.ChatMessage> value) {
+  set history(Iterable<EngineChatMessage> value) {
     _history
       ..clear()
       ..addAll(value);
@@ -62,26 +71,15 @@ final class EngineLlmProvider extends ChangeNotifier
     notifyListeners();
   }
 
-  @override
-  Stream<String> generateStream(
-    String prompt, {
-    Iterable<toolkit.Attachment> attachments = const <toolkit.Attachment>[],
-  }) async* {
+  Stream<String> generateStream(String prompt) async* {
     yield* _stream(prompt);
   }
 
-  @override
-  Stream<String> sendMessageStream(
-    String prompt, {
-    Iterable<toolkit.Attachment> attachments = const <toolkit.Attachment>[],
-  }) async* {
-    final toolkit.ChatMessage user = toolkit.ChatMessage.user(
-      prompt,
-      attachments,
-    );
+  Stream<String> sendMessageStream(String prompt) async* {
+    final EngineChatMessage user = EngineChatMessage.user(prompt);
     _history.add(user);
     _timestamps[user] = DateTime.now();
-    final toolkit.ChatMessage response = toolkit.ChatMessage.llm();
+    final EngineChatMessage response = EngineChatMessage.assistant();
     _history.add(response);
     _timestamps[response] = DateTime.now();
     notifyListeners();

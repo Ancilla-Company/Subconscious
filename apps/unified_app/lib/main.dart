@@ -7,6 +7,7 @@ import 'features/connection/engine_connection_resolver.dart';
 import 'features/dashboard/controller/dashboard_controller.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'features/dashboard/presentation/window_composition_bar.dart';
+import 'features/settings/controller/settings_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,10 +35,33 @@ final class SubconsciousApp extends StatelessWidget {
   final DashboardController dashboardController;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: DashboardPage(controller: dashboardController),
-    theme: AppTheme.light(),
-    title: 'Subconscious',
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: dashboardController.settings,
+    builder: (BuildContext context, Widget? child) {
+      final Color accentColor = _accentColor(
+        dashboardController.settings.accentTheme,
+      );
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: DashboardPage(controller: dashboardController),
+        theme: AppTheme.light(seedColor: accentColor),
+        darkTheme: AppTheme.dark(seedColor: accentColor),
+        themeMode: switch (dashboardController.settings.lightingMode) {
+          AppLightingMode.device => ThemeMode.system,
+          AppLightingMode.light => ThemeMode.light,
+          AppLightingMode.dark => ThemeMode.dark,
+        },
+        title: 'Subconscious',
+      );
+    },
   );
 }
+
+Color _accentColor(AppAccentTheme accent) => switch (accent) {
+  AppAccentTheme.device => AppColors.seed,
+  AppAccentTheme.blue => const Color(0xFF0067C0),
+  AppAccentTheme.purple => const Color(0xFF7C3AED),
+  AppAccentTheme.green => const Color(0xFF107C10),
+  AppAccentTheme.orange => const Color(0xFFCA5010),
+  AppAccentTheme.red => const Color(0xFFD13438),
+};

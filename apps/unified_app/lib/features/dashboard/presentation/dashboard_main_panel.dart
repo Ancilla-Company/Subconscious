@@ -31,7 +31,7 @@ final class _UtilityPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     child: Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,

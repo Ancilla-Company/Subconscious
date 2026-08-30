@@ -21,7 +21,7 @@ final class SettingsMainPanel extends StatelessWidget {
           : Theme.of(context),
       child: SizedBox.expand(
         child: ColoredBox(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           child: switch (controller.activePage) {
             SettingsPage.general => _GeneralSettingsPage(
               controller: controller,
@@ -90,34 +90,39 @@ final class _GeneralSettingsPage extends StatelessWidget {
         _SettingsError(error: error),
       _LabeledDropdown(
         label: 'Mode',
-        value: controller.generalValue('mode', 'Device'),
+        value: controller.modeValue,
         options: _modes,
-        onChanged: (String value) =>
-            controller.updateGeneralSetting('mode', value),
+        onChanged: (String value) => controller.updateGeneralSetting(
+          DashboardSettingsController.modeKey,
+          value,
+        ),
       ),
       _LabeledDropdown(
         label: 'Colour Theme',
-        value: controller.generalValue('colour_theme', 'Device'),
+        value: controller.colourThemeValue,
         options: _colours,
-        onChanged: (String value) =>
-            controller.updateGeneralSetting('colour_theme', value),
+        onChanged: (String value) => controller.updateGeneralSetting(
+          DashboardSettingsController.colourThemeKey,
+          value,
+        ),
       ),
       _LabeledDropdown(
         label: 'Sidebar position',
-        value: controller.generalValue('sidebar_position', 'Left'),
+        value: controller.sidebarPositionValue,
         options: _sidebarPositions,
-        onChanged: (String value) =>
-            controller.updateGeneralSetting('sidebar_position', value),
+        onChanged: (String value) => controller.updateGeneralSetting(
+          DashboardSettingsController.sidebarPositionKey,
+          value,
+        ),
       ),
       _LabeledDropdown(
         label: 'Panel configuration',
-        value: controller.generalValue(
-          'panel_configuration',
-          'Chat · Main · Context',
-        ),
+        value: controller.panelConfigurationValue,
         options: _panelConfigurations,
-        onChanged: (String value) =>
-            controller.updateGeneralSetting('panel_configuration', value),
+        onChanged: (String value) => controller.updateGeneralSetting(
+          DashboardSettingsController.panelConfigurationKey,
+          value,
+        ),
       ),
       const _FieldLabel('Data Folder'),
       const _DataDirectoryField(),
@@ -146,6 +151,7 @@ final class _LabeledDropdown extends StatelessWidget {
       children: <Widget>[
         _FieldLabel(label),
         DropdownButtonFormField<String>(
+          key: ValueKey<String>('$label:$value'),
           initialValue: options.contains(value) ? value : options.first,
           items: <DropdownMenuItem<String>>[
             for (final String option in options)
@@ -980,27 +986,28 @@ String? _nullIfEmpty(String value) {
 
 ThemeData _windowsSettingsTheme(BuildContext context) {
   final ThemeData base = Theme.of(context);
+  final ColorScheme colors = base.colorScheme;
   const RoundedRectangleBorder buttonShape = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(3)),
   );
   return base.copyWith(
     visualDensity: VisualDensity.compact,
-    inputDecorationTheme: const InputDecorationTheme(
+    inputDecorationTheme: InputDecorationTheme(
       isDense: true,
       filled: true,
-      fillColor: Colors.white,
-      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      fillColor: colors.surfaceContainerLowest,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: Color(0xFFB8B8B8)),
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.outline),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: Color(0xFFB8B8B8)),
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.outline),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: Color(0xFF0067C0), width: 1.5),
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.primary, width: 1.5),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -1086,16 +1093,19 @@ final class _WindowsIconButton extends StatelessWidget {
   final VoidCallback? onPressed;
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: 36,
-    child: IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      style: IconButton.styleFrom(
-        backgroundColor: Colors.white,
-        side: const BorderSide(color: Color(0xFFB8B8B8)),
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return SizedBox.square(
+      dimension: 36,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          backgroundColor: colors.surfaceContainerLowest,
+          side: BorderSide(color: colors.outline),
+        ),
+        icon: Icon(icon, size: 17),
       ),
-      icon: Icon(icon, size: 17),
-    ),
-  );
+    );
+  }
 }

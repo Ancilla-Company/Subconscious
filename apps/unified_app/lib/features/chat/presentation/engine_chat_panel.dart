@@ -4,7 +4,6 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_ai_toolkit/flutter_ai_toolkit.dart' as toolkit;
 
 import '../engine_llm_provider.dart';
 
@@ -106,11 +105,11 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final List<toolkit.ChatMessage> messages = widget.provider.history.toList(
+    final List<EngineChatMessage> messages = widget.provider.history.toList(
       growable: false,
     );
     return ColoredBox(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -167,8 +166,10 @@ final class _ChatHeader extends StatelessWidget {
     height: 48,
     padding: const EdgeInsets.symmetric(horizontal: 14),
     alignment: Alignment.centerLeft,
-    decoration: const BoxDecoration(
-      border: Border(bottom: BorderSide(color: Color(0xFFE1E1E1))),
+    decoration: BoxDecoration(
+      border: Border(
+        bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
     ),
     child: Text(
       title,
@@ -199,13 +200,13 @@ final class _EmptyChat extends StatelessWidget {
 final class _MessageBubble extends StatelessWidget {
   const _MessageBubble({required this.message, this.timestamp});
 
-  final toolkit.ChatMessage message;
+  final EngineChatMessage message;
   final DateTime? timestamp;
 
   @override
   Widget build(BuildContext context) {
-    final bool isUser = message.origin == toolkit.MessageOrigin.user;
-    final String text = message.text ?? '';
+    final bool isUser = message.origin == EngineChatMessageOrigin.user;
+    final String text = message.text;
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: FractionallySizedBox(
@@ -214,7 +215,9 @@ final class _MessageBubble extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.fromLTRB(13, 11, 8, 7),
           decoration: BoxDecoration(
-            color: isUser ? const Color(0xFFE4F3F5) : const Color(0xFFF2F2F2),
+            color: isUser
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(6),
           ),
           child: Column(
@@ -282,11 +285,12 @@ final class _Composer extends StatelessWidget {
     final bool hasSelectedModel = models.any(
       (ModelInfo model) => model.id == effectiveModelId,
     );
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.fromLTRB(10, 4, 10, 10),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFD7D7D7)),
+        color: colors.surfaceContainerLowest,
+        border: Border.all(color: colors.outlineVariant),
         borderRadius: BorderRadius.circular(6),
         boxShadow: const <BoxShadow>[
           BoxShadow(
@@ -322,7 +326,7 @@ final class _Composer extends StatelessWidget {
                     height: 34,
                     padding: const EdgeInsets.symmetric(horizontal: 9),
                     decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFD7D7D7)),
+                      border: Border.all(color: colors.outlineVariant),
                       borderRadius: BorderRadius.circular(3),
                     ),
                     child: DropdownButtonHideUnderline(
@@ -372,7 +376,7 @@ final class _Composer extends StatelessWidget {
                     style: IconButton.styleFrom(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(3),
-                        side: const BorderSide(color: Color(0xFFD7D7D7)),
+                        side: BorderSide(color: colors.outlineVariant),
                       ),
                     ),
                     icon: isSending

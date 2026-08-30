@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import '../../chat/engine_llm_provider.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
+import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
 import 'window_composition_bar.dart';
 
-const Color _dividerColor = Color(0xFFE0E0E0);
 typedef _ContextPanelScreen = ContextPanelScreen;
 
 final class DesktopWebDashboardView extends StatefulWidget {
@@ -60,12 +60,48 @@ final class _DesktopWebDashboardViewState
   }
 
   @override
+  void initState() {
+    super.initState();
+    widget.controller.settings.addListener(_onSettingsChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant DesktopWebDashboardView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.settings.removeListener(_onSettingsChanged);
+    widget.controller.settings.addListener(_onSettingsChanged);
+  }
+
+  void _onSettingsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.controller.settings.removeListener(_onSettingsChanged);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     final double availableWidth = MediaQuery.sizeOf(context).width;
+    final List<DashboardPanel> panelOrder = widget
+        .controller
+        .settings
+        .panelOrder
+        .where(
+          (DashboardPanel panel) =>
+              panel != DashboardPanel.context || _isContextPanelVisible,
+        )
+        .toList(growable: false);
+    final double dividerLayoutWidth =
+        _resizeDividerWidth * (panelOrder.length - 1);
     final double maximumContextPanelWidth =
         (availableWidth -
                 _sidebarAndDividerWidth -
-                (_resizeDividerWidth * 2) -
+                dividerLayoutWidth -
                 _minimumChatPanelWidth -
                 _minimumMainPanelWidth)
             .clamp(_minimumContextPanelWidth, _maximumContextPanelWidth)
@@ -73,20 +109,65 @@ final class _DesktopWebDashboardViewState
     final double contextPanelWidth = _contextPanelWidth
         .clamp(_minimumContextPanelWidth, maximumContextPanelWidth)
         .toDouble();
-    final double contextLayoutWidth = _isContextPanelVisible
-        ? contextPanelWidth + _resizeDividerWidth
-        : 0;
     final double maximumChatPanelWidth =
         (availableWidth -
                 _sidebarAndDividerWidth -
-                _resizeDividerWidth -
-                contextLayoutWidth -
+                dividerLayoutWidth -
+                (_isContextPanelVisible ? contextPanelWidth : 0) -
                 _minimumMainPanelWidth)
             .clamp(_minimumChatPanelWidth, _maximumChatPanelWidth)
             .toDouble();
     final double chatPanelWidth = _chatPanelWidth
         .clamp(_minimumChatPanelWidth, maximumChatPanelWidth)
         .toDouble();
+    final Widget sidebar = _Sidebar(
+      selectedPanel: _selectedPanel,
+      isContextPanelVisible: _isContextPanelVisible,
+      onContextPanelVisibilityToggle: _toggleContextPanelVisibility,
+      onPanelSelected: _selectPanel,
+    );
+    final Widget sidebarDivider = SizedBox(
+      width: 1,
+      height: double.infinity,
+      child: ColoredBox(color: colors.outlineVariant),
+    );
+    final int mainPanelIndex = panelOrder.indexOf(DashboardPanel.main);
+    final List<Widget> configuredPanels = <Widget>[
+      for (int index = 0; index < panelOrder.length; index++) ...<Widget>[
+        if (index > 0)
+          _PanelResizeDivider(
+            onDragUpdate: (DragUpdateDetails details) => _resizePanel(
+              panel: _panelForDivider(
+                leftIndex: index - 1,
+                rightIndex: index,
+                mainPanelIndex: mainPanelIndex,
+                panelOrder: panelOrder,
+              ),
+              isLeftPanel:
+                  _panelForDivider(
+                    leftIndex: index - 1,
+                    rightIndex: index,
+                    mainPanelIndex: mainPanelIndex,
+                    panelOrder: panelOrder,
+                  ) ==
+                  panelOrder[index - 1],
+              delta: details.delta.dx,
+              chatPanelWidth: chatPanelWidth,
+              maximumChatPanelWidth: maximumChatPanelWidth,
+              contextPanelWidth: contextPanelWidth,
+              maximumContextPanelWidth: maximumContextPanelWidth,
+            ),
+          ),
+        _buildPanel(
+          panelOrder[index],
+          chatPanelWidth: chatPanelWidth,
+          contextPanelWidth: contextPanelWidth,
+        ),
+      ],
+    ];
+    final bool sidebarOnRight =
+        widget.controller.settings.sidebarPosition ==
+        DashboardSidebarPosition.right;
 
     return Scaffold(
       body: Column(
@@ -95,93 +176,14 @@ final class _DesktopWebDashboardViewState
           Expanded(
             child: DecoratedBox(
               position: DecorationPosition.foreground,
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: _dividerColor)),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: colors.outlineVariant)),
               ),
               child: Row(
                 children: <Widget>[
-                  _Sidebar(
-                    selectedPanel: _selectedPanel,
-                    isContextPanelVisible: _isContextPanelVisible,
-                    onContextPanelVisibilityToggle:
-                        _toggleContextPanelVisibility,
-                    onPanelSelected: _selectPanel,
-                  ),
-                  const SizedBox(
-                    width: 1,
-                    height: double.infinity,
-                    child: ColoredBox(color: _dividerColor),
-                  ),
-                  Container(
-                    width: chatPanelWidth,
-                    color: Colors.white,
-                    child: AnimatedBuilder(
-                      animation: widget.controller,
-                      builder: (BuildContext context, Widget? child) {
-                        if (widget.controller.isLoading ||
-                            widget.controller.isLoadingChat) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-                        if (widget.controller.chatError
-                            case final Object error) {
-                          return _Unavailable(error: error);
-                        }
-                        final EngineLlmProvider? provider =
-                            widget.controller.chatProvider;
-                        if (provider != null && widget.controller.isConnected) {
-                          return EngineChatPanel(
-                            key: ValueKey<String>(
-                              provider.threadUuid ??
-                                  provider.workspaceUuid ??
-                                  'chat',
-                            ),
-                            provider: provider,
-                            title: widget.controller.selectedThread?.title,
-                          );
-                        }
-                        return _Unavailable(error: widget.controller.error);
-                      },
-                    ),
-                  ),
-                  _PanelResizeDivider(
-                    onDragUpdate: (DragUpdateDetails details) {
-                      setState(() {
-                        _chatPanelWidth = (chatPanelWidth + details.delta.dx)
-                            .clamp(
-                              _minimumChatPanelWidth,
-                              maximumChatPanelWidth,
-                            )
-                            .toDouble();
-                      });
-                    },
-                  ),
-                  Expanded(
-                    child: DashboardMainPanel(controller: widget.controller),
-                  ),
-                  if (_isContextPanelVisible) ...<Widget>[
-                    _PanelResizeDivider(
-                      onDragUpdate: (DragUpdateDetails details) {
-                        setState(() {
-                          _contextPanelWidth =
-                              (contextPanelWidth - details.delta.dx)
-                                  .clamp(
-                                    _minimumContextPanelWidth,
-                                    maximumContextPanelWidth,
-                                  )
-                                  .toDouble();
-                        });
-                      },
-                    ),
-                    SizedBox(
-                      width: contextPanelWidth,
-                      child: ContextPanel(
-                        screen: _selectedPanel,
-                        controller: widget.controller,
-                      ),
-                    ),
-                  ],
+                  if (!sidebarOnRight) ...<Widget>[sidebar, sidebarDivider],
+                  Expanded(child: Row(children: configuredPanels)),
+                  if (sidebarOnRight) ...<Widget>[sidebarDivider, sidebar],
                 ],
               ),
             ),
@@ -189,6 +191,94 @@ final class _DesktopWebDashboardViewState
         ],
       ),
     );
+  }
+
+  Widget _buildPanel(
+    DashboardPanel panel, {
+    required double chatPanelWidth,
+    required double contextPanelWidth,
+  }) => switch (panel) {
+    DashboardPanel.chat => SizedBox(
+      key: const ValueKey<DashboardPanel>(DashboardPanel.chat),
+      width: chatPanelWidth,
+      child: ColoredBox(
+        color: Theme.of(context).colorScheme.surface,
+        child: AnimatedBuilder(
+          animation: widget.controller,
+          builder: (BuildContext context, Widget? child) {
+            if (widget.controller.isLoading ||
+                widget.controller.isLoadingChat) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (widget.controller.chatError case final Object error) {
+              return _Unavailable(error: error);
+            }
+            final EngineLlmProvider? provider = widget.controller.chatProvider;
+            if (provider != null && widget.controller.isConnected) {
+              return EngineChatPanel(
+                key: ValueKey<String>(
+                  provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
+                ),
+                provider: provider,
+                title: widget.controller.selectedThread?.title,
+              );
+            }
+            return _Unavailable(error: widget.controller.error);
+          },
+        ),
+      ),
+    ),
+    DashboardPanel.main => Expanded(
+      key: const ValueKey<DashboardPanel>(DashboardPanel.main),
+      child: DashboardMainPanel(controller: widget.controller),
+    ),
+    DashboardPanel.context => SizedBox(
+      key: const ValueKey<DashboardPanel>(DashboardPanel.context),
+      width: contextPanelWidth,
+      child: ContextPanel(
+        screen: _selectedPanel,
+        controller: widget.controller,
+      ),
+    ),
+  };
+
+  DashboardPanel _panelForDivider({
+    required int leftIndex,
+    required int rightIndex,
+    required int mainPanelIndex,
+    required List<DashboardPanel> panelOrder,
+  }) {
+    final DashboardPanel left = panelOrder[leftIndex];
+    final DashboardPanel right = panelOrder[rightIndex];
+    if (left == DashboardPanel.main) return right;
+    if (right == DashboardPanel.main) return left;
+    return mainPanelIndex < leftIndex ? right : left;
+  }
+
+  void _resizePanel({
+    required DashboardPanel panel,
+    required bool isLeftPanel,
+    required double delta,
+    required double chatPanelWidth,
+    required double maximumChatPanelWidth,
+    required double contextPanelWidth,
+    required double maximumContextPanelWidth,
+  }) {
+    final double signedDelta = isLeftPanel ? delta : -delta;
+    setState(() {
+      switch (panel) {
+        case DashboardPanel.chat:
+          _chatPanelWidth = (chatPanelWidth + signedDelta)
+              .clamp(_minimumChatPanelWidth, maximumChatPanelWidth)
+              .toDouble();
+        case DashboardPanel.context:
+          _contextPanelWidth = (contextPanelWidth + signedDelta)
+              .clamp(_minimumContextPanelWidth, maximumContextPanelWidth)
+              .toDouble();
+        case DashboardPanel.main:
+          break;
+      }
+    });
   }
 }
 
@@ -198,31 +288,34 @@ final class _PanelResizeDivider extends StatelessWidget {
   final GestureDragUpdateCallback onDragUpdate;
 
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: SystemMouseCursors.resizeColumn,
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragUpdate: onDragUpdate,
-      child: const ColoredBox(
-        color: Colors.white,
-        child: SizedBox(
-          width: 5,
-          height: double.infinity,
-          child: Stack(
-            children: <Widget>[
-              Positioned(
-                left: 2,
-                top: 0,
-                bottom: 0,
-                width: 1,
-                child: ColoredBox(color: _dividerColor),
-              ),
-            ],
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: onDragUpdate,
+        child: ColoredBox(
+          color: colors.surface,
+          child: SizedBox(
+            width: 5,
+            height: double.infinity,
+            child: Stack(
+              children: <Widget>[
+                Positioned(
+                  left: 2,
+                  top: 0,
+                  bottom: 0,
+                  width: 1,
+                  child: ColoredBox(color: colors.outlineVariant),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 final class _Sidebar extends StatelessWidget {
@@ -240,7 +333,7 @@ final class _Sidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     child: SizedBox(
       width: 40,
       child: Column(
@@ -303,9 +396,12 @@ final class _SidebarDivider extends StatelessWidget {
   const _SidebarDivider();
 
   @override
-  Widget build(BuildContext context) => const Padding(
-    padding: EdgeInsets.fromLTRB(4, 4, 4, 0),
-    child: SizedBox(height: 1, child: ColoredBox(color: _dividerColor)),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+    child: SizedBox(
+      height: 1,
+      child: ColoredBox(color: Theme.of(context).colorScheme.outlineVariant),
+    ),
   );
 }
 

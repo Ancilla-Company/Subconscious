@@ -73,6 +73,8 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (BuildContext context, Widget? child) {
+        final ThemeData theme = Theme.of(context);
+        final Brightness brightness = theme.brightness;
         final (Color, String) presentation = switch (widget
             .controller
             .connectionStatus) {
@@ -81,7 +83,7 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
           EngineConnectionStatus.disconnected => (Colors.red, 'disconnected'),
         };
         return ColoredBox(
-          color: Colors.white,
+          color: theme.colorScheme.surface,
           child: SizedBox(
             height: kWindowCaptionHeight,
             child: Row(
@@ -117,21 +119,21 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
                   ),
                 ),
                 WindowCaptionButton.minimize(
-                  brightness: Brightness.light,
+                  brightness: brightness,
                   onPressed: windowManager.minimize,
                 ),
                 if (_isMaximized)
                   WindowCaptionButton.unmaximize(
-                    brightness: Brightness.light,
+                    brightness: brightness,
                     onPressed: windowManager.unmaximize,
                   )
                 else
                   WindowCaptionButton.maximize(
-                    brightness: Brightness.light,
+                    brightness: brightness,
                     onPressed: windowManager.maximize,
                   ),
                 WindowCaptionButton.close(
-                  brightness: Brightness.light,
+                  brightness: brightness,
                   onPressed: windowManager.close,
                 ),
               ],
