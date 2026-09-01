@@ -430,8 +430,8 @@ final class DashboardController extends ChangeNotifier {
     final int versionAtStart = _appStateVersion;
     bool migratedLegacyState = false;
     try {
-      final AppStateEntry? loaded = await client
-          .getAppState(appStateKey)
+      final List<EngineSetting> loaded = await client
+          .getSettings(key: appStateKey)
           .timeout(requestTimeout);
       if (versionAtStart != 0 || versionAtStart != _appStateVersion) {
         hasLoadedNavigationState = true;
@@ -439,10 +439,10 @@ final class DashboardController extends ChangeNotifier {
       }
 
       _isRestoringNavigation = true;
-      if (loaded == null) {
+      if (loaded.isEmpty) {
         migratedLegacyState = await _loadLegacyNavigationState(client);
       } else {
-        _restoreAppState(loaded.value);
+        _restoreAppState(loaded.last.value);
       }
       navigationError = null;
     } on Object catch (caughtError) {
@@ -664,7 +664,11 @@ final class DashboardController extends ChangeNotifier {
       while (_appStateSavedVersion < _appStateVersion && !_disposed) {
         final int version = _appStateVersion;
         final String value = _appStateSnapshot();
-        await client.putAppState(appStateKey, value).timeout(requestTimeout);
+        await client
+            .putSettings(<EngineSetting>[
+              EngineSetting(key: appStateKey, value: value),
+            ])
+            .timeout(requestTimeout);
         _appStateSavedVersion = version;
         navigationError = null;
       }
