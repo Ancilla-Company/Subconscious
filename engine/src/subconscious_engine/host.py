@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 from contextlib import suppress
 import ipaddress
+import logging
 import os
 import socket
 
@@ -23,6 +24,8 @@ from .storage import Database
 from .tools import ToolRegistry
 
 StatusIndicatorFactory = Callable[[str], BackgroundStatusIndicator]
+
+logger = logging.getLogger(__name__)
 
 
 class EngineHost:
@@ -144,6 +147,8 @@ class EngineHost:
             )
             RuntimeInfoWriter.write(self.config.resolved_data_directory, runtime)
             runtime_written = True
+            if self.config.lan_enabled:
+                logger.info("LAN joining token: %s", self.token.value)
             if not self.config.headless:
                 self._status_indicator = self._status_indicator_factory(self.address)
                 self._status_indicator.start(self.request_stop)

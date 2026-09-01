@@ -126,6 +126,8 @@ final class _GeneralSettingsPage extends StatelessWidget {
       ),
       const _FieldLabel('Data Folder'),
       const _DataDirectoryField(),
+      const _FieldLabel('Joining Token'),
+      _JoiningTokenField(token: controller.joiningToken),
     ],
   );
 }
@@ -1480,6 +1482,53 @@ final class _DataDirectoryField extends StatelessWidget {
       ],
     );
   }
+}
+
+final class _JoiningTokenField extends StatelessWidget {
+  const _JoiningTokenField({required this.token});
+
+  final String? token;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      Expanded(
+        child: SizedBox(
+          height: 32,
+          child: TextFormField(
+            key: ValueKey<String?>(token),
+            initialValue:
+                token ?? 'Unavailable while the engine is disconnected',
+            readOnly: true,
+            textAlignVertical: TextAlignVertical.center,
+            decoration: const InputDecoration(
+              contentPadding: EdgeInsets.symmetric(horizontal: 10),
+              prefixIcon: Icon(FluentIcons.key_20_regular, size: 17),
+              prefixIconConstraints: BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      _WindowsIconButton(
+        tooltip: 'Copy joining token',
+        icon: FluentIcons.copy_20_regular,
+        onPressed: token == null
+            ? null
+            : () async {
+                await Clipboard.setData(ClipboardData(text: token!));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Joining token copied')),
+                  );
+                }
+              },
+      ),
+    ],
+  );
 }
 
 final class _WindowsIconButton extends StatelessWidget {

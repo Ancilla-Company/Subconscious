@@ -359,6 +359,8 @@ final class DashboardSettingsController extends ChangeNotifier {
     }
   }
 
+  String? get joiningToken => repositoryProvider()?.rest.token;
+
   RestEngineClient get _client {
     final RestEngineClient? client = repositoryProvider()?.rest;
     if (client == null) {
