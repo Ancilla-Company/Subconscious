@@ -40,12 +40,12 @@ def fake_pystray():
     )
 
 
-def test_generated_tray_icon_has_expected_size_and_brand_colors():
+def test_bundled_tray_icon_is_loadable():
     image = _icon_image()
-    assert image.size == (64, 64)
-    assert image.mode == "RGBA"
-    assert image.getpixel((0, 0)) == (20, 24, 33, 255)
-    assert image.getpixel((32, 32)) == (255, 255, 255, 255)
+    assert image.format == "ICO"
+    assert image.width > 0
+    assert image.height > 0
+
 
 def test_tray_starts_detached_displays_endpoint_and_quits_gracefully():
     FakeIcon.instances.clear()

@@ -1,6 +1,7 @@
 """Desktop status indicator for the background engine process."""
 
 from collections.abc import Callable
+from importlib.resources import files
 from typing import Protocol
 import warnings
 
@@ -12,13 +13,12 @@ class BackgroundStatusIndicator(Protocol):
 
 
 def _icon_image():
-    from PIL import Image, ImageDraw
+    from PIL import Image
 
-    image = Image.new("RGBA", (64, 64), (20, 24, 33, 255))
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((7, 7, 57, 57), fill=(89, 73, 255, 255))
-    draw.ellipse((20, 18, 44, 42), fill=(255, 255, 255, 255))
-    draw.rectangle((28, 36, 36, 52), fill=(255, 255, 255, 255))
+    icon_resource = files("subconscious_engine").joinpath("app_icon.ico")
+    with icon_resource.open("rb") as icon_stream:
+        image = Image.open(icon_stream)
+        image.load()
     return image
 
 
