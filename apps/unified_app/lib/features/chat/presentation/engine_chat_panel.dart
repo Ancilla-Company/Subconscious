@@ -59,6 +59,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   final ScrollController _scrollController = ScrollController();
   List<ModelInfo> _models = const <ModelInfo>[];
   bool _isSending = false;
+  bool _showThreadSettings = false;
   Object? _error;
   int _modelLoadVersion = 0;
 
@@ -147,44 +148,34 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   }
 
   void _createThread() {
+    if (_showThreadSettings) setState(() => _showThreadSettings = false);
     widget.onCreateThread?.call();
   }
 
-  Future<void> _editThread() async {
-    final Workspace? workspace = widget.workspace;
+  void _toggleThreadSettings() {
+    setState(() {
+      _showThreadSettings = !_showThreadSettings;
+      _error = null;
+    });
+  }
+
+  Future<void> _saveThreadSettings(_ThreadSettingsDraft draft) async {
     final ThreadInfo? thread = widget.thread;
-    final UpdateThreadCallback? update = widget.onUpdateThread;
-    final UpdateThreadDraftCallback? updateDraft = widget.onUpdateThreadDraft;
-    if (workspace == null ||
-        (thread == null ? updateDraft == null : update == null)) {
-      return;
+    if (thread == null) {
+      final UpdateThreadDraftCallback? updateDraft = widget.onUpdateThreadDraft;
+      if (updateDraft == null) return;
+      updateDraft(title: draft.title, toolsConfig: draft.toolsConfig);
+    } else {
+      final UpdateThreadCallback? update = widget.onUpdateThread;
+      if (update == null) return;
+      await update(
+        thread: thread,
+        title: draft.title,
+        toolsConfig: draft.toolsConfig,
+        clearToolsConfig: draft.useWorkspaceDefaults,
+      );
     }
-    final _ThreadSettingsDraft? draft = await showDialog<_ThreadSettingsDraft>(
-      context: context,
-      builder: (BuildContext context) => _ThreadSettingsDialog(
-        repository: widget.provider.repository,
-        workspace: workspace,
-        initialTitle: widget.title,
-        initialToolsConfig: thread?.toolsConfig ?? widget.draftToolsConfig,
-        isDraft: thread == null,
-      ),
-    );
-    if (draft == null || !mounted) return;
-    setState(() => _error = null);
-    try {
-      if (thread == null) {
-        updateDraft!(title: draft.title, toolsConfig: draft.toolsConfig);
-      } else {
-        await update!(
-          thread: thread,
-          title: draft.title,
-          toolsConfig: draft.toolsConfig,
-          clearToolsConfig: draft.useWorkspaceDefaults,
-        );
-      }
-    } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
-    }
+    if (mounted) setState(() => _showThreadSettings = false);
   }
 
   @override
@@ -215,16 +206,29 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                 !_isSending &&
                 widget.onCreateThread != null,
             canEditThread:
-                widget.isComposerEnabled &&
+                (widget.isComposerEnabled || _showThreadSettings) &&
                 !_isSending &&
+                widget.workspace != null &&
                 (widget.thread == null
                     ? widget.onUpdateThreadDraft != null
                     : widget.onUpdateThread != null),
+            settingsVisible: _showThreadSettings,
             onCreateThread: _createThread,
-            onEditThread: _editThread,
+            onEditThread: _toggleThreadSettings,
           ),
           Expanded(
-            child: messages.isEmpty
+            child: _showThreadSettings && widget.workspace != null
+                ? _ThreadSettingsPanel(
+                    repository: widget.provider.repository,
+                    workspace: widget.workspace!,
+                    initialTitle: widget.title,
+                    initialToolsConfig:
+                        widget.thread?.toolsConfig ?? widget.draftToolsConfig,
+                    isDraft: widget.thread == null,
+                    onCancel: _toggleThreadSettings,
+                    onSave: _saveThreadSettings,
+                  )
+                : messages.isEmpty
                 ? const _EmptyChat()
                 : ListView.builder(
                     controller: _scrollController,
@@ -241,26 +245,28 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                         ),
                   ),
           ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-              child: Text(
-                '$_error',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelSmall
-                    ?.copyWith(color: Theme.of(context).colorScheme.error),
+          if (!_showThreadSettings)
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                child: Text(
+                  '$_error',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
+                ),
               ),
+          if (!_showThreadSettings)
+            _Composer(
+              controller: _composer,
+              models: _models,
+              selectedModelId: widget.provider.modelId,
+              isSending: _isSending,
+              enabled: widget.isComposerEnabled,
+              onModelSelected: widget.provider.selectModel,
+              onSend: _send,
             ),
-          _Composer(
-            controller: _composer,
-            models: _models,
-            selectedModelId: widget.provider.modelId,
-            isSending: _isSending,
-            enabled: widget.isComposerEnabled,
-            onModelSelected: widget.provider.selectModel,
-            onSend: _send,
-          ),
         ],
       ),
     );
@@ -272,6 +278,7 @@ final class _ChatHeader extends StatelessWidget {
     required this.title,
     required this.canCreateThread,
     required this.canEditThread,
+    required this.settingsVisible,
     required this.onCreateThread,
     required this.onEditThread,
   });
@@ -279,6 +286,7 @@ final class _ChatHeader extends StatelessWidget {
   final String title;
   final bool canCreateThread;
   final bool canEditThread;
+  final bool settingsVisible;
   final VoidCallback onCreateThread;
   final VoidCallback onEditThread;
 
@@ -307,44 +315,32 @@ final class _ChatHeader extends StatelessWidget {
             icon: const Icon(FluentIcons.add_20_regular, size: 20),
           ),
           const SizedBox(width: 4),
-          SizedBox.square(
-            dimension: 32,
-            child: PopupMenuButton<_ThreadMenuAction>(
-              tooltip: 'More thread options',
-              enabled: canEditThread,
-              padding: EdgeInsets.zero,
-              style: _compactControlStyle(context),
-              icon: const Icon(
-                FluentIcons.more_horizontal_20_regular,
-                size: 20,
+          IconButton(
+            tooltip: settingsVisible
+                ? 'Close thread settings'
+                : 'Thread settings',
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+            padding: EdgeInsets.zero,
+            isSelected: settingsVisible,
+            style: IconButton.styleFrom(
+              backgroundColor: settingsVisible
+                  ? Theme.of(context).colorScheme.secondaryContainer
+                  : null,
+              foregroundColor: settingsVisible
+                  ? Theme.of(context).colorScheme.onSecondaryContainer
+                  : null,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(4),
               ),
-              onSelected: (_ThreadMenuAction action) {
-                if (action == _ThreadMenuAction.settings) onEditThread();
-              },
-              itemBuilder: (BuildContext context) =>
-                  const <PopupMenuEntry<_ThreadMenuAction>>[
-                    PopupMenuItem<_ThreadMenuAction>(
-                      value: _ThreadMenuAction.settings,
-                      child: ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          FluentIcons.settings_20_regular,
-                          size: 18,
-                        ),
-                        title: Text('Thread settings and tools'),
-                      ),
-                    ),
-                  ],
             ),
+            onPressed: canEditThread ? onEditThread : null,
+            icon: const Icon(FluentIcons.more_horizontal_20_regular, size: 20),
           ),
         ],
       ),
     ),
   );
 }
-
-enum _ThreadMenuAction { settings }
 
 final class _EmptyChat extends StatelessWidget {
   const _EmptyChat();
@@ -611,13 +607,19 @@ final class _ThreadSettingsDraft {
   final bool useWorkspaceDefaults;
 }
 
-final class _ThreadSettingsDialog extends StatefulWidget {
-  const _ThreadSettingsDialog({
+typedef _SaveThreadSettingsCallback = Future<void> Function(
+  _ThreadSettingsDraft draft,
+);
+
+final class _ThreadSettingsPanel extends StatefulWidget {
+  const _ThreadSettingsPanel({
     required this.repository,
     required this.workspace,
     required this.initialTitle,
     required this.initialToolsConfig,
     required this.isDraft,
+    required this.onCancel,
+    required this.onSave,
   });
 
   final EngineRepository repository;
@@ -625,18 +627,27 @@ final class _ThreadSettingsDialog extends StatefulWidget {
   final String? initialTitle;
   final String? initialToolsConfig;
   final bool isDraft;
+  final VoidCallback onCancel;
+  final _SaveThreadSettingsCallback onSave;
 
   @override
-  State<_ThreadSettingsDialog> createState() => _ThreadSettingsDialogState();
+  State<_ThreadSettingsPanel> createState() => _ThreadSettingsPanelState();
 }
 
-final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
+final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
   late final TextEditingController _titleController;
   ToolCatalog? _catalog;
+  Map<String, dynamic> _rawTools = <String, dynamic>{};
+  Map<String, bool> _builtinGroups = <String, bool>{};
   Map<String, Map<String, bool>> _builtinTools = <String, Map<String, bool>>{};
   Map<String, bool> _configuredTools = <String, bool>{};
   bool _useWorkspaceDefaults = true;
+  bool _builtinEnabled = true;
+  bool _configuredEnabled = true;
+  bool _builtinExpanded = true;
+  bool _configuredExpanded = false;
   bool _loading = true;
+  bool _saving = false;
   Object? _error;
 
   @override
@@ -655,9 +666,7 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
         widget.initialToolsConfig ?? widget.workspace.toolsConfig,
       );
       final Map<String, dynamic> builtin = _objectValue(config['builtin']);
-      final bool builtinEnabled = config['builtin_enabled'] is bool
-          ? config['builtin_enabled'] as bool
-          : true;
+      final Map<String, bool> builtinGroups = <String, bool>{};
       final Map<String, Map<String, bool>> builtinTools =
           <String, Map<String, bool>>{};
       for (final MapEntry<String, List<BuiltinToolCatalogEntry>> group
@@ -665,35 +674,35 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
         final Map<String, dynamic> groupConfig = _objectValue(
           builtin[group.key],
         );
-        final bool groupEnabled = groupConfig['enabled'] is bool
-            ? groupConfig['enabled'] as bool
-            : true;
         final Map<String, dynamic> tools = _objectValue(groupConfig['tools']);
+        builtinGroups[group.key] = _readBool(
+          groupConfig,
+          'enabled',
+          fallback: true,
+        );
         builtinTools[group.key] = <String, bool>{
           for (final BuiltinToolCatalogEntry tool in group.value)
-            tool.name:
-                builtinEnabled &&
-                groupEnabled &&
-                (tools[tool.name] is bool ? tools[tool.name] as bool : true),
+            tool.name: _readBool(tools, tool.name, fallback: true),
         };
       }
       final Map<String, dynamic> configured = _objectValue(
         config['configured'],
       );
-      final bool configuredEnabled = config['configured_enabled'] is bool
-          ? config['configured_enabled'] as bool
-          : true;
       if (!mounted) return;
       setState(() {
         _catalog = catalog;
+        _rawTools = config;
+        _builtinEnabled = _readBool(config, 'builtin_enabled', fallback: true);
+        _configuredEnabled = _readBool(
+          config,
+          'configured_enabled',
+          fallback: true,
+        );
+        _builtinGroups = builtinGroups;
         _builtinTools = builtinTools;
         _configuredTools = <String, bool>{
           for (final ToolRegistryEntry tool in catalog.configured)
-            tool.uuid:
-                configuredEnabled &&
-                (configured[tool.uuid] is bool
-                    ? configured[tool.uuid] as bool
-                    : true),
+            tool.uuid: _readBool(configured, tool.uuid, fallback: true),
         };
         _loading = false;
       });
@@ -706,27 +715,51 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
     }
   }
 
-  String _serializeTools() => jsonEncode(<String, dynamic>{
-    'builtin_enabled': true,
-    'configured_enabled': true,
-    'builtin': <String, dynamic>{
-      for (final MapEntry<String, Map<String, bool>> group
-          in _builtinTools.entries)
-        group.key: <String, dynamic>{'enabled': true, 'tools': group.value},
-    },
-    'configured': _configuredTools,
-  });
+  String _serializeTools() {
+    final Map<String, dynamic> value = _deepCopy(_rawTools)
+      ..['builtin_enabled'] = _builtinEnabled
+      ..['configured_enabled'] = _configuredEnabled;
+    final Map<String, dynamic> builtin = _objectValue(value['builtin']);
+    for (final String slug in _builtinGroups.keys) {
+      final Map<String, dynamic> group = _objectValue(builtin[slug])
+        ..['enabled'] = _builtinGroups[slug];
+      final Map<String, dynamic> tools = _objectValue(group['tools']);
+      for (final MapEntry<String, bool> tool
+          in (_builtinTools[slug] ?? const <String, bool>{}).entries) {
+        tools[tool.key] = tool.value;
+      }
+      group['tools'] = tools;
+      builtin[slug] = group;
+    }
+    value['builtin'] = builtin;
+    final Map<String, dynamic> configured = _objectValue(value['configured']);
+    for (final MapEntry<String, bool> tool in _configuredTools.entries) {
+      configured[tool.key] = tool.value;
+    }
+    value['configured'] = configured;
+    return jsonEncode(value);
+  }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_loading || _saving) return;
     final String title = _titleController.text.trim();
-    Navigator.pop(
-      context,
-      _ThreadSettingsDraft(
-        title: title.isEmpty ? null : title,
-        toolsConfig: _useWorkspaceDefaults ? null : _serializeTools(),
-        useWorkspaceDefaults: _useWorkspaceDefaults,
-      ),
-    );
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSave(
+        _ThreadSettingsDraft(
+          title: title.isEmpty ? null : title,
+          toolsConfig: _useWorkspaceDefaults ? null : _serializeTools(),
+          useWorkspaceDefaults: _useWorkspaceDefaults,
+        ),
+      );
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = error);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -736,106 +769,327 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.isDraft ? 'Draft thread settings' : 'Thread settings'),
-    content: SizedBox(
-      width: 560,
-      height: 520,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          TextField(
-            controller: _titleController,
-            autofocus: widget.isDraft,
-            decoration: const InputDecoration(labelText: 'Title'),
-          ),
-          const SizedBox(height: 10),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Use workspace tool defaults'),
-            subtitle: const Text(
-              'Turn this off to override the tools available to this thread.',
-            ),
-            value: _useWorkspaceDefaults,
-            onChanged: (bool? value) =>
-                setState(() => _useWorkspaceDefaults = value ?? false),
-          ),
-          const SizedBox(height: 6),
-          Expanded(child: _buildTools(context)),
-        ],
-      ),
-    ),
-    actions: <Widget>[
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: _loading ? null : _submit,
-        child: const Text('Save'),
-      ),
-    ],
-  );
-
-  Widget _buildTools(BuildContext context) {
-    if (_useWorkspaceDefaults) {
-      return Center(
-        child: Text(
-          'This thread inherits ${widget.workspace.name} tool settings.',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-      );
-    }
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error case final Object error) {
-      return Center(child: Text("Couldn't load tools: $error"));
-    }
-    final ToolCatalog? catalog = _catalog;
-    if (catalog == null) return const SizedBox.shrink();
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       children: <Widget>[
-        Text('Built-in tools', style: Theme.of(context).textTheme.titleSmall),
-        for (final MapEntry<String, List<BuiltinToolCatalogEntry>> group
-            in catalog.builtin.entries) ...<Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
-            child: Text(
-              _displayName(group.key),
-              style: Theme.of(context).textTheme.labelLarge,
+        TextField(
+          controller: _titleController,
+          autofocus: widget.isDraft,
+          enabled: !_saving,
+          decoration: const InputDecoration(
+            labelText: 'Thread name',
+            hintText: 'New thread',
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 6,
+          runSpacing: 4,
+          children: <Widget>[
+            TextButton(
+              onPressed: _saving ? null : widget.onCancel,
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: _loading || _saving ? null : _submit,
+              icon: _saving
+                  ? const SizedBox.square(
+                      dimension: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(FluentIcons.save_20_regular, size: 16),
+              label: const Text('Save'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _switchRow(
+          context,
+          title: 'Use workspace defaults',
+          subtitle:
+              'Inherit the tool policy configured for ${widget.workspace.name}.',
+          value: _useWorkspaceDefaults,
+          onChanged: _loading || _saving
+              ? null
+              : (bool value) => setState(() {
+                  _useWorkspaceDefaults = value;
+                  _error = null;
+                }),
+        ),
+        const SizedBox(height: 10),
+        if (_loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
           ),
-          for (final BuiltinToolCatalogEntry tool in group.value)
-            CheckboxListTile(
-              dense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              title: Text(_displayName(tool.name)),
-              subtitle: tool.doc.isEmpty ? null : Text(tool.doc),
-              value: _builtinTools[group.key]?[tool.name] ?? true,
-              onChanged: (bool? value) => setState(
-                () => _builtinTools[group.key]![tool.name] = value ?? false,
-              ),
-            ),
+        _buildBuiltinTools(context),
+        const SizedBox(height: 10),
+        _buildConfiguredTools(context),
+        if (_error case final Object error) ...<Widget>[
+          const SizedBox(height: 12),
+          Text(
+            'Thread settings could not be saved: $error',
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: colors.error),
+          ),
         ],
-        const SizedBox(height: 12),
-        Text('Custom tools', style: Theme.of(context).textTheme.titleSmall),
-        if (catalog.configured.isEmpty)
-          const ListTile(title: Text('No custom tools are configured.')),
-        for (final ToolRegistryEntry tool in catalog.configured)
-          CheckboxListTile(
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-            title: Text(
-              tool.alias?.trim().isNotEmpty ?? false ? tool.alias! : tool.name,
-            ),
-            subtitle: Text(tool.uuid),
-            value: _configuredTools[tool.uuid] ?? true,
-            onChanged: (bool? value) =>
-                setState(() => _configuredTools[tool.uuid] = value ?? false),
-          ),
       ],
     );
+  }
+
+  Widget _switchRow(
+    BuildContext context, {
+    required String title,
+    String? subtitle,
+    required bool value,
+    required ValueChanged<bool>? onChanged,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 5),
+    child: Row(
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(title),
+              if (subtitle != null)
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        _RectangularSwitch(
+          value: value,
+          onChanged: onChanged,
+          semanticLabel: title,
+        ),
+      ],
+    ),
+  );
+
+  Widget _toolCardHeader(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool>? onChanged,
+    required String semanticLabel,
+    required bool expanded,
+    required VoidCallback onToggle,
+  }) => LayoutBuilder(
+    builder: (BuildContext context, BoxConstraints constraints) {
+      final Widget controls = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _RectangularSwitch(
+            value: value,
+            onChanged: onChanged,
+            semanticLabel: semanticLabel,
+          ),
+          const SizedBox(width: 8),
+          Icon(
+            expanded
+                ? FluentIcons.chevron_up_20_regular
+                : FluentIcons.chevron_down_20_regular,
+            size: 17,
+          ),
+        ],
+      );
+      if (constraints.maxWidth >= 220) {
+        return ListTile(
+          onTap: onToggle,
+          title: Text(title),
+          subtitle: Text(subtitle),
+          trailing: controls,
+        );
+      }
+      return InkWell(
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(title, style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              Align(alignment: Alignment.centerRight, child: controls),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _buildBuiltinTools(BuildContext context) => Card(
+    margin: EdgeInsets.zero,
+    clipBehavior: Clip.antiAlias,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(6)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _toolCardHeader(
+          context,
+          title: 'Builtin Tools',
+          subtitle: 'Enable tools provided by the engine.',
+          value: _builtinEnabled,
+          onChanged: _toolsEditable
+              ? (bool value) => _change(() => _builtinEnabled = value)
+              : null,
+          semanticLabel: 'Enable built-in tools',
+          expanded: _builtinExpanded,
+          onToggle: () => setState(() => _builtinExpanded = !_builtinExpanded),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          alignment: Alignment.topCenter,
+          child: !_builtinExpanded
+              ? const SizedBox.shrink()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const Divider(height: 1),
+                    if (_catalog?.builtin.isEmpty ?? true)
+                      const ListTile(
+                        title: Text('No built-in tools are available.'),
+                      ),
+                    for (final MapEntry<String, List<BuiltinToolCatalogEntry>>
+                        group
+                        in _catalog?.builtin.entries ??
+                            const <String, List<BuiltinToolCatalogEntry>>{}
+                                .entries)
+                      ExpansionTile(
+                        title: Text(_displayName(group.key)),
+                        trailing: _RectangularSwitch(
+                          value: _builtinGroups[group.key] ?? true,
+                          onChanged: _toolsEditable && _builtinEnabled
+                              ? (bool value) => _change(
+                                  () => _builtinGroups[group.key] = value,
+                                )
+                              : null,
+                          semanticLabel:
+                              'Enable ${_displayName(group.key)} tools',
+                        ),
+                        children: <Widget>[
+                          for (final BuiltinToolCatalogEntry tool
+                              in group.value)
+                            _buildBuiltinToolRow(group.key, tool),
+                        ],
+                      ),
+                  ],
+                ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildBuiltinToolRow(String group, BuiltinToolCatalogEntry tool) {
+    final bool value = _builtinTools[group]?[tool.name] ?? true;
+    final bool enabled =
+        _toolsEditable && _builtinEnabled && (_builtinGroups[group] ?? true);
+    final String label = _displayName(tool.name);
+    void toggle(bool next) =>
+        _change(() => _builtinTools[group]![tool.name] = next);
+    return ListTile(
+      title: Text(label),
+      subtitle: tool.doc.isEmpty ? null : Text(tool.doc),
+      onTap: enabled ? () => toggle(!value) : null,
+      trailing: _RectangularSwitch(
+        value: value,
+        onChanged: enabled ? toggle : null,
+        semanticLabel: 'Enable $label',
+      ),
+    );
+  }
+
+  Widget _buildConfiguredTools(BuildContext context) => Card(
+    margin: EdgeInsets.zero,
+    clipBehavior: Clip.antiAlias,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(6)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _toolCardHeader(
+          context,
+          title: 'Custom Tools',
+          subtitle:
+              'Configured tools are addressed by their stable registry ID.',
+          value: _configuredEnabled,
+          onChanged: _toolsEditable
+              ? (bool value) => _change(() => _configuredEnabled = value)
+              : null,
+          semanticLabel: 'Enable custom tools',
+          expanded: _configuredExpanded,
+          onToggle: () =>
+              setState(() => _configuredExpanded = !_configuredExpanded),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          alignment: Alignment.topCenter,
+          child: !_configuredExpanded
+              ? const SizedBox.shrink()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const Divider(height: 1),
+                    if (_catalog?.configured.isEmpty ?? true)
+                      const ListTile(
+                        title: Text('No custom tools are configured.'),
+                      ),
+                    for (final ToolRegistryEntry tool
+                        in _catalog?.configured ?? const <ToolRegistryEntry>[])
+                      _buildConfiguredToolRow(tool),
+                  ],
+                ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildConfiguredToolRow(ToolRegistryEntry tool) {
+    final bool value = _configuredTools[tool.uuid] ?? true;
+    final bool enabled = _toolsEditable && _configuredEnabled;
+    final String label = tool.alias?.trim().isNotEmpty ?? false
+        ? tool.alias!
+        : tool.name;
+    void toggle(bool next) => _change(() => _configuredTools[tool.uuid] = next);
+    return ListTile(
+      title: Text(label),
+      subtitle: Text(tool.uuid),
+      onTap: enabled ? () => toggle(!value) : null,
+      trailing: _RectangularSwitch(
+        value: value,
+        onChanged: enabled ? toggle : null,
+        semanticLabel: 'Enable $label',
+      ),
+    );
+  }
+
+  bool get _toolsEditable => !_useWorkspaceDefaults && !_loading && !_saving;
+
+  void _change(VoidCallback update) {
+    setState(() {
+      update();
+      _error = null;
+    });
   }
 
   static Map<String, dynamic> _decodeConfig(String? raw) {
@@ -851,13 +1105,108 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
       ? value.map((Object? key, Object? item) => MapEntry('$key', item))
       : <String, dynamic>{};
 
+  static Map<String, dynamic> _deepCopy(Map<String, dynamic> value) =>
+      _objectValue(jsonDecode(jsonEncode(value)));
+
+  static bool _readBool(
+    Map<String, dynamic> value,
+    String key, {
+    required bool fallback,
+  }) => value[key] is bool ? value[key] as bool : fallback;
+
   static String _displayName(String value) => value
-      .replaceAll('_', ' ')
-      .split(' ')
-      .where((String word) => word.isNotEmpty)
+      .split(RegExp('[_\\-\\s]+'))
+      .where((String part) => part.isNotEmpty)
       .map(
-        (String word) =>
-            '${word.substring(0, 1).toUpperCase()}${word.substring(1)}',
+        (String part) =>
+            '${part.substring(0, 1).toUpperCase()}${part.substring(1)}',
       )
       .join(' ');
+}
+
+final class _RectangularSwitch extends StatelessWidget {
+  const _RectangularSwitch({
+    required this.value,
+    required this.onChanged,
+    required this.semanticLabel,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool enabled = onChanged != null;
+    final Color trackColor = enabled
+        ? (value ? colors.primary : colors.surfaceContainerHighest)
+        : (value
+              ? colors.primary.withValues(alpha: 0.38)
+              : colors.onSurface.withValues(alpha: 0.12));
+    final Color thumbColor = enabled
+        ? (value ? colors.onPrimary : colors.onSurfaceVariant)
+        : colors.onSurface.withValues(alpha: 0.38);
+
+    void toggle() => onChanged?.call(!value);
+
+    return Semantics(
+      label: semanticLabel,
+      button: true,
+      enabled: enabled,
+      toggled: value,
+      child: FocusableActionDetector(
+        enabled: enabled,
+        mouseCursor: enabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        },
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (ActivateIntent intent) {
+              toggle();
+              return null;
+            },
+          ),
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: enabled ? toggle : null,
+          child: SizedBox.square(
+            dimension: 48,
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 40,
+                height: 24,
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: trackColor,
+                  borderRadius: const BorderRadius.all(Radius.circular(3)),
+                ),
+                child: AnimatedAlign(
+                  duration: const Duration(milliseconds: 150),
+                  alignment: value
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: thumbColor,
+                      borderRadius: const BorderRadius.all(Radius.circular(3)),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
