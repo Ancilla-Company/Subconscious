@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subconscious-engine"
+version = "0.1.0"
+description = "Python port of the Subconscious .NET engine"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "aiosqlite==0.22.1",
+  "cryptography==46.0.4",
+  "httpx==0.28.1",
+  "keyring==25.7.0",
+  "Pillow==12.3.0",
+  "pystray==0.19.5",
+  "pydantic==2.12.4",
+  "pydantic-ai==1.51.0",
+  "sqlalchemy==2.0.45",
+  "starlette==0.47.3",
+  "uvicorn==0.40.0",
+]
+
+[project.scripts]
+subconscious-engine = "subconscious_engine.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+test = [
+  "pytest==8.3.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+pythonpath = ["src"]
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+  "lan: verifies reachability through a real non-loopback local network interface",
+]
