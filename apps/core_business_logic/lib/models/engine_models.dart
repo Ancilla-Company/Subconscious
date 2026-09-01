@@ -220,6 +220,36 @@ final class ModelInfo {
   );
 }
 
+final class AppStateEntry {
+  const AppStateEntry({
+    required this.key,
+    required this.value,
+    required this.updatedAt,
+  });
+
+  final String key;
+  final String value;
+  final DateTime updatedAt;
+
+  factory AppStateEntry.fromJson(Map<String, dynamic> json) => AppStateEntry(
+    key:
+        _stringValue(json, 'key', 'key') ??
+        (throw const FormatException('App state key is required.')),
+    value:
+        _stringValue(json, 'value', 'value') ??
+        (throw const FormatException('App state value is required.')),
+    updatedAt:
+        _dateTimeFromJson(_jsonValue(json, 'updatedAt', 'updated_at')) ??
+        (throw const FormatException('App state updatedAt is required.')),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'key': key,
+    'value': value,
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
+  };
+}
+
 final class EngineSetting {
   const EngineSetting({
     required this.key,
@@ -297,6 +327,26 @@ final class WorkspaceFileContent {
   factory WorkspaceFileContent.fromJson(Map<String, dynamic> json) =>
       WorkspaceFileContent(
         content: _stringValue(json, 'content', 'content') ?? '',
+      );
+}
+
+final class WorkspaceFilePreview {
+  const WorkspaceFilePreview({
+    required this.localPath,
+    required this.mediaType,
+  });
+
+  final String localPath;
+  final String mediaType;
+
+  factory WorkspaceFilePreview.fromJson(Map<String, dynamic> json) =>
+      WorkspaceFilePreview(
+        localPath:
+            _stringValue(json, 'localPath', 'local_path') ??
+            (throw const FormatException('Preview path is required.')),
+        mediaType:
+            _stringValue(json, 'mediaType', 'media_type') ??
+            'application/octet-stream',
       );
 }
 

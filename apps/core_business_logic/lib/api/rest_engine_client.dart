@@ -6,79 +6,324 @@ import '../models/engine_models.dart';
 import 'engine_exception.dart';
 
 final class RestEngineClient {
-  RestEngineClient({required Uri baseUri, required this.token, http.Client? client}) : _client = client ?? http.Client(), _baseUri = _withTrailingSlash(baseUri);
+  RestEngineClient({
+    required Uri baseUri,
+    required this.token,
+    http.Client? client,
+  }) : _client = client ?? http.Client(),
+       _baseUri = _withTrailingSlash(baseUri);
   final Uri _baseUri;
   final String token;
   final http.Client _client;
 
-  Future<Map<String, dynamic>> health() => _getMap('health', authenticate: false);
-  Future<List<Workspace>> listWorkspaces() async => _getList('workspaces', Workspace.fromJson);
-  Future<Workspace> getWorkspace(String workspaceUuid) async => Workspace.fromJson(await _getMap('workspaces/${_segment(workspaceUuid)}', authenticate: true));
-  Future<Workspace> createWorkspace({required String name, String? description, String? defaultModelId, String? toolsConfig, String? directories, String? approvalConfig, String? ragConfig}) async {
-    final Map<String, dynamic> json = await _sendMap('POST', 'workspaces', <String, dynamic>{'name': name, if (description != null) 'description': description, if (defaultModelId != null) 'defaultModelId': defaultModelId, if (toolsConfig != null) 'toolsConfig': toolsConfig, if (directories != null) 'directories': directories, if (approvalConfig != null) 'approvalConfig': approvalConfig, if (ragConfig != null) 'ragConfig': ragConfig});
+  Future<Map<String, dynamic>> health() =>
+      _getMap('health', authenticate: false);
+  Future<List<Workspace>> listWorkspaces() async =>
+      _getList('workspaces', Workspace.fromJson);
+  Future<Workspace> getWorkspace(String workspaceUuid) async =>
+      Workspace.fromJson(
+        await _getMap(
+          'workspaces/${_segment(workspaceUuid)}',
+          authenticate: true,
+        ),
+      );
+  Future<Workspace> createWorkspace({
+    required String name,
+    String? description,
+    String? defaultModelId,
+    String? toolsConfig,
+    String? directories,
+    String? approvalConfig,
+    String? ragConfig,
+  }) async {
+    final Map<String, dynamic> json = await _sendMap(
+      'POST',
+      'workspaces',
+      <String, dynamic>{
+        'name': name,
+        if (description != null) 'description': description,
+        if (defaultModelId != null) 'defaultModelId': defaultModelId,
+        if (toolsConfig != null) 'toolsConfig': toolsConfig,
+        if (directories != null) 'directories': directories,
+        if (approvalConfig != null) 'approvalConfig': approvalConfig,
+        if (ragConfig != null) 'ragConfig': ragConfig,
+      },
+    );
     return Workspace.fromJson(json);
   }
 
-  Future<Workspace> updateWorkspace({required String workspaceUuid, required String name, String? description, String? defaultModelId, String? toolsConfig, String? directories, String? approvalConfig, String? ragConfig}) async {
-    final Map<String, dynamic> json = await _sendMap('PUT', 'workspaces/${_segment(workspaceUuid)}', <String, dynamic>{'name': name, if (description != null) 'description': description, if (defaultModelId != null) 'defaultModelId': defaultModelId, if (toolsConfig != null) 'toolsConfig': toolsConfig, if (directories != null) 'directories': directories, if (approvalConfig != null) 'approvalConfig': approvalConfig, if (ragConfig != null) 'ragConfig': ragConfig});
+  Future<Workspace> updateWorkspace({
+    required String workspaceUuid,
+    required String name,
+    String? description,
+    String? defaultModelId,
+    String? toolsConfig,
+    String? directories,
+    String? approvalConfig,
+    String? ragConfig,
+  }) async {
+    final Map<String, dynamic> json = await _sendMap(
+      'PUT',
+      'workspaces/${_segment(workspaceUuid)}',
+      <String, dynamic>{
+        'name': name,
+        if (description != null) 'description': description,
+        if (defaultModelId != null) 'defaultModelId': defaultModelId,
+        if (toolsConfig != null) 'toolsConfig': toolsConfig,
+        if (directories != null) 'directories': directories,
+        if (approvalConfig != null) 'approvalConfig': approvalConfig,
+        if (ragConfig != null) 'ragConfig': ragConfig,
+      },
+    );
     return Workspace.fromJson(json);
   }
 
-  Future<void> deleteWorkspace(String workspaceUuid) => _delete('workspaces/${_segment(workspaceUuid)}');
-  Future<List<ThreadInfo>> listThreads(String workspaceUuid) async => _getList('workspaces/${_segment(workspaceUuid)}/threads', ThreadInfo.fromJson);
-  Future<ThreadInfo> getThread(String threadUuid) async => ThreadInfo.fromJson(await _getMap('threads/${_segment(threadUuid)}', authenticate: true));
+  Future<void> deleteWorkspace(String workspaceUuid) =>
+      _delete('workspaces/${_segment(workspaceUuid)}');
+  Future<List<ThreadInfo>> listThreads(String workspaceUuid) async => _getList(
+    'workspaces/${_segment(workspaceUuid)}/threads',
+    ThreadInfo.fromJson,
+  );
+  Future<ThreadInfo> getThread(String threadUuid) async => ThreadInfo.fromJson(
+    await _getMap('threads/${_segment(threadUuid)}', authenticate: true),
+  );
 
-  Future<ThreadInfo> createThread({required String workspaceUuid, String? title, String? description, String? defaultModelId}) async {
-    final Map<String, dynamic> json = await _sendMap('POST', 'threads', <String, dynamic>{'workspaceUuid': workspaceUuid, if (title != null) 'title': title, if (description != null) 'description': description, if (defaultModelId != null) 'defaultModelId': defaultModelId});
+  Future<ThreadInfo> createThread({
+    required String workspaceUuid,
+    String? title,
+    String? description,
+    String? defaultModelId,
+    String? toolsConfig,
+  }) async {
+    final Map<String, dynamic> json = await _sendMap(
+      'POST',
+      'threads',
+      <String, dynamic>{
+        'workspaceUuid': workspaceUuid,
+        if (title != null) 'title': title,
+        if (description != null) 'description': description,
+        if (defaultModelId != null) 'defaultModelId': defaultModelId,
+        if (toolsConfig != null) 'toolsConfig': toolsConfig,
+      },
+    );
     return ThreadInfo.fromJson(json);
   }
 
-  Future<ThreadInfo> updateThread({required String threadUuid, String? title, String? description, String? defaultModelId}) async {
-    final Map<String, dynamic> json = await _sendMap('PUT', 'threads/${_segment(threadUuid)}', <String, dynamic>{if (title != null) 'title': title, if (description != null) 'description': description, if (defaultModelId != null) 'defaultModelId': defaultModelId});
+  Future<ThreadInfo> updateThread({
+    required String threadUuid,
+    String? title,
+    String? description,
+    String? defaultModelId,
+    String? toolsConfig,
+    bool clearToolsConfig = false,
+  }) async {
+    final Map<String, dynamic> json = await _sendMap(
+      'PUT',
+      'threads/${_segment(threadUuid)}',
+      <String, dynamic>{
+        if (title != null) 'title': title,
+        if (description != null) 'description': description,
+        if (defaultModelId != null) 'defaultModelId': defaultModelId,
+        if (clearToolsConfig)
+          'toolsConfig': null
+        else if (toolsConfig != null)
+          'toolsConfig': toolsConfig,
+      },
+    );
     return ThreadInfo.fromJson(json);
   }
 
-  Future<void> deleteThread(String threadUuid) => _delete('threads/${_segment(threadUuid)}');
-  Future<List<ChatMessage>> listMessages(String threadUuid) async => _getList('threads/${_segment(threadUuid)}/messages', ChatMessage.fromJson);
+  Future<void> deleteThread(String threadUuid) =>
+      _delete('threads/${_segment(threadUuid)}');
+  Future<List<ChatMessage>> listMessages(String threadUuid) async => _getList(
+    'threads/${_segment(threadUuid)}/messages',
+    ChatMessage.fromJson,
+  );
 
-  Future<ChatMessage> createMessage({required String threadUuid, required String role, required String content}) async {
-    final Map<String, dynamic> json = await _sendMap('POST', 'messages', <String, dynamic>{'threadUuid': threadUuid, 'role': role, 'content': content});
+  Future<ChatMessage> createMessage({
+    required String threadUuid,
+    required String role,
+    required String content,
+  }) async {
+    final Map<String, dynamic> json = await _sendMap(
+      'POST',
+      'messages',
+      <String, dynamic>{
+        'threadUuid': threadUuid,
+        'role': role,
+        'content': content,
+      },
+    );
     return ChatMessage.fromJson(json);
   }
 
-  Future<List<ModelInfo>> listModels() async => _getList('models', ModelInfo.fromJson);
+  Future<List<ModelInfo>> listModels() async =>
+      _getList('models', ModelInfo.fromJson);
 
-  Future<List<WorkspaceFileEntry>> listFiles({required String workspaceUuid, required int rootIndex, String? path}) async {
-    final Map<String, String> query = <String, String>{'rootIndex': '$rootIndex', if (path != null) 'path': path};
-    return _getList('workspaces/${_segment(workspaceUuid)}/files', WorkspaceFileEntry.fromJson, query: query);
+  Future<List<WorkspaceFileEntry>> listFiles({
+    required String workspaceUuid,
+    required int rootIndex,
+    String? path,
+  }) async {
+    final Map<String, String> query = <String, String>{
+      'rootIndex': '$rootIndex',
+      if (path != null) 'path': path,
+    };
+    return _getList(
+      'workspaces/${_segment(workspaceUuid)}/files',
+      WorkspaceFileEntry.fromJson,
+      query: query,
+    );
   }
 
-  Future<WorkspaceFileContent> readFile({required String workspaceUuid, required int rootIndex, required String path}) async => WorkspaceFileContent.fromJson(await _getMap('workspaces/${_segment(workspaceUuid)}/files/content', authenticate: true, query: <String, String>{'rootIndex': '$rootIndex', 'path': path}));
+  Future<WorkspaceFileContent> readFile({
+    required String workspaceUuid,
+    required int rootIndex,
+    required String path,
+  }) async => WorkspaceFileContent.fromJson(
+    await _getMap(
+      'workspaces/${_segment(workspaceUuid)}/files/content',
+      authenticate: true,
+      query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    ),
+  );
 
-  Future<WorkspaceFileContent> createFile({required String workspaceUuid, required int rootIndex, required String path, required String content}) async => WorkspaceFileContent.fromJson(await _sendMapWithQuery('POST', 'workspaces/${_segment(workspaceUuid)}/files/content', <String, dynamic>{'content': content}, <String, String>{'rootIndex': '$rootIndex', 'path': path}));
+  Future<WorkspaceFilePreview> previewFile({
+    required String workspaceUuid,
+    required int rootIndex,
+    required String path,
+  }) async => WorkspaceFilePreview.fromJson(
+    await _getMap(
+      'workspaces/${_segment(workspaceUuid)}/files/preview',
+      authenticate: true,
+      query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    ),
+  );
 
-  Future<WorkspaceFileContent> writeFile({required String workspaceUuid, required int rootIndex, required String path, required String content}) async => WorkspaceFileContent.fromJson(await _sendMapWithQuery('PUT', 'workspaces/${_segment(workspaceUuid)}/files/content', <String, dynamic>{'content': content}, <String, String>{'rootIndex': '$rootIndex', 'path': path}));
+  Future<WorkspaceFileContent> createFile({
+    required String workspaceUuid,
+    required int rootIndex,
+    required String path,
+    required String content,
+  }) async => WorkspaceFileContent.fromJson(
+    await _sendMapWithQuery(
+      'POST',
+      'workspaces/${_segment(workspaceUuid)}/files/content',
+      <String, dynamic>{'content': content},
+      <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    ),
+  );
 
-  Future<WorkspaceFileEntry> createDirectory({required String workspaceUuid, required int rootIndex, required String path}) async => WorkspaceFileEntry.fromJson(await _requestMap('POST', 'workspaces/${_segment(workspaceUuid)}/files/directory', query: <String, String>{'rootIndex': '$rootIndex', 'path': path}));
+  Future<WorkspaceFileContent> writeFile({
+    required String workspaceUuid,
+    required int rootIndex,
+    required String path,
+    required String content,
+  }) async => WorkspaceFileContent.fromJson(
+    await _sendMapWithQuery(
+      'PUT',
+      'workspaces/${_segment(workspaceUuid)}/files/content',
+      <String, dynamic>{'content': content},
+      <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    ),
+  );
 
-  Future<List<ModelConfiguration>> listModelConfigurations() async => _getList('model-configurations', ModelConfiguration.fromJson);
+  Future<WorkspaceFileEntry> createDirectory({
+    required String workspaceUuid,
+    required int rootIndex,
+    required String path,
+  }) async => WorkspaceFileEntry.fromJson(
+    await _requestMap(
+      'POST',
+      'workspaces/${_segment(workspaceUuid)}/files/directory',
+      query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    ),
+  );
 
-  Future<ModelConfiguration> createModelConfiguration(ModelConfigurationRequest configuration) async => ModelConfiguration.fromJson(await _sendMap('POST', 'model-configurations', configuration.toJson()));
+  Future<List<ModelConfiguration>> listModelConfigurations() async =>
+      _getList('model-configurations', ModelConfiguration.fromJson);
 
-  Future<ModelConfiguration> updateModelConfiguration({required String id, required ModelConfigurationRequest configuration}) async => ModelConfiguration.fromJson(await _sendMap('PUT', 'model-configurations/${_segment(id)}', configuration.toJson()));
+  Future<ModelConfiguration> createModelConfiguration(
+    ModelConfigurationRequest configuration,
+  ) async => ModelConfiguration.fromJson(
+    await _sendMap('POST', 'model-configurations', configuration.toJson()),
+  );
 
-  Future<void> deleteModelConfiguration(String id) => _delete('model-configurations/${_segment(id)}');
+  Future<ModelConfiguration> updateModelConfiguration({
+    required String id,
+    required ModelConfigurationRequest configuration,
+  }) async => ModelConfiguration.fromJson(
+    await _sendMap(
+      'PUT',
+      'model-configurations/${_segment(id)}',
+      configuration.toJson(),
+    ),
+  );
 
-  Future<ToolCatalog> listToolCatalog() async => ToolCatalog.fromJson(await _getMap('tools/catalog', authenticate: true));
-  Future<List<ToolRegistryEntry>> listTools() async => _getList('tool-registry', ToolRegistryEntry.fromJson);
-  Future<ToolRegistryEntry> getTool(String uuid) async => ToolRegistryEntry.fromJson(await _getMap('tool-registry/${_segment(uuid)}', authenticate: true));
-  Future<ToolRegistryEntry> createTool(ToolRegistryRequest tool) async => ToolRegistryEntry.fromJson(await _sendMap('POST', 'tool-registry', tool.toJson()));
-  Future<ToolRegistryEntry> updateTool({required String uuid, required ToolRegistryRequest tool}) async => ToolRegistryEntry.fromJson(await _sendMap('PUT', 'tool-registry/${_segment(uuid)}', tool.toJson()));
-  Future<void> deleteTool(String uuid) => _delete('tool-registry/${_segment(uuid)}');
+  Future<void> deleteModelConfiguration(String id) =>
+      _delete('model-configurations/${_segment(id)}');
 
-  Future<List<EngineSetting>> getSettings({String? key, String? tag, String? client}) async => _getList('settings', EngineSetting.fromJson, query: <String, String>{if (key != null) 'key': key, if (tag != null) 'tag': tag, if (client != null) 'client': client});
+  Future<ToolCatalog> listToolCatalog() async =>
+      ToolCatalog.fromJson(await _getMap('tools/catalog', authenticate: true));
+  Future<List<ToolRegistryEntry>> listTools() async =>
+      _getList('tool-registry', ToolRegistryEntry.fromJson);
+  Future<ToolRegistryEntry> getTool(String uuid) async =>
+      ToolRegistryEntry.fromJson(
+        await _getMap('tool-registry/${_segment(uuid)}', authenticate: true),
+      );
+  Future<ToolRegistryEntry> createTool(ToolRegistryRequest tool) async =>
+      ToolRegistryEntry.fromJson(
+        await _sendMap('POST', 'tool-registry', tool.toJson()),
+      );
+  Future<ToolRegistryEntry> updateTool({
+    required String uuid,
+    required ToolRegistryRequest tool,
+  }) async => ToolRegistryEntry.fromJson(
+    await _sendMap('PUT', 'tool-registry/${_segment(uuid)}', tool.toJson()),
+  );
+  Future<void> deleteTool(String uuid) =>
+      _delete('tool-registry/${_segment(uuid)}');
 
-  Future<List<EngineSetting>> putSettings(List<EngineSetting> settings) async => _putList('settings', settings.map((EngineSetting value) => value.toJson()).toList(growable: false), EngineSetting.fromJson);
+  Future<AppStateEntry?> getAppState(String key) async {
+    try {
+      return AppStateEntry.fromJson(
+        await _getMap('app-state/${_segment(key)}', authenticate: true),
+      );
+    } on EngineApiException catch (error) {
+      if (error.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<AppStateEntry> putAppState(String key, String value) async =>
+      AppStateEntry.fromJson(
+        await _sendMap('PUT', 'app-state/${_segment(key)}', <String, dynamic>{
+          'value': value,
+        }),
+      );
+
+  Future<List<EngineSetting>> getSettings({
+    String? key,
+    String? tag,
+    String? client,
+  }) async => _getList(
+    'settings',
+    EngineSetting.fromJson,
+    query: <String, String>{
+      if (key != null) 'key': key,
+      if (tag != null) 'tag': tag,
+      if (client != null) 'client': client,
+    },
+  );
+
+  Future<List<EngineSetting>> putSettings(List<EngineSetting> settings) async =>
+      _putList(
+        'settings',
+        settings
+            .map((EngineSetting value) => value.toJson())
+            .toList(growable: false),
+        EngineSetting.fromJson,
+      );
 
   Future<void> close() async => _client.close();
 
@@ -86,47 +331,93 @@ final class RestEngineClient {
     await _request('DELETE', path);
   }
 
-  Future<List<T>> _getList<T>(String path, T Function(Map<String, dynamic>) decode, {Map<String, String> query = const <String, String>{}}) async {
+  Future<List<T>> _getList<T>(
+    String path,
+    T Function(Map<String, dynamic>) decode, {
+    Map<String, String> query = const <String, String>{},
+  }) async {
     final dynamic value = await _request('GET', path, query: query);
-    if (value is! List) throw const FormatException('Expected a JSON array from the engine.');
-    return value.map((dynamic item) => decode((item as Map).cast<String, dynamic>())).toList(growable: false);
+    if (value is! List)
+      throw const FormatException('Expected a JSON array from the engine.');
+    return value
+        .map((dynamic item) => decode((item as Map).cast<String, dynamic>()))
+        .toList(growable: false);
   }
 
-  Future<List<T>> _putList<T>(String path, List<Map<String, dynamic>> body, T Function(Map<String, dynamic>) decode) async {
+  Future<List<T>> _putList<T>(
+    String path,
+    List<Map<String, dynamic>> body,
+    T Function(Map<String, dynamic>) decode,
+  ) async {
     final dynamic value = await _request('PUT', path, body: body);
-    if (value is! List) throw const FormatException('Expected a JSON array from the engine.');
-    return value.map((dynamic item) => decode((item as Map).cast<String, dynamic>())).toList(growable: false);
+    if (value is! List)
+      throw const FormatException('Expected a JSON array from the engine.');
+    return value
+        .map((dynamic item) => decode((item as Map).cast<String, dynamic>()))
+        .toList(growable: false);
   }
 
-  Future<Map<String, dynamic>> _getMap(String path, {required bool authenticate, Map<String, String> query = const <String, String>{}}) async => _mapResponse(await _request('GET', path, query: query, authenticate: authenticate));
+  Future<Map<String, dynamic>> _getMap(
+    String path, {
+    required bool authenticate,
+    Map<String, String> query = const <String, String>{},
+  }) async => _mapResponse(
+    await _request('GET', path, query: query, authenticate: authenticate),
+  );
 
-  Future<Map<String, dynamic>> _sendMap(String method, String path, Map<String, dynamic> body) async => _mapResponse(await _request(method, path, body: body));
+  Future<Map<String, dynamic>> _sendMap(
+    String method,
+    String path,
+    Map<String, dynamic> body,
+  ) async => _mapResponse(await _request(method, path, body: body));
 
-  Future<Map<String, dynamic>> _sendMapWithQuery(String method, String path, Map<String, dynamic> body, Map<String, String> query) async => _mapResponse(await _request(method, path, body: body, query: query));
+  Future<Map<String, dynamic>> _sendMapWithQuery(
+    String method,
+    String path,
+    Map<String, dynamic> body,
+    Map<String, String> query,
+  ) async =>
+      _mapResponse(await _request(method, path, body: body, query: query));
 
-  Future<Map<String, dynamic>> _requestMap(String method, String path, {Map<String, String> query = const <String, String>{}}) async => _mapResponse(await _request(method, path, query: query));
+  Future<Map<String, dynamic>> _requestMap(
+    String method,
+    String path, {
+    Map<String, String> query = const <String, String>{},
+  }) async => _mapResponse(await _request(method, path, query: query));
 
   Map<String, dynamic> _mapResponse(dynamic value) {
-    if (value is! Map) throw const FormatException('Expected a JSON object from the engine.');
+    if (value is! Map)
+      throw const FormatException('Expected a JSON object from the engine.');
     return value.cast<String, dynamic>();
   }
 
-  Future<dynamic> _request(String method, String path, {Object? body, Map<String, String> query = const <String, String>{}, bool authenticate = true}) async {
-    final Uri uri = _baseUri.resolve(path).replace(queryParameters: query.isEmpty ? null : query);
+  Future<dynamic> _request(
+    String method,
+    String path, {
+    Object? body,
+    Map<String, String> query = const <String, String>{},
+    bool authenticate = true,
+  }) async {
+    final Uri uri = _baseUri
+        .resolve(path)
+        .replace(queryParameters: query.isEmpty ? null : query);
     final http.Request request = http.Request(method, uri);
     request.headers['Accept'] = 'application/json';
-    if (authenticate && token.isNotEmpty) request.headers['Authorization'] = 'Bearer $token';
+    if (authenticate && token.isNotEmpty)
+      request.headers['Authorization'] = 'Bearer $token';
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
     }
     final http.StreamedResponse response = await _client.send(request);
     final String text = await response.stream.bytesToString();
-    if (response.statusCode < 200 || response.statusCode >= 300) throw apiException(request, response, text);
+    if (response.statusCode < 200 || response.statusCode >= 300)
+      throw apiException(request, response, text);
     if (text.trim().isEmpty) return null;
     return jsonDecode(text);
   }
 }
 
 String _segment(String value) => Uri.encodeComponent(value);
-Uri _withTrailingSlash(Uri value) => value.path.endsWith('/') ? value : value.replace(path: '${value.path}/');
+Uri _withTrailingSlash(Uri value) =>
+    value.path.endsWith('/') ? value : value.replace(path: '${value.path}/');

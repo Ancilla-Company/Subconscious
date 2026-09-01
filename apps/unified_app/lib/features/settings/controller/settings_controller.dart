@@ -9,7 +9,7 @@ enum SettingsPage { general, models, tools, skills, about }
 
 enum AppLightingMode { device, light, dark }
 
-enum AppAccentTheme { device, blue, purple, green, orange, red }
+enum AppAccentTheme { device, neutral, blue, purple, green, orange, red }
 
 enum DashboardSidebarPosition { left, right }
 
@@ -53,6 +53,7 @@ final class DashboardSettingsController extends ChangeNotifier {
 
   AppAccentTheme get accentTheme =>
       switch (generalSettings[colourThemeKey]?.toLowerCase()) {
+        'default' => AppAccentTheme.neutral,
         'blue' => AppAccentTheme.blue,
         'purple' => AppAccentTheme.purple,
         'green' => AppAccentTheme.green,
@@ -108,6 +109,7 @@ final class DashboardSettingsController extends ChangeNotifier {
 
   String get colourThemeValue => switch (accentTheme) {
     AppAccentTheme.device => 'Device',
+    AppAccentTheme.neutral => 'Default',
     AppAccentTheme.blue => 'Blue',
     AppAccentTheme.purple => 'Purple',
     AppAccentTheme.green => 'Green',

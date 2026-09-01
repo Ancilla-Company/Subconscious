@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 
@@ -8,8 +11,6 @@ import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
 import 'window_composition_bar.dart';
-
-typedef _ContextPanelScreen = ContextPanelScreen;
 
 final class DesktopWebDashboardView extends StatefulWidget {
   const DesktopWebDashboardView({required this.controller, super.key});
@@ -23,54 +24,47 @@ final class DesktopWebDashboardView extends StatefulWidget {
 
 final class _DesktopWebDashboardViewState
     extends State<DesktopWebDashboardView> {
-  static const double _defaultChatPanelWidth = 280;
   static const double _minimumChatPanelWidth = 140;
   static const double _maximumChatPanelWidth = 600;
-  static const double _defaultContextPanelWidth = 280;
   static const double _minimumContextPanelWidth = 180;
   static const double _maximumContextPanelWidth = 600;
   static const double _minimumMainPanelWidth = 300;
   static const double _sidebarAndDividerWidth = 41;
   static const double _resizeDividerWidth = 5;
 
-  _ContextPanelScreen _selectedPanel = _ContextPanelScreen.threads;
-  bool _isContextPanelVisible = true;
-  double _chatPanelWidth = _defaultChatPanelWidth;
-  double _contextPanelWidth = _defaultContextPanelWidth;
-
   void _toggleContextPanelVisibility() {
-    setState(() => _isContextPanelVisible = !_isContextPanelVisible);
+    widget.controller.updateLayoutState(
+      contextPanelVisible: !widget.controller.contextPanelVisible,
+    );
   }
 
-  void _selectPanel(_ContextPanelScreen panel) {
-    setState(() {
-      _selectedPanel = panel;
-      _isContextPanelVisible = true;
-    });
-    switch (panel) {
-      case ContextPanelScreen.files:
-        widget.controller.settings.showFiles();
-      case ContextPanelScreen.settings:
-        widget.controller.settings.showSettings();
-      case ContextPanelScreen.threads:
-      case ContextPanelScreen.workspaces:
-      case ContextPanelScreen.account:
-        widget.controller.settings.showUtility();
-    }
+  void _selectPanel(DashboardSection section) {
+    widget.controller.updateLayoutState(contextPanelVisible: true);
+    unawaited(widget.controller.activateSection(section));
   }
 
   @override
   void initState() {
     super.initState();
-    widget.controller.settings.addListener(_onSettingsChanged);
+    widget.controller
+      ..addListener(_onControllerChanged)
+      ..settings.addListener(_onSettingsChanged);
   }
 
   @override
   void didUpdateWidget(covariant DesktopWebDashboardView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller == widget.controller) return;
-    oldWidget.controller.settings.removeListener(_onSettingsChanged);
-    widget.controller.settings.addListener(_onSettingsChanged);
+    oldWidget.controller
+      ..removeListener(_onControllerChanged)
+      ..settings.removeListener(_onSettingsChanged);
+    widget.controller
+      ..addListener(_onControllerChanged)
+      ..settings.addListener(_onSettingsChanged);
+  }
+
+  void _onControllerChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onSettingsChanged() {
@@ -79,7 +73,9 @@ final class _DesktopWebDashboardViewState
 
   @override
   void dispose() {
-    widget.controller.settings.removeListener(_onSettingsChanged);
+    widget.controller
+      ..removeListener(_onControllerChanged)
+      ..settings.removeListener(_onSettingsChanged);
     super.dispose();
   }
 
@@ -87,15 +83,25 @@ final class _DesktopWebDashboardViewState
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final double availableWidth = MediaQuery.sizeOf(context).width;
-    final List<DashboardPanel> panelOrder = widget
-        .controller
-        .settings
-        .panelOrder
+    final bool isContextPanelVisible = widget.controller.contextPanelVisible;
+    final List<DashboardPanel> configuredPanelOrder =
+        widget.controller.settings.panelOrder;
+    final Set<DashboardPanel> includedPanels = <DashboardPanel>{};
+    final List<DashboardPanel> normalizedPanelOrder = <DashboardPanel>[
+      for (final DashboardPanel panel in configuredPanelOrder)
+        if (includedPanels.add(panel)) panel,
+      for (final DashboardPanel panel in DashboardPanel.values)
+        if (includedPanels.add(panel)) panel,
+    ];
+    final List<DashboardPanel> panelOrder = normalizedPanelOrder
         .where(
           (DashboardPanel panel) =>
-              panel != DashboardPanel.context || _isContextPanelVisible,
+              panel != DashboardPanel.context || isContextPanelVisible,
         )
         .toList(growable: false);
+    final String panelArrangementKey = normalizedPanelOrder
+        .map((DashboardPanel panel) => panel.name)
+        .join(':');
     final double dividerLayoutWidth =
         _resizeDividerWidth * (panelOrder.length - 1);
     final double maximumContextPanelWidth =
@@ -106,23 +112,23 @@ final class _DesktopWebDashboardViewState
                 _minimumMainPanelWidth)
             .clamp(_minimumContextPanelWidth, _maximumContextPanelWidth)
             .toDouble();
-    final double contextPanelWidth = _contextPanelWidth
+    final double contextPanelWidth = widget.controller.contextPanelWidth
         .clamp(_minimumContextPanelWidth, maximumContextPanelWidth)
         .toDouble();
     final double maximumChatPanelWidth =
         (availableWidth -
                 _sidebarAndDividerWidth -
                 dividerLayoutWidth -
-                (_isContextPanelVisible ? contextPanelWidth : 0) -
+                (isContextPanelVisible ? contextPanelWidth : 0) -
                 _minimumMainPanelWidth)
             .clamp(_minimumChatPanelWidth, _maximumChatPanelWidth)
             .toDouble();
-    final double chatPanelWidth = _chatPanelWidth
+    final double chatPanelWidth = widget.controller.chatPanelWidth
         .clamp(_minimumChatPanelWidth, maximumChatPanelWidth)
         .toDouble();
     final Widget sidebar = _Sidebar(
-      selectedPanel: _selectedPanel,
-      isContextPanelVisible: _isContextPanelVisible,
+      selectedPanel: widget.controller.selectedSection,
+      isContextPanelVisible: isContextPanelVisible,
       onContextPanelVisibilityToggle: _toggleContextPanelVisibility,
       onPanelSelected: _selectPanel,
     );
@@ -182,7 +188,12 @@ final class _DesktopWebDashboardViewState
               child: Row(
                 children: <Widget>[
                   if (!sidebarOnRight) ...<Widget>[sidebar, sidebarDivider],
-                  Expanded(child: Row(children: configuredPanels)),
+                  Expanded(
+                    child: Row(
+                      key: ValueKey<String>(panelArrangementKey),
+                      children: configuredPanels,
+                    ),
+                  ),
                   if (sidebarOnRight) ...<Widget>[sidebarDivider, sidebar],
                 ],
               ),
@@ -220,7 +231,27 @@ final class _DesktopWebDashboardViewState
                   provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
                 ),
                 provider: provider,
+                workspace: widget.controller.threadsWorkspace,
+                thread: widget.controller.selectedThread,
+                onCreateThread: ({String? title, String? toolsConfig}) => widget
+                    .controller
+                    .createThread(title: title, toolsConfig: toolsConfig),
+                onUpdateThread:
+                    ({
+                      required ThreadInfo thread,
+                      String? title,
+                      String? toolsConfig,
+                      required bool clearToolsConfig,
+                    }) => widget.controller.updateThreadSettings(
+                      thread: thread,
+                      title: title,
+                      toolsConfig: toolsConfig,
+                      clearToolsConfig: clearToolsConfig,
+                    ),
                 title: widget.controller.selectedThread?.title,
+                useNeutralUserBubbleForeground:
+                    widget.controller.settings.accentTheme ==
+                    AppAccentTheme.neutral,
               );
             }
             return _Unavailable(error: widget.controller.error);
@@ -236,7 +267,7 @@ final class _DesktopWebDashboardViewState
       key: const ValueKey<DashboardPanel>(DashboardPanel.context),
       width: contextPanelWidth,
       child: ContextPanel(
-        screen: _selectedPanel,
+        screen: widget.controller.selectedSection,
         controller: widget.controller,
       ),
     ),
@@ -265,20 +296,22 @@ final class _DesktopWebDashboardViewState
     required double maximumContextPanelWidth,
   }) {
     final double signedDelta = isLeftPanel ? delta : -delta;
-    setState(() {
-      switch (panel) {
-        case DashboardPanel.chat:
-          _chatPanelWidth = (chatPanelWidth + signedDelta)
+    switch (panel) {
+      case DashboardPanel.chat:
+        widget.controller.updateLayoutState(
+          chatPanelWidth: (chatPanelWidth + signedDelta)
               .clamp(_minimumChatPanelWidth, maximumChatPanelWidth)
-              .toDouble();
-        case DashboardPanel.context:
-          _contextPanelWidth = (contextPanelWidth + signedDelta)
+              .toDouble(),
+        );
+      case DashboardPanel.context:
+        widget.controller.updateLayoutState(
+          contextPanelWidth: (contextPanelWidth + signedDelta)
               .clamp(_minimumContextPanelWidth, maximumContextPanelWidth)
-              .toDouble();
-        case DashboardPanel.main:
-          break;
-      }
-    });
+              .toDouble(),
+        );
+      case DashboardPanel.main:
+        break;
+    }
   }
 }
 
@@ -326,10 +359,10 @@ final class _Sidebar extends StatelessWidget {
     required this.onPanelSelected,
   });
 
-  final _ContextPanelScreen selectedPanel;
+  final DashboardSection selectedPanel;
   final bool isContextPanelVisible;
   final VoidCallback onContextPanelVisibilityToggle;
-  final ValueChanged<_ContextPanelScreen> onPanelSelected;
+  final ValueChanged<DashboardSection> onPanelSelected;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -350,22 +383,22 @@ final class _Sidebar extends StatelessWidget {
             icon: FluentIcons.apps_24_regular,
             selectedIcon: FluentIcons.apps_24_filled,
             tooltip: 'Workspaces',
-            selected: selectedPanel == _ContextPanelScreen.workspaces,
-            onPressed: () => onPanelSelected(_ContextPanelScreen.workspaces),
+            selected: selectedPanel == DashboardSection.workspaces,
+            onPressed: () => onPanelSelected(DashboardSection.workspaces),
           ),
           _SidebarButton(
             icon: FluentIcons.chat_multiple_24_regular,
             selectedIcon: FluentIcons.chat_multiple_24_filled,
             tooltip: 'Threads',
-            selected: selectedPanel == _ContextPanelScreen.threads,
-            onPressed: () => onPanelSelected(_ContextPanelScreen.threads),
+            selected: selectedPanel == DashboardSection.threads,
+            onPressed: () => onPanelSelected(DashboardSection.threads),
           ),
           _SidebarButton(
             icon: FluentIcons.folder_24_regular,
             selectedIcon: FluentIcons.folder_24_filled,
             tooltip: 'Files',
-            selected: selectedPanel == _ContextPanelScreen.files,
-            onPressed: () => onPanelSelected(_ContextPanelScreen.files),
+            selected: selectedPanel == DashboardSection.files,
+            onPressed: () => onPanelSelected(DashboardSection.files),
           ),
           const Spacer(),
           const _SidebarDivider(),
@@ -373,8 +406,8 @@ final class _Sidebar extends StatelessWidget {
             icon: FluentIcons.settings_24_regular,
             selectedIcon: FluentIcons.settings_24_filled,
             tooltip: 'Settings',
-            selected: selectedPanel == _ContextPanelScreen.settings,
-            onPressed: () => onPanelSelected(_ContextPanelScreen.settings),
+            selected: selectedPanel == DashboardSection.settings,
+            onPressed: () => onPanelSelected(DashboardSection.settings),
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
@@ -382,8 +415,8 @@ final class _Sidebar extends StatelessWidget {
               icon: FluentIcons.person_circle_24_regular,
               selectedIcon: FluentIcons.person_circle_24_filled,
               tooltip: 'Account',
-              selected: selectedPanel == _ContextPanelScreen.account,
-              onPressed: () => onPanelSelected(_ContextPanelScreen.account),
+              selected: selectedPanel == DashboardSection.account,
+              onPressed: () => onPanelSelected(DashboardSection.account),
             ),
           ),
         ],
@@ -445,7 +478,9 @@ final class _SidebarButton extends StatelessWidget {
 
 final class _Unavailable extends StatelessWidget {
   const _Unavailable({this.error});
+
   final Object? error;
+
   @override
   Widget build(BuildContext context) => Center(
     child: Padding(

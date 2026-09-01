@@ -9,6 +9,8 @@ import '../../settings/controller/settings_controller.dart';
 
 enum EngineConnectionStatus { disconnected, connecting, connected }
 
+enum DashboardSection { workspaces, threads, files, settings, account }
+
 final class WorkspaceDirectoryRoot {
   const WorkspaceDirectoryRoot({required this.index, required this.path});
 
@@ -29,13 +31,73 @@ final class OpenWorkspaceFile {
     required this.rootIndex,
     required this.path,
     required this.content,
+    this.localPath,
+    this.mediaType,
   });
 
   final int rootIndex;
   final String path;
   final String content;
+  final String? localPath;
+  final String? mediaType;
 
   String get name => path.replaceAll('\\', '/').split('/').last;
+  bool get isImage => localPath != null;
+  bool get isSvg => mediaType == 'image/svg+xml';
+
+  static bool supportsImagePreview(String path) {
+    final String lower = path.toLowerCase();
+    return const <String>[
+      '.bmp',
+      '.gif',
+      '.jpeg',
+      '.jpg',
+      '.png',
+      '.svg',
+      '.webp',
+    ].any(lower.endsWith);
+  }
+}
+
+/// A stable reference to a file within one of a workspace's directory roots.
+final class WorkspaceFileReference {
+  WorkspaceFileReference({required this.rootIndex, required this.path})
+    : key = _createKey(rootIndex, path);
+
+  final int rootIndex;
+  final String path;
+  final String key;
+
+  factory WorkspaceFileReference.fromJson(Map<String, dynamic> json) {
+    final Object? rootIndex = json['rootIndex'];
+    final Object? path = json['path'];
+    if (rootIndex is! int || rootIndex < 0 || path is! String || path.isEmpty) {
+      throw const FormatException('Invalid workspace file reference.');
+    }
+    return WorkspaceFileReference(rootIndex: rootIndex, path: path);
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'rootIndex': rootIndex,
+    'path': path,
+    'key': key,
+  };
+
+  static String _createKey(int rootIndex, String path) =>
+      '$rootIndex:${path.replaceAll('\\', '/')}';
+}
+
+final class _WorkspaceViewerState {
+  _WorkspaceViewerState({
+    List<WorkspaceFileReference>? openFiles,
+    this.activeFileKey,
+    Set<String>? expandedDirectoryKeys,
+  }) : openFiles = openFiles ?? <WorkspaceFileReference>[],
+       expandedDirectoryKeys = expandedDirectoryKeys ?? <String>{};
+
+  List<WorkspaceFileReference> openFiles;
+  String? activeFileKey;
+  final Set<String> expandedDirectoryKeys;
 }
 
 typedef EngineRepositoryResolver = Future<EngineRepository?> Function();
@@ -50,6 +112,10 @@ final class DashboardController extends ChangeNotifier {
 
   static const Duration reconnectInterval = Duration(seconds: 3);
   static const Duration requestTimeout = Duration(seconds: 5);
+  static const Duration appStateSaveDebounce = Duration(milliseconds: 300);
+  static const String appStateKey = 'dashboard_state_v2';
+  static const String navigationKey = 'dashboard_navigation_v1';
+  static const String navigationTag = 'navigation';
 
   final EngineRepositoryResolver _repositoryResolver;
   final String? initialWorkspaceUuid;
@@ -60,39 +126,209 @@ final class DashboardController extends ChangeNotifier {
 
   EngineLlmProvider? chatProvider;
   EngineConnectionStatus connectionStatus = EngineConnectionStatus.connecting;
+  DashboardSection selectedSection = DashboardSection.threads;
   List<Workspace> workspaces = const <Workspace>[];
   List<ThreadInfo> threads = const <ThreadInfo>[];
   Workspace? selectedWorkspace;
+  Workspace? activeWorkspace;
+  Workspace? get threadsWorkspace => activeWorkspace;
   ThreadInfo? selectedThread;
+  String? pendingDraftTitle;
+  String? pendingDraftToolsConfig;
+  int chatSessionVersion = 0;
   Object? error;
   Object? workspacesError;
   Object? threadsError;
   Object? chatError;
   Object? filesError;
+  Object? navigationError;
   bool isLoadingWorkspaces = false;
   bool isLoadingThreads = false;
   bool isLoadingChat = false;
   bool isLoadingFile = false;
   bool isSavingFile = false;
+  bool isCreatingWorkspace = false;
+  bool hasLoadedNavigationState = false;
   OpenWorkspaceFile? openFile;
+  String? selectedFileTreeNodeKey;
+
+  bool contextPanelVisible = true;
+  double chatPanelWidth = 280;
+  double contextPanelWidth = 280;
+  double? windowX;
+  double? windowY;
+  double? windowWidth;
+  double? windowHeight;
+  bool windowMaximized = false;
+
+  String? _workspacesWorkspaceUuid;
+  String? _threadsWorkspaceUuid;
+  String? _threadsThreadUuid;
+  String? _filesWorkspaceUuid;
+  int? _filesRootIndex;
+  String? _filesPath;
 
   final Map<String, List<WorkspaceFileEntry>> _directoryEntries =
       <String, List<WorkspaceFileEntry>>{};
   final Set<String> _loadingDirectories = <String>{};
+  final Map<String, _WorkspaceViewerState> _workspaceViewerStates =
+      <String, _WorkspaceViewerState>{};
   Timer? _reconnectTimer;
+  Timer? _appStateSaveTimer;
   bool _connectionCheckInProgress = false;
+  bool _isRestoringNavigation = false;
+  Future<void>? _appStateWriteFuture;
   bool _disposed = false;
   int _threadRequestVersion = 0;
   int _chatRequestVersion = 0;
   int _fileRequestVersion = 0;
+  int _sectionActivationVersion = 0;
+  int _appStateVersion = 0;
+  int _appStateSavedVersion = 0;
 
   bool get isConnected => connectionStatus == EngineConnectionStatus.connected;
   bool get isLoading =>
       connectionStatus == EngineConnectionStatus.connecting &&
       workspaces.isEmpty;
 
+  List<WorkspaceFileReference> get rememberedOpenFiles =>
+      List<WorkspaceFileReference>.unmodifiable(
+        _currentViewerState?.openFiles ?? const <WorkspaceFileReference>[],
+      );
+
+  String? get rememberedActiveFileKey => _currentViewerState?.activeFileKey;
+
+  bool get hasWindowBounds =>
+      _isFinite(windowX) &&
+      _isFinite(windowY) &&
+      _isPositiveFinite(windowWidth) &&
+      _isPositiveFinite(windowHeight);
+
+  void rememberOpenFiles(
+    List<WorkspaceFileReference> files, {
+    String? activeKey,
+  }) {
+    final String? workspaceUuid = activeWorkspace?.uuid;
+    if (workspaceUuid == null) return;
+    final Set<String> seen = <String>{};
+    final List<WorkspaceFileReference> ordered = <WorkspaceFileReference>[
+      for (final WorkspaceFileReference file in files)
+        if (seen.add(file.key)) file,
+    ];
+    final _WorkspaceViewerState? existingState =
+        _workspaceViewerStates[workspaceUuid];
+    if (existingState == null && ordered.isEmpty && activeKey == null) return;
+    if (existingState != null &&
+        existingState.activeFileKey == activeKey &&
+        existingState.openFiles.length == ordered.length) {
+      bool unchanged = true;
+      for (int index = 0; index < ordered.length; index++) {
+        if (existingState.openFiles[index].key != ordered[index].key) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) return;
+    }
+    final _WorkspaceViewerState state =
+        existingState ?? _WorkspaceViewerState();
+    _workspaceViewerStates[workspaceUuid] = state;
+    state
+      ..openFiles = ordered
+      ..activeFileKey = activeKey;
+    _markAppStateChanged();
+    notifyListeners();
+  }
+
+  bool isDirectoryExpanded(
+    int rootIndex,
+    String path, {
+    bool defaultValue = false,
+  }) {
+    final _WorkspaceViewerState? state = _currentViewerState;
+    if (state == null) return defaultValue;
+    return state.expandedDirectoryKeys.contains(_directoryKey(rootIndex, path));
+  }
+
+  void setDirectoryExpanded(int rootIndex, String path, bool expanded) {
+    final String? workspaceUuid = activeWorkspace?.uuid;
+    if (workspaceUuid == null) return;
+    final _WorkspaceViewerState? existingState =
+        _workspaceViewerStates[workspaceUuid];
+    final _WorkspaceViewerState state =
+        existingState ?? _WorkspaceViewerState();
+    _workspaceViewerStates[workspaceUuid] = state;
+    final String key = _directoryKey(rootIndex, path);
+    final bool membershipChanged = expanded
+        ? state.expandedDirectoryKeys.add(key)
+        : state.expandedDirectoryKeys.remove(key);
+    final bool changed = existingState == null || membershipChanged;
+    if (!changed) return;
+    _markAppStateChanged();
+    notifyListeners();
+  }
+
+  void updateLayoutState({
+    bool? contextPanelVisible,
+    double? chatPanelWidth,
+    double? contextPanelWidth,
+  }) {
+    bool changed = false;
+    if (contextPanelVisible != null &&
+        contextPanelVisible != this.contextPanelVisible) {
+      this.contextPanelVisible = contextPanelVisible;
+      changed = true;
+    }
+    if (_isPositiveFinite(chatPanelWidth) &&
+        chatPanelWidth != this.chatPanelWidth) {
+      this.chatPanelWidth = chatPanelWidth!;
+      changed = true;
+    }
+    if (_isPositiveFinite(contextPanelWidth) &&
+        contextPanelWidth != this.contextPanelWidth) {
+      this.contextPanelWidth = contextPanelWidth!;
+      changed = true;
+    }
+    if (!changed) return;
+    _markAppStateChanged();
+    notifyListeners();
+  }
+
+  void updateWindowState({
+    double? windowX,
+    double? windowY,
+    double? windowWidth,
+    double? windowHeight,
+    bool? windowMaximized,
+  }) {
+    bool changed = false;
+    if (_isFinite(windowX) && windowX != this.windowX) {
+      this.windowX = windowX;
+      changed = true;
+    }
+    if (_isFinite(windowY) && windowY != this.windowY) {
+      this.windowY = windowY;
+      changed = true;
+    }
+    if (_isPositiveFinite(windowWidth) && windowWidth != this.windowWidth) {
+      this.windowWidth = windowWidth;
+      changed = true;
+    }
+    if (_isPositiveFinite(windowHeight) && windowHeight != this.windowHeight) {
+      this.windowHeight = windowHeight;
+      changed = true;
+    }
+    if (windowMaximized != null && windowMaximized != this.windowMaximized) {
+      this.windowMaximized = windowMaximized;
+      changed = true;
+    }
+    if (!changed) return;
+    _markAppStateChanged();
+    notifyListeners();
+  }
+
   List<WorkspaceDirectoryRoot> get fileRoots {
-    final String? rawDirectories = selectedWorkspace?.directories;
+    final String? rawDirectories = activeWorkspace?.directories;
     if (rawDirectories == null || rawDirectories.trim().isEmpty) {
       return const <WorkspaceDirectoryRoot>[];
     }
@@ -110,6 +346,337 @@ final class DashboardController extends ChangeNotifier {
       ];
     } on FormatException {
       return const <WorkspaceDirectoryRoot>[];
+    }
+  }
+
+  Future<void> activateSection(
+    DashboardSection section, {
+    bool persist = true,
+  }) async {
+    final int activationVersion = ++_sectionActivationVersion;
+    selectedSection = section;
+    switch (section) {
+      case DashboardSection.workspaces:
+        if (selectedWorkspace == null) {
+          settings.showUtility();
+        } else {
+          settings.showWorkspace();
+        }
+      case DashboardSection.threads:
+        settings.showUtility();
+      case DashboardSection.files:
+        settings.showFiles();
+      case DashboardSection.settings:
+        settings.showSettings();
+      case DashboardSection.account:
+        settings.showUtility();
+    }
+    notifyListeners();
+
+    if (section == DashboardSection.threads && selectedThread == null) {
+      final ThreadInfo? thread = _threadByUuid(_threadsThreadUuid);
+      if (thread != null) {
+        await selectThread(thread, remember: false);
+      } else if (_threadsThreadUuid != null) {
+        _threadsThreadUuid = null;
+      }
+    } else if (section == DashboardSection.files) {
+      final int? rootIndex = _filesRootIndex;
+      final String? path = _filesPath;
+      if (rootIndex != null && path != null && openFile == null) {
+        final bool opened = await openWorkspaceFile(
+          rootIndex,
+          path,
+          remember: false,
+        );
+        if (!opened) {
+          _filesRootIndex = null;
+          _filesPath = null;
+        }
+      }
+    }
+    if (activationVersion != _sectionActivationVersion ||
+        selectedSection != section) {
+      return;
+    }
+    if (persist) _markNavigationChanged();
+    notifyListeners();
+  }
+
+  void openSettingsPage(SettingsPage page) {
+    selectedSection = DashboardSection.settings;
+    settings.openSettingsPage(page);
+    _markNavigationChanged();
+    notifyListeners();
+  }
+
+  void beginWorkspaceCreation() {
+    if (!isConnected || isCreatingWorkspace) return;
+    isCreatingWorkspace = true;
+    settings.showWorkspace();
+    notifyListeners();
+  }
+
+  void cancelWorkspaceCreation() {
+    if (!isCreatingWorkspace) return;
+    isCreatingWorkspace = false;
+    notifyListeners();
+  }
+
+  Future<void> _loadNavigationState() async {
+    if (hasLoadedNavigationState) return;
+    final RestEngineClient? client = repository?.rest;
+    if (client == null) return;
+    final int versionAtStart = _appStateVersion;
+    bool migratedLegacyState = false;
+    try {
+      final AppStateEntry? loaded = await client
+          .getAppState(appStateKey)
+          .timeout(requestTimeout);
+      if (versionAtStart != 0 || versionAtStart != _appStateVersion) {
+        hasLoadedNavigationState = true;
+        return;
+      }
+
+      _isRestoringNavigation = true;
+      if (loaded == null) {
+        migratedLegacyState = await _loadLegacyNavigationState(client);
+      } else {
+        _restoreAppState(loaded.value);
+      }
+      navigationError = null;
+    } on Object catch (caughtError) {
+      navigationError = caughtError;
+    } finally {
+      _isRestoringNavigation = false;
+      hasLoadedNavigationState = true;
+      if (migratedLegacyState) _markAppStateChanged();
+      notifyListeners();
+    }
+  }
+
+  Future<bool> _loadLegacyNavigationState(RestEngineClient client) async {
+    final List<EngineSetting> loaded = await client
+        .getSettings(
+          key: navigationKey,
+          tag: navigationTag,
+          client: DashboardSettingsController.settingsClient,
+        )
+        .timeout(requestTimeout);
+    if (loaded.isEmpty) return false;
+    final Object? decoded = jsonDecode(loaded.last.value);
+    final Map<String, dynamic> root = _objectValue(decoded);
+    if (root['version'] != 1) return false;
+    _restoreNavigation(root);
+    return true;
+  }
+
+  void _restoreAppState(String value) {
+    final Object? decoded = jsonDecode(value);
+    final Map<String, dynamic> root = _objectValue(decoded);
+    if (root['version'] != 2) {
+      throw const FormatException('Unsupported dashboard app-state version.');
+    }
+    _restoreNavigation(root);
+    _restoreFileViewer(root['fileViewer']);
+
+    final Map<String, dynamic> layout = _objectValue(root['layout']);
+    contextPanelVisible = _boolValue(layout['contextPanelVisible']) ?? true;
+    chatPanelWidth = _positiveDoubleValue(layout['chatPanelWidth']) ?? 280;
+    contextPanelWidth =
+        _positiveDoubleValue(layout['contextPanelWidth']) ?? 280;
+
+    final Map<String, dynamic> window = _objectValue(root['window']);
+    windowX = _doubleValue(window['x']);
+    windowY = _doubleValue(window['y']);
+    windowWidth = _positiveDoubleValue(window['width']);
+    windowHeight = _positiveDoubleValue(window['height']);
+    windowMaximized = _boolValue(window['maximized']) ?? false;
+  }
+
+  void _restoreNavigation(Map<String, dynamic> root) {
+    selectedSection =
+        _enumValue(DashboardSection.values, root['activeSection']) ??
+        DashboardSection.threads;
+    final Map<String, dynamic> sections = _objectValue(root['sections']);
+    final Map<String, dynamic> workspaces = _objectValue(
+      sections['workspaces'],
+    );
+    final Map<String, dynamic> threads = _objectValue(sections['threads']);
+    final Map<String, dynamic> files = _objectValue(sections['files']);
+    final Map<String, dynamic> settingsState = _objectValue(
+      sections['settings'],
+    );
+    _workspacesWorkspaceUuid = _stringValue(workspaces['workspaceUuid']);
+    _threadsWorkspaceUuid = _stringValue(threads['workspaceUuid']);
+    _threadsThreadUuid = _stringValue(threads['threadUuid']);
+    _filesWorkspaceUuid = _stringValue(files['workspaceUuid']);
+    _filesRootIndex = _nonNegativeIntValue(files['rootIndex']);
+    _filesPath = _stringValue(files['path']);
+    settings.activePage =
+        _enumValue(SettingsPage.values, settingsState['page']) ??
+        SettingsPage.general;
+  }
+
+  void _restoreFileViewer(Object? value) {
+    _workspaceViewerStates.clear();
+    final Map<String, dynamic> fileViewer = _objectValue(value);
+    final Map<String, dynamic> nestedWorkspaces = _objectValue(
+      fileViewer['workspaces'],
+    );
+    final Map<String, dynamic> workspaceMap = nestedWorkspaces.isNotEmpty
+        ? nestedWorkspaces
+        : fileViewer;
+    for (final MapEntry<String, dynamic> entry in workspaceMap.entries) {
+      final Map<String, dynamic> stateJson = _objectValue(entry.value);
+      if (stateJson.isEmpty) continue;
+      final List<WorkspaceFileReference> openFiles = <WorkspaceFileReference>[];
+      final Set<String> seenFileKeys = <String>{};
+      final Object? rawOpenFiles = stateJson['openFiles'];
+      if (rawOpenFiles is List) {
+        for (final Object? rawFile in rawOpenFiles) {
+          try {
+            final WorkspaceFileReference file = WorkspaceFileReference.fromJson(
+              _objectValue(rawFile),
+            );
+            if (seenFileKeys.add(file.key)) openFiles.add(file);
+          } on FormatException {
+            // Ignore malformed file references without discarding other state.
+          }
+        }
+      }
+      final Set<String> expandedDirectoryKeys = <String>{};
+      final Object? rawExpanded =
+          stateJson['expandedDirectoryKeys'] ??
+          stateJson['expandedDirectories'];
+      if (rawExpanded is List) {
+        for (final Object? key in rawExpanded) {
+          if (key is String && key.isNotEmpty) {
+            expandedDirectoryKeys.add(key);
+          }
+        }
+      }
+      _workspaceViewerStates[entry.key] = _WorkspaceViewerState(
+        openFiles: openFiles,
+        activeFileKey: _stringValue(stateJson['activeFileKey']),
+        expandedDirectoryKeys: expandedDirectoryKeys,
+      );
+    }
+  }
+
+  String _appStateSnapshot() => jsonEncode(<String, dynamic>{
+    'version': 2,
+    'activeSection': selectedSection.name,
+    'sections': <String, dynamic>{
+      'workspaces': <String, dynamic>{
+        if (_workspacesWorkspaceUuid != null)
+          'workspaceUuid': _workspacesWorkspaceUuid,
+      },
+      'threads': <String, dynamic>{
+        if (_threadsWorkspaceUuid != null)
+          'workspaceUuid': _threadsWorkspaceUuid,
+        if (_threadsThreadUuid != null) 'threadUuid': _threadsThreadUuid,
+      },
+      'files': <String, dynamic>{
+        if (_filesWorkspaceUuid != null) 'workspaceUuid': _filesWorkspaceUuid,
+        if (_filesRootIndex != null) 'rootIndex': _filesRootIndex,
+        if (_filesPath != null) 'path': _filesPath,
+      },
+      'settings': <String, dynamic>{'page': settings.activePage.name},
+      'account': <String, dynamic>{},
+    },
+    'fileViewer': <String, dynamic>{
+      for (final MapEntry<String, _WorkspaceViewerState> entry
+          in _workspaceViewerStates.entries)
+        entry.key: <String, dynamic>{
+          'openFiles': <Map<String, dynamic>>[
+            for (final WorkspaceFileReference file in entry.value.openFiles)
+              file.toJson(),
+          ],
+          if (entry.value.activeFileKey != null)
+            'activeFileKey': entry.value.activeFileKey,
+          'expandedDirectoryKeys': entry.value.expandedDirectoryKeys.toList()
+            ..sort(),
+        },
+    },
+    'layout': <String, dynamic>{
+      'contextPanelVisible': contextPanelVisible,
+      'chatPanelWidth': _isPositiveFinite(chatPanelWidth)
+          ? chatPanelWidth
+          : 280,
+      'contextPanelWidth': _isPositiveFinite(contextPanelWidth)
+          ? contextPanelWidth
+          : 280,
+    },
+    'window': <String, dynamic>{
+      if (_isFinite(windowX)) 'x': windowX,
+      if (_isFinite(windowY)) 'y': windowY,
+      if (_isPositiveFinite(windowWidth)) 'width': windowWidth,
+      if (_isPositiveFinite(windowHeight)) 'height': windowHeight,
+      'maximized': windowMaximized,
+    },
+  });
+
+  void _markNavigationChanged() => _markAppStateChanged();
+
+  void _markAppStateChanged() {
+    if (_isRestoringNavigation || _disposed) return;
+    _appStateVersion++;
+    navigationError = null;
+    _schedulePendingAppStateSave();
+  }
+
+  void _schedulePendingNavigationSave() => _schedulePendingAppStateSave();
+
+  void _schedulePendingAppStateSave() {
+    if (_appStateSavedVersion >= _appStateVersion || _disposed) return;
+    _appStateSaveTimer?.cancel();
+    _appStateSaveTimer = Timer(
+      appStateSaveDebounce,
+      () => unawaited(flushAppState()),
+    );
+  }
+
+  Future<void> flushAppState() {
+    _appStateSaveTimer?.cancel();
+    _appStateSaveTimer = null;
+    if (_disposed || _appStateSavedVersion >= _appStateVersion) {
+      return _appStateWriteFuture ?? Future<void>.value();
+    }
+    final Future<void>? currentWrite = _appStateWriteFuture;
+    if (currentWrite != null) {
+      return currentWrite.then((_) => flushAppState());
+    }
+    late final Future<void> write;
+    write = _writePendingAppState().whenComplete(() {
+      if (identical(_appStateWriteFuture, write)) {
+        _appStateWriteFuture = null;
+      }
+    });
+    _appStateWriteFuture = write;
+    return write;
+  }
+
+  Future<void> _writePendingAppState() async {
+    final RestEngineClient? client = repository?.rest;
+    if (client == null) return;
+    try {
+      while (_appStateSavedVersion < _appStateVersion && !_disposed) {
+        final int version = _appStateVersion;
+        final String value = _appStateSnapshot();
+        await client.putAppState(appStateKey, value).timeout(requestTimeout);
+        _appStateSavedVersion = version;
+        navigationError = null;
+      }
+    } on Object catch (caughtError) {
+      navigationError = caughtError;
+      notifyListeners();
+    } finally {
+      if (_appStateSavedVersion < _appStateVersion &&
+          navigationError == null &&
+          !_disposed) {
+        _schedulePendingAppStateSave();
+      }
     }
   }
 
@@ -147,7 +714,11 @@ final class DashboardController extends ChangeNotifier {
           if (!settings.hasLoadedGeneralSettings) {
             await settings.loadGeneralSettings();
           }
-          if (workspaces.isEmpty) await loadWorkspaces();
+          if (!hasLoadedNavigationState) await _loadNavigationState();
+          if (workspaces.isEmpty) {
+            await loadWorkspaces();
+          }
+          _schedulePendingNavigationSave();
           return;
         } on Object {
           await _closeRepository(currentRepository);
@@ -167,10 +738,12 @@ final class DashboardController extends ChangeNotifier {
       await discoveredRepository.rest.health().timeout(requestTimeout);
       await discoveredRepository.connect().timeout(requestTimeout);
       await settings.loadGeneralSettings(force: true);
+      await _loadNavigationState();
       connectionStatus = EngineConnectionStatus.connected;
       error = null;
       notifyListeners();
       await loadWorkspaces();
+      _schedulePendingNavigationSave();
     } on Object catch (caughtError) {
       final EngineRepository? failedRepository = _repository;
       if (failedRepository != null) await _closeRepository(failedRepository);
@@ -211,17 +784,26 @@ final class DashboardController extends ChangeNotifier {
           .listWorkspaces()
           .timeout(requestTimeout);
       workspaces = loaded;
-      final String? preferredUuid =
-          selectedWorkspace?.uuid ?? initialWorkspaceUuid;
-      Workspace? nextWorkspace;
-      for (final Workspace workspace in loaded) {
-        if (workspace.uuid == preferredUuid) {
-          nextWorkspace = workspace;
-          break;
-        }
-      }
-      nextWorkspace ??= loaded.firstOrNull;
-      await selectWorkspace(nextWorkspace);
+
+      final Workspace? managementWorkspace =
+          _workspaceByUuid(
+            selectedWorkspace?.uuid ??
+                _workspacesWorkspaceUuid ??
+                initialWorkspaceUuid,
+          ) ??
+          loaded.firstOrNull;
+      final Workspace? restoredActiveWorkspace =
+          _workspaceByUuid(
+            activeWorkspace?.uuid ??
+                _threadsWorkspaceUuid ??
+                _filesWorkspaceUuid ??
+                initialWorkspaceUuid ??
+                managementWorkspace?.uuid,
+          ) ??
+          managementWorkspace;
+      await selectWorkspace(managementWorkspace, remember: false);
+      await selectActiveWorkspace(restoredActiveWorkspace, remember: false);
+      await activateSection(selectedSection, persist: navigationError == null);
     } on Object catch (caughtError) {
       workspacesError = caughtError;
     } finally {
@@ -230,22 +812,57 @@ final class DashboardController extends ChangeNotifier {
     }
   }
 
-  Future<void> selectWorkspace(Workspace? workspace) async {
+  Future<void> selectWorkspace(
+    Workspace? workspace, {
+    bool remember = true,
+  }) async {
+    isCreatingWorkspace = false;
     selectedWorkspace = workspace;
-    selectedThread = null;
-    threads = const <ThreadInfo>[];
-    threadsError = null;
-    _threadRequestVersion++;
-    _clearFiles();
-    _setChatScope(
-      workspaceUuid: workspace?.uuid,
-      modelId: workspace?.defaultModelId,
-    );
+    if (remember) {
+      _workspacesWorkspaceUuid = workspace?.uuid;
+      _markNavigationChanged();
+    } else {
+      _workspacesWorkspaceUuid ??= workspace?.uuid;
+    }
+    notifyListeners();
+  }
+
+  Future<void> selectThreadWorkspace(
+    Workspace? workspace, {
+    bool remember = true,
+  }) => selectActiveWorkspace(workspace, remember: remember);
+
+  Future<void> selectActiveWorkspace(
+    Workspace? workspace, {
+    bool remember = true,
+  }) async {
+    final bool changed = activeWorkspace?.uuid != workspace?.uuid;
+    activeWorkspace = workspace;
+    if (changed) {
+      selectedThread = null;
+      pendingDraftTitle = null;
+      pendingDraftToolsConfig = null;
+      threads = const <ThreadInfo>[];
+      threadsError = null;
+      isLoadingThreads = false;
+      _threadRequestVersion++;
+      _threadsThreadUuid = null;
+      _clearFiles();
+      chatSessionVersion++;
+      _setChatScope(
+        workspaceUuid: workspace?.uuid,
+        modelId: workspace?.defaultModelId,
+      );
+    }
+    _threadsWorkspaceUuid = workspace?.uuid;
+    _filesWorkspaceUuid = workspace?.uuid;
+    if (remember) _markNavigationChanged();
     notifyListeners();
     if (workspace == null || repository == null || !isConnected) return;
 
-    final int requestVersion = _threadRequestVersion;
+    final int requestVersion = ++_threadRequestVersion;
     isLoadingThreads = true;
+    threadsError = null;
     notifyListeners();
     try {
       final List<ThreadInfo> loaded = await repository!
@@ -263,10 +880,15 @@ final class DashboardController extends ChangeNotifier {
     }
   }
 
-  Future<void> selectThread(ThreadInfo thread) async {
+  Future<void> selectThread(ThreadInfo thread, {bool remember = true}) async {
     final EngineRepository? currentRepository = repository;
     final int requestVersion = ++_chatRequestVersion;
     selectedThread = thread;
+    if (remember) {
+      _threadsWorkspaceUuid = threadsWorkspace?.uuid ?? thread.workspaceUuid;
+      _threadsThreadUuid = thread.uuid;
+      _markNavigationChanged();
+    }
     chatProvider?.dispose();
     chatProvider = null;
     chatError = null;
@@ -291,7 +913,7 @@ final class DashboardController extends ChangeNotifier {
       final EngineLlmProvider provider = EngineLlmProvider(
         repository: currentRepository,
         threadUuid: thread.uuid,
-        modelId: thread.defaultModelId ?? selectedWorkspace?.defaultModelId,
+        modelId: thread.defaultModelId ?? threadsWorkspace?.defaultModelId,
       );
       provider.replaceEngineHistory(messages);
       chatProvider = provider;
@@ -305,6 +927,51 @@ final class DashboardController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  Future<void> createThread({String? title, String? toolsConfig}) async {
+    final Workspace? workspace = threadsWorkspace;
+    final RestEngineClient? client = repository?.rest;
+    if (workspace == null || client == null) {
+      throw StateError('Choose a chat workspace before creating a thread.');
+    }
+    final ThreadInfo created = await client
+        .createThread(
+          workspaceUuid: workspace.uuid,
+          title: title,
+          toolsConfig: toolsConfig,
+        )
+        .timeout(requestTimeout);
+    threads = <ThreadInfo>[
+      created,
+      for (final ThreadInfo thread in threads)
+        if (thread.uuid != created.uuid) thread,
+    ];
+    await selectThread(created);
+  }
+
+  Future<void> updateThreadSettings({
+    required ThreadInfo thread,
+    String? title,
+    String? toolsConfig,
+    bool clearToolsConfig = false,
+  }) async {
+    final RestEngineClient client =
+        repository?.rest ??
+        (throw StateError('The Subconscious engine is not connected.'));
+    final ThreadInfo updated = await client
+        .updateThread(
+          threadUuid: thread.uuid,
+          title: title,
+          toolsConfig: toolsConfig,
+          clearToolsConfig: clearToolsConfig,
+        )
+        .timeout(requestTimeout);
+    threads = threads
+        .map((ThreadInfo item) => item.uuid == updated.uuid ? updated : item)
+        .toList(growable: false);
+    if (selectedThread?.uuid == updated.uuid) selectedThread = updated;
+    notifyListeners();
   }
 
   Future<void> createWorkspace({
@@ -323,7 +990,12 @@ final class DashboardController extends ChangeNotifier {
   Future<void> updateWorkspace(
     Workspace workspace, {
     required String name,
-    String? description,
+    required String? description,
+    required String? defaultModelId,
+    required String toolsConfig,
+    required String directories,
+    required String approvalConfig,
+    required String ragConfig,
   }) async {
     final RestEngineClient client =
         repository?.rest ??
@@ -333,17 +1005,18 @@ final class DashboardController extends ChangeNotifier {
           workspaceUuid: workspace.uuid,
           name: name,
           description: description,
-          defaultModelId: workspace.defaultModelId,
-          toolsConfig: workspace.toolsConfig,
-          directories: workspace.directories,
-          approvalConfig: workspace.approvalConfig,
-          ragConfig: workspace.ragConfig,
+          defaultModelId: defaultModelId,
+          toolsConfig: toolsConfig,
+          directories: directories,
+          approvalConfig: approvalConfig,
+          ragConfig: ragConfig,
         )
         .timeout(requestTimeout);
     workspaces = workspaces
         .map((Workspace item) => item.uuid == updated.uuid ? updated : item)
         .toList(growable: false);
     if (selectedWorkspace?.uuid == updated.uuid) selectedWorkspace = updated;
+    if (activeWorkspace?.uuid == updated.uuid) activeWorkspace = updated;
     notifyListeners();
   }
 
@@ -352,19 +1025,22 @@ final class DashboardController extends ChangeNotifier {
         repository?.rest ??
         (throw StateError('The Subconscious engine is not connected.'));
     await client.deleteWorkspace(workspace.uuid).timeout(requestTimeout);
+    _forgetWorkspace(workspace.uuid);
 
     final bool wasSelected = selectedWorkspace?.uuid == workspace.uuid;
+    final bool wasThreadWorkspace = threadsWorkspace?.uuid == workspace.uuid;
     workspaces = workspaces
         .where((Workspace item) => item.uuid != workspace.uuid)
         .toList(growable: false);
-    if (!wasSelected) {
-      notifyListeners();
-      return;
-    }
-
     final Workspace? nextWorkspace = workspaces.firstOrNull;
-    if (nextWorkspace == null) settings.showUtility();
-    await selectWorkspace(nextWorkspace);
+    if (wasSelected) {
+      if (nextWorkspace == null) settings.showUtility();
+      await selectWorkspace(nextWorkspace);
+    }
+    if (wasThreadWorkspace) {
+      await selectThreadWorkspace(nextWorkspace);
+    }
+    if (!wasSelected && !wasThreadWorkspace) notifyListeners();
   }
 
   List<WorkspaceFileEntry>? directoryEntries(int rootIndex, String path) =>
@@ -373,14 +1049,23 @@ final class DashboardController extends ChangeNotifier {
   bool isDirectoryLoading(int rootIndex, String path) =>
       _loadingDirectories.contains(_directoryKey(rootIndex, path));
 
+  String fileTreeNodeKey(int rootIndex, String path) =>
+      _directoryKey(rootIndex, path);
+
+  void selectFileTreeNode(int rootIndex, String path) {
+    selectedFileTreeNodeKey = _directoryKey(rootIndex, path);
+    notifyListeners();
+  }
+
   Future<void> loadDirectory(int rootIndex, String path) async {
     final Workspace? workspace = selectedWorkspace;
     final RestEngineClient? client = repository?.rest;
     final String key = _directoryKey(rootIndex, path);
     if (workspace == null ||
         client == null ||
-        _loadingDirectories.contains(key))
+        _loadingDirectories.contains(key)) {
       return;
+    }
     _loadingDirectories.add(key);
     filesError = null;
     notifyListeners();
@@ -402,7 +1087,6 @@ final class DashboardController extends ChangeNotifier {
 
   Future<void> refreshFiles() async {
     _directoryEntries.clear();
-    openFile = null;
     filesError = null;
     notifyListeners();
     await Future.wait(<Future<void>>[
@@ -411,28 +1095,71 @@ final class DashboardController extends ChangeNotifier {
     ]);
   }
 
-  Future<void> openWorkspaceFile(int rootIndex, String path) async {
+  Future<OpenWorkspaceFile?> readWorkspaceFile(
+    int rootIndex,
+    String path,
+  ) async {
     final Workspace? workspace = selectedWorkspace;
     final RestEngineClient? client = repository?.rest;
-    if (workspace == null || client == null) return;
-    final int requestVersion = ++_fileRequestVersion;
-    isLoadingFile = true;
-    filesError = null;
-    notifyListeners();
-    try {
-      final WorkspaceFileContent result = await client
-          .readFile(
+    if (workspace == null || client == null) return null;
+    if (OpenWorkspaceFile.supportsImagePreview(path)) {
+      final WorkspaceFilePreview preview = await client
+          .previewFile(
             workspaceUuid: workspace.uuid,
             rootIndex: rootIndex,
             path: path,
           )
           .timeout(requestTimeout);
-      if (requestVersion == _fileRequestVersion)
-        openFile = OpenWorkspaceFile(
+      return OpenWorkspaceFile(
+        rootIndex: rootIndex,
+        path: path,
+        content: '',
+        localPath: preview.localPath,
+        mediaType: preview.mediaType,
+      );
+    }
+    final WorkspaceFileContent result = await client
+        .readFile(
+          workspaceUuid: workspace.uuid,
           rootIndex: rootIndex,
           path: path,
-          content: result.content,
-        );
+        )
+        .timeout(requestTimeout);
+    return OpenWorkspaceFile(
+      rootIndex: rootIndex,
+      path: path,
+      content: result.content,
+    );
+  }
+
+  Future<bool> openWorkspaceFile(
+    int rootIndex,
+    String path, {
+    bool remember = true,
+  }) async {
+    final Workspace? workspace = selectedWorkspace;
+    if (workspace == null || repository?.rest == null) return false;
+    final int requestVersion = ++_fileRequestVersion;
+    selectedFileTreeNodeKey = _directoryKey(rootIndex, path);
+    isLoadingFile = true;
+    filesError = null;
+    notifyListeners();
+    bool opened = false;
+    try {
+      final OpenWorkspaceFile? openedFile = await readWorkspaceFile(
+        rootIndex,
+        path,
+      );
+      if (openedFile != null && requestVersion == _fileRequestVersion) {
+        openFile = openedFile;
+        opened = true;
+        if (remember) {
+          _filesWorkspaceUuid = workspace.uuid;
+          _filesRootIndex = rootIndex;
+          _filesPath = path;
+          _markNavigationChanged();
+        }
+      }
     } on Object catch (caughtError) {
       if (requestVersion == _fileRequestVersion) filesError = caughtError;
     } finally {
@@ -441,6 +1168,7 @@ final class DashboardController extends ChangeNotifier {
         notifyListeners();
       }
     }
+    return opened;
   }
 
   Future<void> saveOpenFile(String content) async {
@@ -471,6 +1199,25 @@ final class DashboardController extends ChangeNotifier {
       isSavingFile = false;
       notifyListeners();
     }
+  }
+
+  void activateOpenFile(OpenWorkspaceFile file) {
+    openFile = file;
+    selectedFileTreeNodeKey = _directoryKey(file.rootIndex, file.path);
+    _filesWorkspaceUuid = selectedWorkspace?.uuid;
+    _filesRootIndex = file.rootIndex;
+    _filesPath = file.path;
+    _markNavigationChanged();
+    notifyListeners();
+  }
+
+  void closeOpenFile() {
+    openFile = null;
+    selectedFileTreeNodeKey = null;
+    _filesRootIndex = null;
+    _filesPath = null;
+    _markNavigationChanged();
+    notifyListeners();
   }
 
   Future<void> createFile({
@@ -519,6 +1266,88 @@ final class DashboardController extends ChangeNotifier {
     await loadDirectory(rootIndex, parent);
   }
 
+  _WorkspaceViewerState? get _currentViewerState {
+    final String? workspaceUuid = selectedWorkspace?.uuid;
+    return workspaceUuid == null ? null : _workspaceViewerStates[workspaceUuid];
+  }
+
+  Workspace? _workspaceByUuid(String? uuid) {
+    if (uuid == null) return null;
+    for (final Workspace workspace in workspaces) {
+      if (workspace.uuid == uuid) return workspace;
+    }
+    return null;
+  }
+
+  ThreadInfo? _threadByUuid(String? uuid) {
+    if (uuid == null) return null;
+    for (final ThreadInfo thread in threads) {
+      if (thread.uuid == uuid) return thread;
+    }
+    return null;
+  }
+
+  void _forgetWorkspace(String workspaceUuid) {
+    bool changed = _workspaceViewerStates.remove(workspaceUuid) != null;
+    if (_workspacesWorkspaceUuid == workspaceUuid) {
+      _workspacesWorkspaceUuid = null;
+      changed = true;
+    }
+    if (_threadsWorkspaceUuid == workspaceUuid) {
+      _threadsWorkspaceUuid = null;
+      _threadsThreadUuid = null;
+      changed = true;
+    }
+    if (_filesWorkspaceUuid == workspaceUuid) {
+      _filesWorkspaceUuid = null;
+      _filesRootIndex = null;
+      _filesPath = null;
+      changed = true;
+    }
+    if (changed) _markNavigationChanged();
+  }
+
+  static Map<String, dynamic> _objectValue(Object? value) => value is Map
+      ? value.map((Object? key, Object? item) => MapEntry('$key', item))
+      : <String, dynamic>{};
+
+  static String? _stringValue(Object? value) => value is String ? value : null;
+
+  static int? _nonNegativeIntValue(Object? value) {
+    if (value is int) return value >= 0 ? value : null;
+    if (value is num && value.isFinite && value == value.truncateToDouble()) {
+      final int converted = value.toInt();
+      return converted >= 0 ? converted : null;
+    }
+    return null;
+  }
+
+  static bool? _boolValue(Object? value) => value is bool ? value : null;
+
+  static double? _doubleValue(Object? value) {
+    if (value is! num) return null;
+    final double converted = value.toDouble();
+    return converted.isFinite ? converted : null;
+  }
+
+  static double? _positiveDoubleValue(Object? value) {
+    final double? converted = _doubleValue(value);
+    return converted != null && converted > 0 ? converted : null;
+  }
+
+  static bool _isFinite(double? value) => value != null && value.isFinite;
+
+  static bool _isPositiveFinite(double? value) =>
+      value != null && value.isFinite && value > 0;
+
+  static T? _enumValue<T extends Enum>(List<T> values, Object? value) {
+    if (value is! String) return null;
+    for (final T candidate in values) {
+      if (candidate.name == value) return candidate;
+    }
+    return null;
+  }
+
   void _setChatScope({
     String? workspaceUuid,
     String? threadUuid,
@@ -545,6 +1374,7 @@ final class DashboardController extends ChangeNotifier {
     _directoryEntries.clear();
     _loadingDirectories.clear();
     openFile = null;
+    selectedFileTreeNodeKey = null;
     filesError = null;
     _fileRequestVersion++;
   }
@@ -556,6 +1386,7 @@ final class DashboardController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _reconnectTimer?.cancel();
+    _appStateSaveTimer?.cancel();
     chatProvider?.dispose();
     settings.dispose();
     unawaited(repository?.socket.dispose());

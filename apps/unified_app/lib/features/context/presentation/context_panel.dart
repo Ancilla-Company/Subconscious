@@ -1,11 +1,41 @@
+import 'dart:async';
+
 import 'package:core_business_logic/core_business_logic.dart';
+import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_code_editor/flutter_code_editor.dart';
+import 'package:flutter_highlight/themes/github.dart';
+import 'package:flutter_highlight/themes/monokai-sublime.dart';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:highlight/highlight.dart' show Mode;
+import 'package:highlight/languages/bash.dart' as highlight_bash;
+import 'package:highlight/languages/cpp.dart' as highlight_cpp;
+import 'package:highlight/languages/cs.dart' as highlight_csharp;
+import 'package:highlight/languages/css.dart' as highlight_css;
+import 'package:highlight/languages/dart.dart' as highlight_dart;
+import 'package:highlight/languages/go.dart' as highlight_go;
+import 'package:highlight/languages/java.dart' as highlight_java;
+import 'package:highlight/languages/javascript.dart' as highlight_javascript;
+import 'package:highlight/languages/json.dart' as highlight_json;
+import 'package:highlight/languages/kotlin.dart' as highlight_kotlin;
+import 'package:highlight/languages/php.dart' as highlight_php;
+import 'package:highlight/languages/plaintext.dart' as highlight_plaintext;
+import 'package:highlight/languages/python.dart' as highlight_python;
+import 'package:highlight/languages/ruby.dart' as highlight_ruby;
+import 'package:highlight/languages/rust.dart' as highlight_rust;
+import 'package:highlight/languages/sql.dart' as highlight_sql;
+import 'package:highlight/languages/swift.dart' as highlight_swift;
+import 'package:highlight/languages/typescript.dart' as highlight_typescript;
+import 'package:highlight/languages/xml.dart' as highlight_xml;
+import 'package:highlight/languages/yaml.dart' as highlight_yaml;
+import 'package:markdown/markdown.dart' as md;
+import 'package:markdown_quill/markdown_quill.dart';
 
 import '../../dashboard/controller/dashboard_controller.dart';
 import '../../settings/controller/settings_controller.dart';
-
-enum ContextPanelScreen { threads, files, workspaces, settings, account }
+import 'workspace_image_preview.dart';
 
 final class ContextPanel extends StatelessWidget {
   const ContextPanel({
@@ -14,7 +44,7 @@ final class ContextPanel extends StatelessWidget {
     super.key,
   });
 
-  final ContextPanelScreen screen;
+  final DashboardSection screen;
   final DashboardController controller;
 
   @override
@@ -23,15 +53,13 @@ final class ContextPanel extends StatelessWidget {
     child: AnimatedBuilder(
       animation: controller,
       builder: (BuildContext context, Widget? child) => switch (screen) {
-        ContextPanelScreen.threads => _ThreadsSection(controller: controller),
-        ContextPanelScreen.files => _FilesSection(controller: controller),
-        ContextPanelScreen.workspaces => _WorkspacesSection(
+        DashboardSection.threads => _ThreadsSection(controller: controller),
+        DashboardSection.files => _FilesSection(controller: controller),
+        DashboardSection.workspaces => _WorkspacesSection(
           controller: controller,
         ),
-        ContextPanelScreen.settings => _SettingsSection(
-          controller: controller.settings,
-        ),
-        ContextPanelScreen.account => const _AccountSection(),
+        DashboardSection.settings => _SettingsSection(controller: controller),
+        DashboardSection.account => const _AccountSection(),
       },
     ),
   );
@@ -60,6 +88,33 @@ final class _SectionHeader extends StatelessWidget {
           ...actions,
         ],
       ),
+    ),
+  );
+}
+
+final class _HeaderButton extends StatelessWidget {
+  const _HeaderButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
+    child: IconButton(
+      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+      onPressed: onPressed,
+      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      ),
+      tooltip: tooltip,
+      icon: Icon(icon, size: 20),
     ),
   );
 }
@@ -103,44 +158,47 @@ final class _ThreadsSection extends StatelessWidget {
       _SectionHeader(
         title: 'Threads',
         actions: <Widget>[
-          const Icon(FluentIcons.folder_20_regular, size: 16),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 142,
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                isExpanded: true,
-                value: controller.selectedWorkspace?.uuid ?? '',
-                items: <DropdownMenuItem<String>>[
-                  const DropdownMenuItem<String>(
-                    value: '',
-                    child: Text(
-                      'All workspaces',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  for (final Workspace workspace in controller.workspaces)
-                    DropdownMenuItem<String>(
-                      value: workspace.uuid,
+          if (kIsWeb ||
+              defaultTargetPlatform != TargetPlatform.windows) ...<Widget>[
+            const Icon(FluentIcons.folder_20_regular, size: 16),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 142,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: controller.threadsWorkspace?.uuid ?? '',
+                  items: <DropdownMenuItem<String>>[
+                    const DropdownMenuItem<String>(
+                      value: '',
                       child: Text(
-                        workspace.name,
+                        'All workspaces',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                ],
-                onChanged: (String? uuid) {
-                  Workspace? workspace;
-                  for (final Workspace candidate in controller.workspaces) {
-                    if (candidate.uuid == uuid) {
-                      workspace = candidate;
-                      break;
+                    for (final Workspace workspace in controller.workspaces)
+                      DropdownMenuItem<String>(
+                        value: workspace.uuid,
+                        child: Text(
+                          workspace.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (String? uuid) {
+                    Workspace? workspace;
+                    for (final Workspace candidate in controller.workspaces) {
+                      if (candidate.uuid == uuid) {
+                        workspace = candidate;
+                        break;
+                      }
                     }
-                  }
-                  controller.selectWorkspace(workspace);
-                },
+                    controller.selectThreadWorkspace(workspace);
+                  },
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
       Expanded(child: _threadBody(context)),
@@ -152,16 +210,20 @@ final class _ThreadsSection extends StatelessWidget {
       return const _PanelMessage(
         'Threads are available when the engine is connected.',
       );
-    if (controller.selectedWorkspace == null)
-      return const _PanelMessage('Choose a workspace to see its threads.');
+    if (controller.threadsWorkspace == null)
+      return const _PanelMessage(
+        'Choose a workspace in the title bar to see its threads.',
+      );
     if (controller.isLoadingThreads)
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     if (controller.threadsError case final Object error) {
       return _PanelMessage(
         "Couldn't load threads\n$error",
         action: OutlinedButton(
-          onPressed: () =>
-              controller.selectWorkspace(controller.selectedWorkspace),
+          onPressed: () => controller.selectThreadWorkspace(
+            controller.threadsWorkspace,
+            remember: false,
+          ),
           child: const Text('Retry'),
         ),
       );
@@ -211,23 +273,9 @@ final class _NavigationRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             children: <Widget>[
-              SizedBox(
-                width: 16,
-                child: Center(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 120),
-                    width: 4,
-                    height: subtitle == null ? 24 : 30,
-                    decoration: BoxDecoration(
-                      color: selected ? colors.primary : Colors.transparent,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,11 +317,11 @@ final class _WorkspacesSection extends StatelessWidget {
       _SectionHeader(
         title: 'Workspaces',
         actions: <Widget>[
-          IconButton(
+          _HeaderButton(
             tooltip: 'New workspace',
-            icon: const Icon(FluentIcons.add_20_regular, size: 18),
+            icon: FluentIcons.add_20_regular,
             onPressed: controller.isConnected
-                ? () => _showWorkspaceDialog(context, controller)
+                ? controller.beginWorkspaceCreation
                 : null,
           ),
         ],
@@ -313,88 +361,16 @@ final class _WorkspacesSection extends StatelessWidget {
           subtitle: workspace.description?.trim().isEmpty ?? true
               ? null
               : workspace.description,
-          onTap: () {
-            controller.selectWorkspace(workspace);
-            controller.settings.showWorkspace();
+          onTap: () async {
+            await controller.selectWorkspace(workspace);
+            if (controller.selectedSection == DashboardSection.workspaces) {
+              controller.settings.showWorkspace();
+            }
           },
         );
       },
     );
   }
-}
-
-Future<void> _showWorkspaceDialog(
-  BuildContext context,
-  DashboardController controller,
-) async {
-  final TextEditingController nameController = TextEditingController();
-  final TextEditingController descriptionController = TextEditingController();
-  final _WorkspaceDraft? draft = await showDialog<_WorkspaceDraft>(
-    context: context,
-    builder: (BuildContext context) => AlertDialog(
-      title: const Text('New workspace'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            TextField(
-              controller: nameController,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Name'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: descriptionController,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Description'),
-            ),
-          ],
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final String name = nameController.text.trim();
-            if (name.isNotEmpty) {
-              Navigator.pop(
-                context,
-                _WorkspaceDraft(name, descriptionController.text.trim()),
-              );
-            }
-          },
-          child: const Text('Create'),
-        ),
-      ],
-    ),
-  );
-  nameController.dispose();
-  descriptionController.dispose();
-  if (draft == null || !context.mounted) return;
-  try {
-    await controller.createWorkspace(
-      name: draft.name,
-      description: draft.description.isEmpty ? null : draft.description,
-    );
-    controller.settings.showWorkspace();
-  } on Object catch (error) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Couldn't create workspace: $error")),
-      );
-    }
-  }
-}
-
-final class _WorkspaceDraft {
-  const _WorkspaceDraft(this.name, this.description);
-
-  final String name;
-  final String description;
 }
 
 final class _FilesSection extends StatelessWidget {
@@ -411,35 +387,24 @@ final class _FilesSection extends StatelessWidget {
         _SectionHeader(
           title: 'Files',
           actions: <Widget>[
-            IconButton(
+            _HeaderButton(
               tooltip: 'Refresh files',
-              icon: const Icon(
-                FluentIcons.arrow_clockwise_20_regular,
-                size: 18,
-              ),
+              icon: FluentIcons.arrow_clockwise_20_regular,
               onPressed: roots.isEmpty ? null : controller.refreshFiles,
             ),
-            IconButton(
+            _HeaderButton(
               tooltip: 'Create a file',
-              icon: const Icon(FluentIcons.document_add_20_regular, size: 18),
+              icon: FluentIcons.document_add_20_regular,
               onPressed: roots.isEmpty
                   ? null
-                  : () => _showCreateEntryDialog(
-                      context,
-                      controller,
-                      isDirectory: false,
-                    ),
+                  : () => _createWorkspaceFile(context, controller),
             ),
-            IconButton(
+            _HeaderButton(
               tooltip: 'Create a folder',
-              icon: const Icon(FluentIcons.folder_add_20_regular, size: 18),
+              icon: FluentIcons.folder_add_20_regular,
               onPressed: roots.isEmpty
                   ? null
-                  : () => _showCreateEntryDialog(
-                      context,
-                      controller,
-                      isDirectory: true,
-                    ),
+                  : () => _chooseWorkspaceFolder(context, controller),
             ),
           ],
         ),
@@ -479,6 +444,9 @@ final class _FilesSection extends StatelessWidget {
                   children: <Widget>[
                     for (final WorkspaceDirectoryRoot root in roots)
                       _DirectoryNode(
+                        key: ValueKey<String>(
+                          '${controller.selectedWorkspace?.uuid}:${root.index}',
+                        ),
                         controller: controller,
                         rootIndex: root.index,
                         path: '',
@@ -500,6 +468,8 @@ final class _DirectoryNode extends StatefulWidget {
     required this.path,
     required this.label,
     this.isRoot = false,
+    this.depth = 0,
+    super.key,
   });
 
   final DashboardController controller;
@@ -507,6 +477,7 @@ final class _DirectoryNode extends StatefulWidget {
   final String path;
   final String label;
   final bool isRoot;
+  final int depth;
 
   @override
   State<_DirectoryNode> createState() => _DirectoryNodeState();
@@ -518,11 +489,32 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
   @override
   void initState() {
     super.initState();
-    _expanded = widget.isRoot;
-    if (_expanded)
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => widget.controller.loadDirectory(widget.rootIndex, widget.path),
-      );
+    _expanded = widget.controller.isDirectoryExpanded(
+      widget.rootIndex,
+      widget.path,
+      defaultValue: widget.isRoot,
+    );
+    if (_expanded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _expanded) {
+          widget.controller.loadDirectory(widget.rootIndex, widget.path);
+        }
+      });
+    }
+  }
+
+  void _toggle(List<WorkspaceFileEntry>? entries) {
+    widget.controller.selectFileTreeNode(widget.rootIndex, widget.path);
+    final bool expanded = !_expanded;
+    setState(() => _expanded = expanded);
+    widget.controller.setDirectoryExpanded(
+      widget.rootIndex,
+      widget.path,
+      expanded,
+    );
+    if (expanded && entries == null) {
+      widget.controller.loadDirectory(widget.rootIndex, widget.path);
+    }
   }
 
   @override
@@ -533,164 +525,317 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
       widget.rootIndex,
       widget.path,
     );
-    return ExpansionTile(
-      initiallyExpanded: widget.isRoot,
-      tilePadding: EdgeInsets.only(left: widget.isRoot ? 8 : 16, right: 8),
-      childrenPadding: const EdgeInsets.only(left: 12),
-      leading: Icon(
-        widget.isRoot
-            ? FluentIcons.folder_20_filled
-            : FluentIcons.folder_20_regular,
-        size: 17,
-      ),
-      title: Text(
-        widget.label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
-      onExpansionChanged: (bool expanded) {
-        _expanded = expanded;
-        if (expanded && entries == null)
-          widget.controller.loadDirectory(widget.rootIndex, widget.path);
-      },
+    final bool selected =
+        widget.controller.selectedFileTreeNodeKey ==
+        widget.controller.fileTreeNodeKey(widget.rootIndex, widget.path);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (_expanded && loading)
-          const Padding(
-            padding: EdgeInsets.all(12),
-            child: SizedBox.square(
-              dimension: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          )
-        else if (_expanded && entries != null && entries.isEmpty)
-          const ListTile(dense: true, title: Text('Empty folder'))
-        else if (_expanded && entries != null)
-          for (final WorkspaceFileEntry entry in entries)
-            if (entry.isDirectory)
-              _DirectoryNode(
-                controller: widget.controller,
-                rootIndex: widget.rootIndex,
-                path: entry.relativePath,
-                label: entry.name,
-              )
-            else
-              ListTile(
-                dense: true,
-                leading: const Icon(FluentIcons.document_20_regular, size: 16),
-                title: Text(
-                  entry.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
+        _FileTreeRow(
+          depth: widget.depth,
+          selected: selected,
+          onTap: () => _toggle(entries),
+          leading: Icon(
+            widget.isRoot
+                ? FluentIcons.folder_20_filled
+                : FluentIcons.folder_20_regular,
+            size: 16,
+          ),
+          label: widget.label,
+          trailing: AnimatedRotation(
+            turns: _expanded ? 0.25 : 0,
+            duration: const Duration(milliseconds: 120),
+            child: const Icon(FluentIcons.chevron_right_20_regular, size: 14),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 140),
+          alignment: Alignment.topCenter,
+          child: !_expanded
+              ? const SizedBox.shrink()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (loading)
+                      _FileTreeRow(
+                        depth: widget.depth + 1,
+                        selected: false,
+                        onTap: null,
+                        leading: const SizedBox.square(
+                          dimension: 14,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
+                        ),
+                        label: 'Loading…',
+                      )
+                    else if (entries != null && entries.isEmpty)
+                      _FileTreeRow(
+                        depth: widget.depth + 1,
+                        selected: false,
+                        onTap: null,
+                        leading: const SizedBox(width: 16),
+                        label: 'Empty folder',
+                      )
+                    else if (entries != null)
+                      for (final WorkspaceFileEntry entry in entries)
+                        if (entry.isDirectory)
+                          _DirectoryNode(
+                            key: ValueKey<String>(
+                              '${widget.rootIndex}:${entry.relativePath}',
+                            ),
+                            controller: widget.controller,
+                            rootIndex: widget.rootIndex,
+                            path: entry.relativePath,
+                            label: entry.name,
+                            depth: widget.depth + 1,
+                          )
+                        else
+                          _FileTreeRow(
+                            key: ValueKey<String>(
+                              '${widget.rootIndex}:${entry.relativePath}',
+                            ),
+                            depth: widget.depth + 1,
+                            selected:
+                                widget.controller.selectedFileTreeNodeKey ==
+                                widget.controller.fileTreeNodeKey(
+                                  widget.rootIndex,
+                                  entry.relativePath,
+                                ),
+                            onTap: () => widget.controller.openWorkspaceFile(
+                              widget.rootIndex,
+                              entry.relativePath,
+                            ),
+                            leading: Icon(
+                              OpenWorkspaceFile.supportsImagePreview(
+                                    entry.relativePath,
+                                  )
+                                  ? FluentIcons.image_20_regular
+                                  : FluentIcons.document_20_regular,
+                              size: 16,
+                            ),
+                            label: entry.name,
+                          ),
+                  ],
                 ),
-                selected:
-                    widget.controller.openFile?.rootIndex == widget.rootIndex &&
-                    widget.controller.openFile?.path == entry.relativePath,
-                onTap: () => widget.controller.openWorkspaceFile(
-                  widget.rootIndex,
-                  entry.relativePath,
-                ),
-              ),
+        ),
       ],
     );
   }
 }
 
-Future<void> _showCreateEntryDialog(
-  BuildContext context,
-  DashboardController controller, {
-  required bool isDirectory,
-}) async {
-  final List<WorkspaceDirectoryRoot> roots = controller.fileRoots;
-  if (roots.isEmpty) return;
-  int rootIndex = roots.first.index;
-  final TextEditingController pathController = TextEditingController(
-    text: isDirectory ? 'notes/new-folder' : 'notes/new-note.md',
-  );
-  final _FileEntryDraft? draft = await showDialog<_FileEntryDraft>(
-    context: context,
-    builder: (BuildContext context) => StatefulBuilder(
-      builder: (BuildContext context, StateSetter setState) => AlertDialog(
-        title: Text(isDirectory ? 'New folder' : 'New file'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              DropdownButtonFormField<int>(
-                initialValue: rootIndex,
-                decoration: const InputDecoration(labelText: 'Allowed folder'),
-                items: <DropdownMenuItem<int>>[
-                  for (final WorkspaceDirectoryRoot root in roots)
-                    DropdownMenuItem<int>(
-                      value: root.index,
-                      child: Text(root.path, overflow: TextOverflow.ellipsis),
+final class _FileTreeRow extends StatelessWidget {
+  const _FileTreeRow({
+    required this.depth,
+    required this.selected,
+    required this.onTap,
+    required this.leading,
+    required this.label,
+    this.trailing,
+    super.key,
+  });
+
+  final int depth;
+  final bool selected;
+  final VoidCallback? onTap;
+  final Widget leading;
+  final String label;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Material(
+        color: selected ? colors.secondaryContainer : Colors.transparent,
+        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        child: InkWell(
+          borderRadius: const BorderRadius.all(Radius.circular(4)),
+          onTap: onTap,
+          child: SizedBox(
+            height: 30,
+            child: Padding(
+              padding: EdgeInsets.only(left: 6 + depth * 14, right: 6),
+              child: Row(
+                children: <Widget>[
+                  SizedBox(width: 18, child: Center(child: leading)),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: selected ? colors.onSecondaryContainer : null,
+                      ),
                     ),
+                  ),
+                  if (trailing != null) ...<Widget>[
+                    const SizedBox(width: 4),
+                    trailing!,
+                  ],
                 ],
-                onChanged: (int? value) =>
-                    setState(() => rootIndex = value ?? rootIndex),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: pathController,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Relative path'),
-              ),
-            ],
+            ),
           ),
         ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final String path = pathController.text.trim();
-              if (path.isNotEmpty)
-                Navigator.pop(context, _FileEntryDraft(rootIndex, path));
-            },
-            child: const Text('Create'),
-          ),
-        ],
       ),
-    ),
-  );
-  pathController.dispose();
-  if (draft == null || !context.mounted) return;
-  try {
-    if (isDirectory) {
-      await controller.createDirectory(
-        rootIndex: draft.rootIndex,
-        path: draft.path,
-      );
-    } else {
-      await controller.createFile(rootIndex: draft.rootIndex, path: draft.path);
-    }
-  } on Object catch (error) {
-    if (context.mounted)
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Couldn't create ${isDirectory ? 'folder' : 'file'}: $error",
-          ),
-        ),
-      );
+    );
   }
 }
 
-final class _FileEntryDraft {
-  const _FileEntryDraft(this.rootIndex, this.path);
+Future<void> _createWorkspaceFile(
+  BuildContext context,
+  DashboardController controller,
+) async {
+  final List<WorkspaceDirectoryRoot> roots = controller.fileRoots;
+  if (roots.isEmpty) return;
+  try {
+    final file_selector.FileSaveLocation? location = await file_selector
+        .getSaveLocation(
+          suggestedName: 'new-file.md',
+          initialDirectory: roots.first.path,
+        );
+    if (location == null || !context.mounted) return;
+    final ({int rootIndex, String relativePath})? mapped = _mapWorkspacePath(
+      location.path,
+      roots,
+      requireRelativePath: true,
+    );
+    if (mapped == null) {
+      _showFileActionMessage(
+        context,
+        'Choose a file inside one of this workspace’s allowed folders.',
+      );
+      return;
+    }
+    await controller.createFile(
+      rootIndex: mapped.rootIndex,
+      path: mapped.relativePath,
+    );
+  } on Object catch (error) {
+    if (context.mounted) {
+      _showFileActionMessage(context, "Couldn't create file: $error");
+    }
+  }
+}
 
-  final int rootIndex;
-  final String path;
+Future<void> _chooseWorkspaceFolder(
+  BuildContext context,
+  DashboardController controller,
+) async {
+  final List<WorkspaceDirectoryRoot> roots = controller.fileRoots;
+  if (roots.isEmpty) return;
+  try {
+    final String? path = await file_selector.getDirectoryPath(
+      initialDirectory: roots.first.path,
+    );
+    if (path == null || !context.mounted) return;
+    if (_mapWorkspacePath(path, roots, requireRelativePath: false) == null) {
+      _showFileActionMessage(
+        context,
+        'Choose a folder inside one of this workspace’s allowed folders.',
+      );
+      return;
+    }
+    await controller.refreshFiles();
+  } on Object catch (error) {
+    if (context.mounted) {
+      _showFileActionMessage(context, "Couldn't refresh files: $error");
+    }
+  }
+}
+
+({int rootIndex, String relativePath})? _mapWorkspacePath(
+  String selectedPath,
+  List<WorkspaceDirectoryRoot> roots, {
+  required bool requireRelativePath,
+}) {
+  final String? selected = _normalizeAbsolutePath(selectedPath);
+  if (selected == null) return null;
+  final bool ignoreCase = defaultTargetPlatform == TargetPlatform.windows;
+  final String comparableSelected = ignoreCase
+      ? selected.toLowerCase()
+      : selected;
+  ({int rootIndex, String relativePath, int rootLength})? bestMatch;
+  for (final WorkspaceDirectoryRoot root in roots) {
+    final String? normalizedRoot = _normalizeAbsolutePath(root.path);
+    if (normalizedRoot == null) continue;
+    final String comparableRoot = ignoreCase
+        ? normalizedRoot.toLowerCase()
+        : normalizedRoot;
+    final String prefix = comparableRoot.endsWith('/')
+        ? comparableRoot
+        : '$comparableRoot/';
+    final String? relativePath;
+    if (comparableSelected == comparableRoot) {
+      relativePath = '';
+    } else if (comparableSelected.startsWith(prefix)) {
+      relativePath = selected.substring(prefix.length);
+    } else {
+      relativePath = null;
+    }
+    if (relativePath == null ||
+        (requireRelativePath && relativePath.isEmpty) ||
+        (bestMatch != null && bestMatch.rootLength >= normalizedRoot.length)) {
+      continue;
+    }
+    bestMatch = (
+      rootIndex: root.index,
+      relativePath: relativePath,
+      rootLength: normalizedRoot.length,
+    );
+  }
+  if (bestMatch == null) return null;
+  return (rootIndex: bestMatch.rootIndex, relativePath: bestMatch.relativePath);
+}
+
+String? _normalizeAbsolutePath(String rawPath) {
+  final String value = rawPath.trim().replaceAll('\\', '/');
+  final RegExp drivePattern = RegExp(r'^[A-Za-z]:/');
+  final bool isDrive = drivePattern.hasMatch(value);
+  final bool isUnc = value.startsWith('//');
+  final bool isPosix = value.startsWith('/');
+  if (value.isEmpty || (!isDrive && !isUnc && !isPosix)) return null;
+
+  final String prefix;
+  final String remainder;
+  final int protectedSegments;
+  if (isDrive) {
+    prefix = '${value.substring(0, 2)}/';
+    remainder = value.substring(3);
+    protectedSegments = 0;
+  } else if (isUnc) {
+    prefix = '//';
+    remainder = value.substring(2);
+    protectedSegments = 2;
+  } else {
+    prefix = '/';
+    remainder = value.substring(1);
+    protectedSegments = 0;
+  }
+
+  final List<String> segments = <String>[];
+  for (final String segment in remainder.split('/')) {
+    if (segment.isEmpty || segment == '.') continue;
+    if (segment == '..') {
+      if (segments.length <= protectedSegments) return null;
+      segments.removeLast();
+    } else {
+      segments.add(segment);
+    }
+  }
+  if (isUnc && segments.length < protectedSegments) return null;
+  return segments.isEmpty ? prefix : '$prefix${segments.join('/')}';
+}
+
+void _showFileActionMessage(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
 final class _SettingsSection extends StatelessWidget {
   const _SettingsSection({required this.controller});
 
-  final DashboardSettingsController controller;
+  final DashboardController controller;
 
   static const List<(String, IconData, SettingsPage)> _pages =
       <(String, IconData, SettingsPage)>[
@@ -707,7 +852,7 @@ final class _SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
+    animation: controller.settings,
     builder: (BuildContext context, Widget? child) => Column(
       children: <Widget>[
         const _SectionHeader(title: 'Settings'),
@@ -721,8 +866,9 @@ final class _SettingsSection extends StatelessWidget {
               final (String, IconData, SettingsPage) page = _pages[index];
               return _NavigationRow(
                 selected:
-                    controller.destination == MainPanelDestination.settings &&
-                    controller.activePage == page.$3,
+                    controller.settings.destination ==
+                        MainPanelDestination.settings &&
+                    controller.settings.activePage == page.$3,
                 label: page.$1,
                 onTap: () => controller.openSettingsPage(page.$3),
               );
@@ -755,15 +901,73 @@ final class WorkspaceFileEditor extends StatefulWidget {
   State<WorkspaceFileEditor> createState() => _WorkspaceFileEditorState();
 }
 
+final class _WorkspaceFileTab {
+  _WorkspaceFileTab(this.file)
+    : savedContent = file.content,
+      draftContent = file.content,
+      cleanContent = file.content,
+      lineEnding = file.content.contains('\r\n') ? '\r\n' : '\n',
+      hadTrailingLineEnding = file.content.endsWith('\n');
+
+  OpenWorkspaceFile file;
+  String savedContent;
+  String draftContent;
+  String cleanContent;
+  String lineEnding;
+  bool hadTrailingLineEnding;
+  bool quillBaselineInitialized = false;
+  TextSelection selection = const TextSelection.collapsed(offset: 0);
+
+  String get key => '${file.rootIndex}:${file.path}';
+  bool get isDirty => !file.isImage && draftContent != cleanContent;
+
+  void resetFromRemote(OpenWorkspaceFile nextFile) {
+    file = nextFile;
+    savedContent = nextFile.content;
+    draftContent = nextFile.content;
+    cleanContent = nextFile.content;
+    lineEnding = nextFile.content.contains('\r\n') ? '\r\n' : '\n';
+    hadTrailingLineEnding = nextFile.content.endsWith('\n');
+    quillBaselineInitialized = false;
+    selection = const TextSelection.collapsed(offset: 0);
+  }
+}
+
 final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
-  final TextEditingController _textController = TextEditingController();
-  String? _loadedFileKey;
+  final List<_WorkspaceFileTab> _tabs = <_WorkspaceFileTab>[];
+  final FocusNode _quillFocusNode = FocusNode();
+  final ScrollController _quillScrollController = ScrollController();
+  CodeController? _codeController;
+  quill.QuillController? _quillController;
+  StreamSubscription<dynamic>? _quillChangesSubscription;
+  late final MarkdownToDelta _markdownToDelta;
+  final DeltaToMarkdown _deltaToMarkdown = DeltaToMarkdown();
+  String? _activeKey;
+  String? _workspaceUuid;
+  String? _restorationWorkspaceUuid;
+  bool _syncingEditor = false;
+  bool _restoringTabs = false;
+  int _restorationGeneration = 0;
+
+  _WorkspaceFileTab? get _activeTab {
+    for (final _WorkspaceFileTab tab in _tabs) {
+      if (tab.key == _activeKey) return tab;
+    }
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
+    _markdownToDelta = MarkdownToDelta(
+      markdownDocument: md.Document(
+        encodeHtml: false,
+        extensionSet: md.ExtensionSet.gitHubFlavored,
+      ),
+    );
+    _workspaceUuid = widget.controller.selectedWorkspace?.uuid;
     widget.controller.addListener(_onControllerChanged);
-    _syncFile();
+    _startTabRestoration(_workspaceUuid);
   }
 
   @override
@@ -772,44 +976,413 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
-      _syncFile();
+      _restorationGeneration++;
+      _restoringTabs = false;
+      _restorationWorkspaceUuid = null;
+      _clearTabs();
+      _workspaceUuid = widget.controller.selectedWorkspace?.uuid;
+      _startTabRestoration(_workspaceUuid);
     }
   }
 
   void _onControllerChanged() {
-    _syncFile();
+    final String? workspaceUuid = widget.controller.selectedWorkspace?.uuid;
+    if (workspaceUuid != _workspaceUuid) {
+      _restorationGeneration++;
+      _restoringTabs = false;
+      _restorationWorkspaceUuid = null;
+      _clearTabs();
+      _workspaceUuid = workspaceUuid;
+      _startTabRestoration(workspaceUuid);
+    } else if (!_restoringTabs) {
+      _syncFile();
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _startTabRestoration(String? workspaceUuid) {
+    final DashboardController controller = widget.controller;
+    final int generation = ++_restorationGeneration;
+    _restoringTabs = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_isCurrentRestoration(controller, workspaceUuid, generation)) {
+        return;
+      }
+      if (workspaceUuid == null) {
+        _restoringTabs = false;
+        _syncFile();
+        if (mounted) setState(() {});
+        return;
+      }
+      if (_restorationWorkspaceUuid == workspaceUuid) {
+        _restoringTabs = false;
+        _syncFile();
+        if (mounted) setState(() {});
+        return;
+      }
+      _restorationWorkspaceUuid = workspaceUuid;
+      unawaited(_restoreTabs(controller, workspaceUuid, generation));
+    });
+  }
+
+  bool _isCurrentRestoration(
+    DashboardController controller,
+    String? workspaceUuid,
+    int generation,
+  ) =>
+      mounted &&
+      generation == _restorationGeneration &&
+      identical(widget.controller, controller) &&
+      controller.selectedWorkspace?.uuid == workspaceUuid;
+
+  Future<void> _restoreTabs(
+    DashboardController controller,
+    String workspaceUuid,
+    int generation,
+  ) async {
+    final List<WorkspaceFileReference> references =
+        controller.rememberedOpenFiles;
+    final String? rememberedActiveKey = controller.rememberedActiveFileKey;
+    final List<_WorkspaceFileTab> restoredTabs = <_WorkspaceFileTab>[];
+    for (final WorkspaceFileReference reference in references) {
+      try {
+        final OpenWorkspaceFile? file = await controller.readWorkspaceFile(
+          reference.rootIndex,
+          reference.path,
+        );
+        if (!_isCurrentRestoration(controller, workspaceUuid, generation)) {
+          return;
+        }
+        if (file != null) restoredTabs.add(_WorkspaceFileTab(file));
+      } on Object {
+        if (!_isCurrentRestoration(controller, workspaceUuid, generation)) {
+          return;
+        }
+      }
+    }
+    if (!_isCurrentRestoration(controller, workspaceUuid, generation)) return;
+
+    _tabs.addAll(restoredTabs);
+
+    // A file opened while restoration was reading tabs must win over the
+    // remembered active tab rather than being replaced when restoration ends.
+    final OpenWorkspaceFile? currentFile = controller.openFile;
+    _WorkspaceFileTab? selectedTab;
+    if (currentFile != null) {
+      final String currentKey = _fileKey(
+        currentFile.rootIndex,
+        currentFile.path,
+      );
+      for (final _WorkspaceFileTab tab in _tabs) {
+        if (tab.key == currentKey) {
+          selectedTab = tab;
+          break;
+        }
+      }
+      if (selectedTab == null) {
+        selectedTab = _WorkspaceFileTab(currentFile);
+        _tabs.add(selectedTab);
+      }
+    }
+    if (selectedTab == null) {
+      for (final _WorkspaceFileTab tab in _tabs) {
+        if (tab.key == rememberedActiveKey) {
+          selectedTab = tab;
+          break;
+        }
+      }
+    }
+    selectedTab ??= _tabs.isEmpty ? null : _tabs.last;
+    if (selectedTab == null) {
+      _restoringTabs = false;
+      _persistTabs();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _activateEditor(selectedTab);
+    controller.activateOpenFile(selectedTab.file);
+    if (!_isCurrentRestoration(controller, workspaceUuid, generation)) return;
+    _restoringTabs = false;
+    // Persist the successfully restored set so stale or unreadable references
+    // do not reappear on the next launch.
+    _persistTabs();
     if (mounted) setState(() {});
   }
 
   void _syncFile() {
+    if (_restoringTabs || widget.controller.isLoadingFile) return;
     final OpenWorkspaceFile? file = widget.controller.openFile;
-    final String? key = file == null ? null : '${file.rootIndex}:${file.path}';
-    if (key != _loadedFileKey) {
-      _loadedFileKey = key;
-      _textController.value = TextEditingValue(
-        text: file?.content ?? '',
-        selection: TextSelection.collapsed(offset: file?.content.length ?? 0),
-      );
+    if (file == null) return;
+    final String key = _fileKey(file.rootIndex, file.path);
+    _WorkspaceFileTab? tab;
+    for (final _WorkspaceFileTab candidate in _tabs) {
+      if (candidate.key == key) {
+        tab = candidate;
+        break;
+      }
     }
+    if (tab != null && _activeKey == key) {
+      if (_refreshCleanTab(tab, file)) _activateEditor(tab);
+      return;
+    }
+
+    _captureActiveContent();
+    if (tab == null) {
+      tab = _WorkspaceFileTab(file);
+      _tabs.add(tab);
+    } else {
+      _refreshCleanTab(tab, file);
+    }
+    _activateEditor(tab);
+    _persistTabs();
+  }
+
+  bool _refreshCleanTab(_WorkspaceFileTab tab, OpenWorkspaceFile file) {
+    final bool contentChanged = file.content != tab.savedContent;
+    tab.file = file;
+    if (file.isImage || tab.isDirty || !contentChanged) return false;
+    tab.resetFromRemote(file);
+    return true;
+  }
+
+  void _persistTabs() {
+    if (_restoringTabs ||
+        widget.controller.selectedWorkspace?.uuid != _workspaceUuid) {
+      return;
+    }
+    widget.controller.rememberOpenFiles(<WorkspaceFileReference>[
+      for (final _WorkspaceFileTab tab in _tabs)
+        WorkspaceFileReference(
+          rootIndex: tab.file.rootIndex,
+          path: tab.file.path,
+        ),
+    ], activeKey: _activeKey);
+  }
+
+  void _activateEditor(_WorkspaceFileTab tab) {
+    _disposeEditorControllers();
+    _activeKey = tab.key;
+    if (tab.file.isImage) return;
+    _syncingEditor = true;
+    if (_usesQuill(tab.file.path)) {
+      _createQuillController(tab);
+      _quillChangesSubscription = _quillController!.document.changes.listen(
+        (_) => _onEditorChanged(),
+      );
+    } else {
+      _codeController = CodeController(
+        text: tab.draftContent,
+        language: _languageForPath(tab.file.path),
+      )..addListener(_onEditorChanged);
+    }
+    _syncingEditor = false;
+    if (_usesQuill(tab.file.path)) _requestQuillFocus();
+  }
+
+  void _createQuillController(_WorkspaceFileTab tab) {
+    final String normalized = _normalizeLineEndings(tab.draftContent);
+    final quill.Document document;
+    if (_isMarkdown(tab.file.path)) {
+      document = quill.Document.fromDelta(_markdownToDelta.convert(normalized));
+    } else {
+      String text = normalized;
+      if (text.endsWith('\n')) text = text.substring(0, text.length - 1);
+      document = quill.Document()..insert(0, text);
+    }
+    final TextSelection selection = _clampSelection(
+      tab.selection,
+      document.length,
+    );
+    _quillController = quill.QuillController(
+      document: document,
+      selection: selection,
+    );
+    tab.selection = selection;
+    if (!tab.quillBaselineInitialized) {
+      final String canonical = _serializeQuillContent(tab, _quillController!);
+      tab
+        ..draftContent = canonical
+        ..cleanContent = canonical
+        ..quillBaselineInitialized = true;
+    }
+  }
+
+  void _requestQuillFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final _WorkspaceFileTab? tab = _activeTab;
+      if (mounted &&
+          tab != null &&
+          _usesQuill(tab.file.path) &&
+          _quillController != null) {
+        _quillFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _onEditorChanged() {
+    if (_syncingEditor) return;
+    final _WorkspaceFileTab? tab = _activeTab;
+    if (tab == null || tab.file.isImage) return;
+    final quill.QuillController? quillController = _quillController;
+    if (quillController != null) tab.selection = quillController.selection;
+    final String content = _currentContent(tab);
+    if (content == tab.draftContent) return;
+    tab.draftContent = content;
+    if (mounted) setState(() {});
+  }
+
+  void _captureActiveContent() {
+    final _WorkspaceFileTab? tab = _activeTab;
+    if (tab == null || tab.file.isImage) return;
+    final quill.QuillController? quillController = _quillController;
+    if (quillController != null) tab.selection = quillController.selection;
+    tab.draftContent = _currentContent(tab);
+  }
+
+  String _currentContent(_WorkspaceFileTab tab) {
+    final CodeController? codeController = _codeController;
+    if (codeController != null) return codeController.fullText;
+    final quill.QuillController? quillController = _quillController;
+    if (quillController == null) return tab.draftContent;
+    return _serializeQuillContent(tab, quillController);
+  }
+
+  String _serializeQuillContent(
+    _WorkspaceFileTab tab,
+    quill.QuillController controller,
+  ) {
+    final String value = _isMarkdown(tab.file.path)
+        ? _deltaToMarkdown.convert(controller.document.toDelta())
+        : controller.document.toPlainText();
+    return _restoreLineEndings(tab, value);
+  }
+
+  TextSelection _clampSelection(TextSelection selection, int documentLength) {
+    final int maxOffset = documentLength < 0 ? 0 : documentLength;
+    return TextSelection(
+      baseOffset: selection.baseOffset.clamp(0, maxOffset),
+      extentOffset: selection.extentOffset.clamp(0, maxOffset),
+      affinity: selection.affinity,
+      isDirectional: selection.isDirectional,
+    );
+  }
+
+  String _restoreLineEndings(_WorkspaceFileTab tab, String value) {
+    String normalized = _normalizeLineEndings(value);
+    while (normalized.endsWith('\n')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    if (tab.hadTrailingLineEnding) normalized = '$normalized\n';
+    return tab.lineEnding == '\r\n'
+        ? normalized.replaceAll('\n', '\r\n')
+        : normalized;
+  }
+
+  Future<void> _saveActive() async {
+    final _WorkspaceFileTab? tab = _activeTab;
+    if (tab == null || tab.file.isImage || !tab.isDirty) return;
+    _captureActiveContent();
+    await widget.controller.saveOpenFile(tab.draftContent);
+    if (!mounted || widget.controller.filesError != null) return;
+    tab
+      ..savedContent = tab.draftContent
+      ..cleanContent = tab.draftContent
+      ..file = OpenWorkspaceFile(
+        rootIndex: tab.file.rootIndex,
+        path: tab.file.path,
+        content: tab.draftContent,
+      );
+    setState(() {});
+  }
+
+  void _selectTab(_WorkspaceFileTab tab) {
+    if (tab.key == _activeKey) return;
+    _captureActiveContent();
+    widget.controller.activateOpenFile(tab.file);
+  }
+
+  Future<void> _closeTab(_WorkspaceFileTab tab) async {
+    if (tab.isDirty) {
+      final bool discard =
+          await showDialog<bool>(
+            context: context,
+            builder: (BuildContext context) => AlertDialog(
+              title: const Text('Discard unsaved changes?'),
+              content: Text('Close “${tab.file.name}” without saving?'),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Discard'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!discard || !mounted) return;
+    }
+    final int index = _tabs.indexOf(tab);
+    final bool wasActive = tab.key == _activeKey;
+    setState(() => _tabs.remove(tab));
+    if (!wasActive) {
+      _persistTabs();
+      return;
+    }
+    _disposeEditorControllers();
+    _activeKey = null;
+    if (_tabs.isEmpty) {
+      widget.controller.closeOpenFile();
+      _persistTabs();
+      return;
+    }
+    final _WorkspaceFileTab next = _tabs[index.clamp(0, _tabs.length - 1)];
+    widget.controller.activateOpenFile(next.file);
+    _persistTabs();
+  }
+
+  void _disposeEditorControllers() {
+    _codeController?.removeListener(_onEditorChanged);
+    _codeController?.dispose();
+    _codeController = null;
+    final StreamSubscription<dynamic>? quillChangesSubscription =
+        _quillChangesSubscription;
+    _quillChangesSubscription = null;
+    if (quillChangesSubscription != null) {
+      unawaited(quillChangesSubscription.cancel());
+    }
+    _quillController?.dispose();
+    _quillController = null;
+  }
+
+  void _clearTabs() {
+    _disposeEditorControllers();
+    _tabs.clear();
+    _activeKey = null;
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
-    _textController.dispose();
+    _clearTabs();
+    _quillFocusNode.dispose();
+    _quillScrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final OpenWorkspaceFile? file = widget.controller.openFile;
-    if (widget.controller.isLoadingFile) {
+    final _WorkspaceFileTab? activeTab = _activeTab;
+    if (widget.controller.isLoadingFile && _tabs.isEmpty) {
       return ColoredBox(
         color: Theme.of(context).colorScheme.surface,
         child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
-    if (file == null) {
+    if (activeTab == null) {
       return ColoredBox(
         color: Theme.of(context).colorScheme.surface,
         child: Center(
@@ -837,60 +1410,277 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       color: Theme.of(context).colorScheme.surface,
       child: Column(
         children: <Widget>[
-          SizedBox(
-            height: 48,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: <Widget>[
-                  const Icon(FluentIcons.document_20_regular, size: 17),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      file.path,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall,
+          _buildTabBar(context, activeTab),
+          Expanded(child: _buildEditor(context, activeTab)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabBar(BuildContext context, _WorkspaceFileTab activeTab) =>
+      SizedBox(
+        height: 48,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: <Widget>[
+                      for (final _WorkspaceFileTab tab in _tabs)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: _FileTabButton(
+                            label: tab.file.name,
+                            selected: tab.key == _activeKey,
+                            dirty: tab.isDirty,
+                            onTap: () => _selectTab(tab),
+                            onClose: () => _closeTab(tab),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (!activeTab.file.isImage)
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(3)),
                     ),
                   ),
-                  FilledButton.icon(
-                    onPressed: widget.controller.isSavingFile
-                        ? null
-                        : () => widget.controller.saveOpenFile(
-                            _textController.text,
+                  onPressed:
+                      widget.controller.isSavingFile ||
+                          widget.controller.isLoadingFile ||
+                          !activeTab.isDirty
+                      ? null
+                      : _saveActive,
+                  icon: widget.controller.isSavingFile
+                      ? const SizedBox.square(
+                          dimension: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(FluentIcons.save_20_regular, size: 16),
+                  label: const Text('Save'),
+                ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _buildEditor(BuildContext context, _WorkspaceFileTab tab) {
+    if (tab.file.isImage) {
+      return Padding(
+        padding: const EdgeInsets.all(12),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.all(Radius.circular(6)),
+          child: ColoredBox(
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            child: WorkspaceImagePreview(
+              path: tab.file.localPath!,
+              isSvg: tab.file.isSvg,
+            ),
+          ),
+        ),
+      );
+    }
+    final quill.QuillController? quillController = _quillController;
+    if (_usesQuill(tab.file.path) && quillController != null) {
+      return Column(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.all(Radius.circular(6)),
+                child: ColoredBox(
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  child: quill.QuillSimpleToolbar(
+                    controller: quillController,
+                    config: const quill.QuillSimpleToolbarConfig(
+                      iconTheme: quill.QuillIconTheme(
+                        iconButtonSelectedData: quill.IconButtonData(
+                          constraints: BoxConstraints.tightFor(
+                            width: 32,
+                            height: 32,
                           ),
-                    icon: widget.controller.isSavingFile
-                        ? const SizedBox.square(
-                            dimension: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(FluentIcons.save_20_regular, size: 16),
-                    label: const Text('Save'),
+                          padding: EdgeInsets.zero,
+                        ),
+                        iconButtonUnselectedData: quill.IconButtonData(
+                          constraints: BoxConstraints.tightFor(
+                            width: 32,
+                            height: 32,
+                          ),
+                          padding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
           ),
-          const Divider(height: 1),
           Expanded(
-            child: TextField(
-              controller: _textController,
-              expands: true,
-              maxLines: null,
-              minLines: null,
-              keyboardType: TextInputType.multiline,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-                height: 1.45,
-              ),
-              decoration: const InputDecoration(
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.all(16),
+            child: quill.QuillEditor.basic(
+              controller: quillController,
+              focusNode: _quillFocusNode,
+              scrollController: _quillScrollController,
+              config: const quill.QuillEditorConfig(
+                padding: EdgeInsets.all(16),
               ),
             ),
           ),
         ],
+      );
+    }
+    final CodeController? codeController = _codeController;
+    if (codeController == null) return const SizedBox.shrink();
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    return CodeTheme(
+      data: CodeThemeData(styles: dark ? monokaiSublimeTheme : githubTheme),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Theme(
+          data: Theme.of(context).copyWith(
+            inputDecorationTheme: const InputDecorationTheme(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+              filled: false,
+            ),
+          ),
+          child: CodeField(
+            controller: codeController,
+            decoration: const BoxDecoration(color: Colors.transparent),
+            textStyle: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static bool _usesQuill(String path) =>
+      _isMarkdown(path) || path.toLowerCase().endsWith('.txt');
+
+  static bool _isMarkdown(String path) {
+    final String lower = path.toLowerCase();
+    return lower.endsWith('.md') || lower.endsWith('.markdown');
+  }
+
+  static String _normalizeLineEndings(String value) =>
+      value.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+
+  static String _fileKey(int rootIndex, String path) =>
+      '$rootIndex:${path.replaceAll('\\', '/')}';
+
+  static Mode _languageForPath(String path) {
+    final String lower = path.toLowerCase();
+    final int dot = lower.lastIndexOf('.');
+    final String extension = dot < 0 ? '' : lower.substring(dot + 1);
+    return switch (extension) {
+      'dart' => highlight_dart.dart,
+      'js' || 'jsx' || 'mjs' || 'cjs' => highlight_javascript.javascript,
+      'ts' || 'tsx' => highlight_typescript.typescript,
+      'py' => highlight_python.python,
+      'java' => highlight_java.java,
+      'kt' || 'kts' => highlight_kotlin.kotlin,
+      'swift' => highlight_swift.swift,
+      'go' => highlight_go.go,
+      'rs' => highlight_rust.rust,
+      'rb' => highlight_ruby.ruby,
+      'php' => highlight_php.php,
+      'c' || 'h' || 'cc' || 'cpp' || 'cxx' || 'hpp' => highlight_cpp.cpp,
+      'cs' => highlight_csharp.cs,
+      'sh' || 'bash' || 'zsh' || 'ps1' || 'bat' || 'cmd' => highlight_bash.bash,
+      'json' || 'jsonc' => highlight_json.json,
+      'yaml' || 'yml' => highlight_yaml.yaml,
+      'xml' || 'html' || 'htm' || 'svg' => highlight_xml.xml,
+      'css' || 'scss' || 'sass' || 'less' => highlight_css.css,
+      'sql' => highlight_sql.sql,
+      _ => highlight_plaintext.plaintext,
+    };
+  }
+}
+
+final class _FileTabButton extends StatelessWidget {
+  const _FileTabButton({
+    required this.label,
+    required this.selected,
+    required this.dirty,
+    required this.onTap,
+    required this.onClose,
+  });
+
+  final String label;
+  final bool selected;
+  final bool dirty;
+  final VoidCallback onTap;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Material(
+      color: selected ? colors.secondaryContainer : colors.surfaceContainerLow,
+      borderRadius: const BorderRadius.all(Radius.circular(6)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 34,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 10, right: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 180),
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: selected ? colors.onSecondaryContainer : null,
+                    ),
+                  ),
+                ),
+                if (dirty) ...<Widget>[
+                  const SizedBox(width: 7),
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: colors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 3),
+                IconButton(
+                  tooltip: 'Close $label',
+                  onPressed: onClose,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 26,
+                    height: 26,
+                  ),
+                  icon: const Icon(FluentIcons.dismiss_20_regular, size: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

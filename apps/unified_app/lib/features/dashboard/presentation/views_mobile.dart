@@ -1,7 +1,9 @@
+import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 
 import '../../chat/engine_llm_provider.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
+import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
 
 final class MobileDashboardView extends StatelessWidget {
@@ -44,7 +46,25 @@ final class MobileDashboardView extends StatelessWidget {
           provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
         ),
         provider: provider,
+        workspace: controller.threadsWorkspace,
+        thread: controller.selectedThread,
+        onCreateThread: ({String? title, String? toolsConfig}) =>
+            controller.createThread(title: title, toolsConfig: toolsConfig),
+        onUpdateThread:
+            ({
+              required ThreadInfo thread,
+              String? title,
+              String? toolsConfig,
+              required bool clearToolsConfig,
+            }) => controller.updateThreadSettings(
+              thread: thread,
+              title: title,
+              toolsConfig: toolsConfig,
+              clearToolsConfig: clearToolsConfig,
+            ),
         title: controller.selectedThread?.title,
+        useNeutralUserBubbleForeground:
+            controller.settings.accentTheme == AppAccentTheme.neutral,
       );
     }
     return Center(
