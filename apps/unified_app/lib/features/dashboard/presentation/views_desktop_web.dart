@@ -239,12 +239,13 @@ final class _DesktopWebDashboardViewState
               return _Unavailable(error: error);
             }
             final EngineLlmProvider? provider = widget.controller.chatProvider;
-            if (provider != null && widget.controller.isConnected) {
+            if (provider != null) {
               return EngineChatPanel(
                 key: ValueKey<String>(
                   provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
                 ),
                 provider: provider,
+                isComposerEnabled: widget.controller.isConnected,
                 workspace: widget.controller.threadsWorkspace,
                 thread: widget.controller.selectedThread,
                 onCreateThread: ({String? title, String? toolsConfig}) => widget

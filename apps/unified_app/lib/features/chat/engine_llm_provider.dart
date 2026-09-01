@@ -28,13 +28,19 @@ final class EngineLlmProvider extends ChangeNotifier {
     this.modelId,
   });
 
-  final core.EngineRepository repository;
+  core.EngineRepository repository;
   final String? threadUuid;
   final String? workspaceUuid;
   String? modelId;
   final List<EngineChatMessage> _history = <EngineChatMessage>[];
   final Map<EngineChatMessage, DateTime?> _timestamps =
       <EngineChatMessage, DateTime?>{};
+
+  void replaceRepository(core.EngineRepository repository) {
+    if (identical(this.repository, repository)) return;
+    this.repository = repository;
+    notifyListeners();
+  }
 
   DateTime? timestampFor(EngineChatMessage message) => _timestamps[message];
 

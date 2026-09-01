@@ -40,12 +40,13 @@ final class MobileDashboardView extends StatelessWidget {
       );
     }
     final EngineLlmProvider? provider = controller.chatProvider;
-    if (provider != null && controller.isConnected) {
+    if (provider != null) {
       return EngineChatPanel(
         key: ValueKey<String>(
           provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
         ),
         provider: provider,
+        isComposerEnabled: controller.isConnected,
         workspace: controller.threadsWorkspace,
         thread: controller.selectedThread,
         onCreateThread: ({String? title, String? toolsConfig}) =>

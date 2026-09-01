@@ -22,6 +22,7 @@ typedef UpdateThreadCallback = Future<void> Function({
 final class EngineChatPanel extends StatefulWidget {
   const EngineChatPanel({
     required this.provider,
+    required this.isComposerEnabled,
     this.workspace,
     this.thread,
     this.onCreateThread,
@@ -32,6 +33,7 @@ final class EngineChatPanel extends StatefulWidget {
   });
 
   final EngineLlmProvider provider;
+  final bool isComposerEnabled;
   final Workspace? workspace;
   final ThreadInfo? thread;
   final CreateThreadCallback? onCreateThread;
@@ -55,20 +57,26 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   void initState() {
     super.initState();
     widget.provider.addListener(_onProviderChanged);
-    unawaited(_loadModels());
+    if (widget.isComposerEnabled) unawaited(_loadModels());
     _scheduleScrollToBottom();
   }
 
   @override
   void didUpdateWidget(covariant EngineChatPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.provider == widget.provider) return;
-    oldWidget.provider.removeListener(_onProviderChanged);
-    widget.provider.addListener(_onProviderChanged);
-    _models = const <ModelInfo>[];
-    _error = null;
-    unawaited(_loadModels());
-    _scheduleScrollToBottom();
+    if (oldWidget.provider != widget.provider) {
+      oldWidget.provider.removeListener(_onProviderChanged);
+      widget.provider.addListener(_onProviderChanged);
+      _models = const <ModelInfo>[];
+      _error = null;
+      if (widget.isComposerEnabled) unawaited(_loadModels());
+      _scheduleScrollToBottom();
+      return;
+    }
+    if (!oldWidget.isComposerEnabled && widget.isComposerEnabled) {
+      _error = null;
+      unawaited(_loadModels());
+    }
   }
 
   Future<void> _loadModels() async {
@@ -102,7 +110,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
 
   Future<void> _send() async {
     final String content = _composer.text.trim();
-    if (content.isEmpty || _isSending) return;
+    if (!widget.isComposerEnabled || content.isEmpty || _isSending) return;
     _composer.clear();
     setState(() {
       _isSending = true;
@@ -230,6 +238,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
             models: _models,
             selectedModelId: widget.provider.modelId,
             isSending: _isSending,
+            enabled: widget.isComposerEnabled,
             onModelSelected: widget.provider.selectModel,
             onSend: _send,
           ),
@@ -424,6 +433,7 @@ final class _Composer extends StatelessWidget {
     required this.models,
     required this.selectedModelId,
     required this.isSending,
+    required this.enabled,
     required this.onModelSelected,
     required this.onSend,
   });
@@ -432,6 +442,7 @@ final class _Composer extends StatelessWidget {
   final List<ModelInfo> models;
   final String? selectedModelId;
   final bool isSending;
+  final bool enabled;
   final ValueChanged<String?> onModelSelected;
   final VoidCallback onSend;
 
@@ -443,6 +454,7 @@ final class _Composer extends StatelessWidget {
     final bool hasSelectedModel = models.any(
       (ModelInfo model) => model.id == effectiveModelId,
     );
+    final bool interactive = enabled && !isSending;
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.fromLTRB(10, 4, 10, 10),
@@ -463,16 +475,16 @@ final class _Composer extends StatelessWidget {
         children: <Widget>[
           TextField(
             controller: controller,
-            enabled: !isSending,
+            enabled: interactive,
             minLines: 3,
             maxLines: 6,
             keyboardType: TextInputType.multiline,
-            decoration: const InputDecoration(
-              hintText: 'Ask anything…',
+            decoration: InputDecoration(
+              hintText: enabled ? 'Ask anything…' : 'Engine unavailable',
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
-              contentPadding: EdgeInsets.fromLTRB(14, 12, 14, 4),
+              contentPadding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
             ),
           ),
           Padding(
@@ -518,11 +530,11 @@ final class _Composer extends StatelessWidget {
                                 ),
                               ),
                           ],
-                          onChanged: isSending
-                              ? null
-                              : (String? value) => onModelSelected(
+                          onChanged: interactive
+                              ? (String? value) => onModelSelected(
                                   value == null || value.isEmpty ? null : value,
-                                ),
+                                )
+                              : null,
                         ),
                       ),
                     ),
@@ -530,13 +542,13 @@ final class _Composer extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Send',
+                  tooltip: enabled ? 'Send' : 'Engine unavailable',
                   constraints: const BoxConstraints.tightFor(
                     width: 32,
                     height: 32,
                   ),
                   padding: EdgeInsets.zero,
-                  onPressed: isSending ? null : onSend,
+                  onPressed: interactive ? onSend : null,
                   style: _compactControlStyle(context),
                   icon: isSending
                       ? const SizedBox.square(

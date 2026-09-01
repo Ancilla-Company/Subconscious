@@ -757,6 +757,7 @@ final class DashboardController extends ChangeNotifier {
       _repository = discoveredRepository;
       await discoveredRepository.rest.health().timeout(requestTimeout);
       await discoveredRepository.connect().timeout(requestTimeout);
+      chatProvider?.replaceRepository(discoveredRepository);
       await settings.loadGeneralSettings(force: true);
       await _loadNavigationState();
       connectionStatus = EngineConnectionStatus.connected;
@@ -779,8 +780,6 @@ final class DashboardController extends ChangeNotifier {
     if (identical(_repository, repositoryToClose)) _repository = null;
     _chatRequestVersion++;
     isLoadingChat = false;
-    chatProvider?.dispose();
-    chatProvider = null;
     try {
       await repositoryToClose.socket.dispose();
     } on Object {
