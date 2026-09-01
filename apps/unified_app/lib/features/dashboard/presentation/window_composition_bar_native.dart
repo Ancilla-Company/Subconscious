@@ -242,12 +242,15 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
                           style: Theme.of(context).textTheme.labelLarge,
                         ),
                         const Spacer(),
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: presentation.$1,
-                            shape: BoxShape.circle,
+                        Transform.translate(
+                          offset: const Offset(0, 2),
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: presentation.$1,
+                              shape: BoxShape.circle,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 6),

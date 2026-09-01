@@ -49,6 +49,16 @@ async def read_file(request: Request) -> Response:
         return _failure(error)
 
 
+async def preview_file(request: Request) -> Response:
+    try:
+        async with request.app.state.database.session() as session:
+            result = await WorkspaceFileService(session).preview(
+                request.path_params["uuid"], _root_index(request), _path(request) or "")
+        return json_response(result)
+    except (WorkspaceFileError, OSError) as error:
+        return _failure(error)
+
+
 async def mutate_file(request: Request) -> Response:
     body = await parse_request(request, WriteWorkspaceFileRequest)
     if isinstance(body, Response):
@@ -78,6 +88,7 @@ def file_routes() -> list[Route]:
     return [
         Route("/api/v1/workspaces/{uuid}/files", list_files, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/content", read_file, methods=["GET"]),
+        Route("/api/v1/workspaces/{uuid}/files/preview", preview_file, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/content", mutate_file, methods=["POST", "PUT"]),
         Route("/api/v1/workspaces/{uuid}/files/directory", create_directory, methods=["POST"]),
     ]

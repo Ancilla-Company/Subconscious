@@ -241,16 +241,15 @@ final class _DesktopWebDashboardViewState
             final EngineLlmProvider? provider = widget.controller.chatProvider;
             if (provider != null) {
               return EngineChatPanel(
-                key: ValueKey<String>(
-                  provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
-                ),
+                key: ValueKey<int>(widget.controller.chatSessionVersion),
                 provider: provider,
                 isComposerEnabled: widget.controller.isConnected,
                 workspace: widget.controller.threadsWorkspace,
                 thread: widget.controller.selectedThread,
-                onCreateThread: ({String? title, String? toolsConfig}) => widget
-                    .controller
-                    .createThread(title: title, toolsConfig: toolsConfig),
+                onCreateThread: widget.controller.beginThreadDraft,
+                onMaterializeThreadDraft:
+                    widget.controller.materializeThreadDraft,
+                onUpdateThreadDraft: widget.controller.updateThreadDraft,
                 onUpdateThread:
                     ({
                       required ThreadInfo thread,
@@ -263,7 +262,10 @@ final class _DesktopWebDashboardViewState
                       toolsConfig: toolsConfig,
                       clearToolsConfig: clearToolsConfig,
                     ),
-                title: widget.controller.selectedThread?.title,
+                title:
+                    widget.controller.selectedThread?.title ??
+                    widget.controller.pendingDraftTitle,
+                draftToolsConfig: widget.controller.pendingDraftToolsConfig,
                 useNeutralUserBubbleForeground:
                     widget.controller.settings.accentTheme ==
                     AppAccentTheme.neutral,

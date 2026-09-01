@@ -43,7 +43,12 @@ class AgentManager:
                 usage_limits=UsageLimits(request_limit=8, tool_calls_limit=64))
             self._collect_returns(result.new_messages(), records, seen_returns)
             if isinstance(result.output, str):
-                return AgentExecutionResult(result.output, records)
+                text = result.output
+                if not text.strip():
+                    text = self._latest_response_text(result.new_messages())
+                if not text.strip():
+                    raise RuntimeError("The model completed without an assistant response.")
+                return AgentExecutionResult(text, records)
             requests = result.output
             deferred = DeferredToolResults()
             for call in requests.approvals:
@@ -79,6 +84,18 @@ class AgentManager:
             elif role == "assistant":
                 messages.append(ModelResponse(parts=[TextPart(content)]))
         return messages
+
+    @staticmethod
+    def _latest_response_text(messages: Sequence[ModelMessage]) -> str:
+        for message in reversed(messages):
+            if not isinstance(message, ModelResponse):
+                continue
+            text = "".join(
+                part.content for part in message.parts if isinstance(part, TextPart)
+            )
+            if text.strip():
+                return text
+        return ""
 
     @staticmethod
     def _collect_returns(messages: Sequence[ModelMessage], records: list[dict[str, Any]],

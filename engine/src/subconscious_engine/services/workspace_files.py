@@ -11,7 +11,11 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from subconscious_engine.api.extra_schemas import WorkspaceFileContentDto, WorkspaceFileEntryDto
+from subconscious_engine.api.extra_schemas import (
+    WorkspaceFileContentDto,
+    WorkspaceFileEntryDto,
+    WorkspaceFilePreviewDto,
+)
 from subconscious_engine.storage.models import Workspace
 
 
@@ -27,6 +31,15 @@ class WorkspaceFileService:
                   ".h", ".hpp", ".html", ".htm", ".java", ".js", ".jsx", ".json",
                   ".md", ".markdown", ".php", ".ps1", ".py", ".rb", ".rs", ".sh",
                   ".sql", ".toml", ".ts", ".tsx", ".txt", ".xml", ".xaml", ".yml", ".yaml"}
+    IMAGE_MEDIA_TYPES = {
+        ".bmp": "image/bmp",
+        ".gif": "image/gif",
+        ".jpeg": "image/jpeg",
+        ".jpg": "image/jpeg",
+        ".png": "image/png",
+        ".svg": "image/svg+xml",
+        ".webp": "image/webp",
+    }
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -59,6 +72,10 @@ class WorkspaceFileService:
     async def read(self, workspace_uuid: str, root_index: int, relative_path: str) -> WorkspaceFileContentDto:
         root = await self.root(workspace_uuid, root_index)
         return await asyncio.to_thread(self._read_sync, root, relative_path)
+
+    async def preview(self, workspace_uuid: str, root_index: int, relative_path: str) -> WorkspaceFilePreviewDto:
+        root = await self.root(workspace_uuid, root_index)
+        return await asyncio.to_thread(self._preview_sync, root, relative_path)
 
     async def create(self, workspace_uuid: str, root_index: int, relative_path: str, content: str | None) -> WorkspaceFileContentDto:
         encoded = self._encode(content)
@@ -95,6 +112,13 @@ class WorkspaceFileService:
         except UnicodeDecodeError as error:
             raise WorkspaceFileError(400, "The requested file is not valid UTF-8 text.") from error
 
+    def _preview_sync(self, root: Path, relative_path: str) -> WorkspaceFilePreviewDto:
+        file = self._existing_regular_file(root, relative_path)
+        media_type = self.IMAGE_MEDIA_TYPES.get(file.suffix.casefold())
+        if media_type is None:
+            raise WorkspaceFileError(400, "The requested file is not a supported image.")
+        return WorkspaceFilePreviewDto(local_path=str(file), media_type=media_type)
+
     def _create_sync(self, root: Path, relative_path: str, content: str, encoded: bytes) -> WorkspaceFileContentDto:
         file = self._new_target(root, relative_path, file_target=True)
         try:
@@ -126,10 +150,14 @@ class WorkspaceFileService:
         return WorkspaceFileEntryDto(name=directory.name, relative_path=directory.relative_to(root).as_posix(), is_directory=True)
 
     def _existing_file(self, root: Path, relative_path: str) -> Path:
+        file = self._existing_regular_file(root, relative_path)
+        self._ensure_extension(file)
+        return file
+
+    def _existing_regular_file(self, root: Path, relative_path: str) -> Path:
         file = self._existing(root, relative_path, allow_root=False)
         if not file.is_file():
             raise WorkspaceFileError(400, "The content path must identify a file, not a directory.")
-        self._ensure_extension(file)
         return file
 
     def _existing(self, root: Path, relative_path: str | None, allow_root: bool) -> Path:

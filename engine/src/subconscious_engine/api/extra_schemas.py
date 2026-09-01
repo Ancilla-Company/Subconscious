@@ -25,6 +25,11 @@ class WorkspaceFileContentDto(WireModel):
     content: str
 
 
+class WorkspaceFilePreviewDto(WireModel):
+    local_path: str
+    media_type: str
+
+
 class WriteWorkspaceFileRequest(WireModel):
     content: str | None = None
 

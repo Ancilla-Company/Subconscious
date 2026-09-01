@@ -42,15 +42,14 @@ final class MobileDashboardView extends StatelessWidget {
     final EngineLlmProvider? provider = controller.chatProvider;
     if (provider != null) {
       return EngineChatPanel(
-        key: ValueKey<String>(
-          provider.threadUuid ?? provider.workspaceUuid ?? 'chat',
-        ),
+        key: ValueKey<int>(controller.chatSessionVersion),
         provider: provider,
         isComposerEnabled: controller.isConnected,
         workspace: controller.threadsWorkspace,
         thread: controller.selectedThread,
-        onCreateThread: ({String? title, String? toolsConfig}) =>
-            controller.createThread(title: title, toolsConfig: toolsConfig),
+        onCreateThread: controller.beginThreadDraft,
+        onMaterializeThreadDraft: controller.materializeThreadDraft,
+        onUpdateThreadDraft: controller.updateThreadDraft,
         onUpdateThread:
             ({
               required ThreadInfo thread,
@@ -63,7 +62,8 @@ final class MobileDashboardView extends StatelessWidget {
               toolsConfig: toolsConfig,
               clearToolsConfig: clearToolsConfig,
             ),
-        title: controller.selectedThread?.title,
+        title: controller.selectedThread?.title ?? controller.pendingDraftTitle,
+        draftToolsConfig: controller.pendingDraftToolsConfig,
         useNeutralUserBubbleForeground:
             controller.settings.accentTheme == AppAccentTheme.neutral,
       );

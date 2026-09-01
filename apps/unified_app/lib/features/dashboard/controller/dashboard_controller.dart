@@ -903,6 +903,9 @@ final class DashboardController extends ChangeNotifier {
     final EngineRepository? currentRepository = repository;
     final int requestVersion = ++_chatRequestVersion;
     selectedThread = thread;
+    pendingDraftTitle = null;
+    pendingDraftToolsConfig = null;
+    chatSessionVersion++;
     if (remember) {
       _threadsWorkspaceUuid = threadsWorkspace?.uuid ?? thread.workspaceUuid;
       _threadsThreadUuid = thread.uuid;
@@ -948,6 +951,74 @@ final class DashboardController extends ChangeNotifier {
     }
   }
 
+  void beginThreadDraft() {
+    final Workspace? workspace = threadsWorkspace;
+    if (workspace == null) return;
+    selectedThread = null;
+    pendingDraftTitle = null;
+    pendingDraftToolsConfig = null;
+    _threadsThreadUuid = null;
+    chatSessionVersion++;
+    _setChatScope(
+      workspaceUuid: workspace.uuid,
+      modelId: workspace.defaultModelId,
+    );
+    _markNavigationChanged();
+    notifyListeners();
+  }
+
+  void updateThreadDraft({String? title, String? toolsConfig}) {
+    if (selectedThread != null) return;
+    final String? normalizedTitle = title?.trim();
+    pendingDraftTitle = normalizedTitle == null || normalizedTitle.isEmpty
+        ? null
+        : normalizedTitle;
+    pendingDraftToolsConfig = toolsConfig;
+    notifyListeners();
+  }
+
+  Future<EngineLlmProvider> materializeThreadDraft(String firstMessage) async {
+    final Workspace? workspace = threadsWorkspace;
+    final RestEngineClient? client = repository?.rest;
+    final EngineLlmProvider? draftProvider = chatProvider;
+    if (workspace == null || client == null || draftProvider == null) {
+      throw StateError('Choose a chat workspace before sending a message.');
+    }
+    if (selectedThread != null) return draftProvider;
+
+    final String? draftTitle = pendingDraftTitle?.trim();
+    final ThreadInfo created = await client
+        .createThread(
+          workspaceUuid: workspace.uuid,
+          title: draftTitle == null || draftTitle.isEmpty
+              ? _titleFromFirstMessage(firstMessage)
+              : draftTitle,
+          toolsConfig: pendingDraftToolsConfig,
+        )
+        .timeout(requestTimeout);
+    if (_disposed ||
+        selectedThread != null ||
+        !identical(chatProvider, draftProvider) ||
+        threadsWorkspace?.uuid != workspace.uuid) {
+      throw StateError('The active draft changed while it was being created.');
+    }
+
+    threads = <ThreadInfo>[
+      created,
+      for (final ThreadInfo thread in threads)
+        if (thread.uuid != created.uuid) thread,
+    ];
+    selectedThread = created;
+    pendingDraftTitle = null;
+    pendingDraftToolsConfig = null;
+    _threadsWorkspaceUuid = workspace.uuid;
+    _threadsThreadUuid = created.uuid;
+    draftProvider.bindThread(created.uuid);
+    _markNavigationChanged();
+    notifyListeners();
+    return draftProvider;
+  }
+
   Future<void> createThread({String? title, String? toolsConfig}) async {
     final Workspace? workspace = threadsWorkspace;
     final RestEngineClient? client = repository?.rest;
@@ -967,6 +1038,14 @@ final class DashboardController extends ChangeNotifier {
         if (thread.uuid != created.uuid) thread,
     ];
     await selectThread(created);
+  }
+
+  static String _titleFromFirstMessage(String content) {
+    final String normalized = content.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.isEmpty) return 'New conversation';
+    return normalized.length <= 60
+        ? normalized
+        : '${normalized.substring(0, 57)}…';
   }
 
   Future<void> updateThreadSettings({

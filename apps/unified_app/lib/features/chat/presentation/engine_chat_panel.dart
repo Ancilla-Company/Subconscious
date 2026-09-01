@@ -8,7 +8,10 @@ import 'package:flutter/services.dart';
 
 import '../engine_llm_provider.dart';
 
-typedef CreateThreadCallback = Future<void> Function({
+typedef MaterializeThreadDraftCallback = Future<EngineLlmProvider> Function(
+  String firstMessage,
+);
+typedef UpdateThreadDraftCallback = void Function({
   String? title,
   String? toolsConfig,
 });
@@ -26,8 +29,11 @@ final class EngineChatPanel extends StatefulWidget {
     this.workspace,
     this.thread,
     this.onCreateThread,
+    this.onMaterializeThreadDraft,
+    this.onUpdateThreadDraft,
     this.onUpdateThread,
     this.title,
+    this.draftToolsConfig,
     this.useNeutralUserBubbleForeground = false,
     super.key,
   });
@@ -36,9 +42,12 @@ final class EngineChatPanel extends StatefulWidget {
   final bool isComposerEnabled;
   final Workspace? workspace;
   final ThreadInfo? thread;
-  final CreateThreadCallback? onCreateThread;
+  final VoidCallback? onCreateThread;
+  final MaterializeThreadDraftCallback? onMaterializeThreadDraft;
+  final UpdateThreadDraftCallback? onUpdateThreadDraft;
   final UpdateThreadCallback? onUpdateThread;
   final String? title;
+  final String? draftToolsConfig;
   final bool useNeutralUserBubbleForeground;
 
   @override
@@ -111,13 +120,22 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   Future<void> _send() async {
     final String content = _composer.text.trim();
     if (!widget.isComposerEnabled || content.isEmpty || _isSending) return;
-    _composer.clear();
     setState(() {
       _isSending = true;
       _error = null;
     });
     try {
-      await for (final String _ in widget.provider.sendMessageStream(content)) {
+      EngineLlmProvider provider = widget.provider;
+      if (widget.thread == null) {
+        final MaterializeThreadDraftCallback? materialize =
+            widget.onMaterializeThreadDraft;
+        if (materialize == null) {
+          throw StateError('The draft thread cannot be created.');
+        }
+        provider = await materialize(content);
+      }
+      _composer.clear();
+      await for (final String _ in provider.sendMessageStream(content)) {
         // Provider notifications redraw the streaming response.
       }
     } on Object catch (error) {
@@ -128,48 +146,42 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     }
   }
 
-  Future<void> _createThread() async {
-    final CreateThreadCallback? create = widget.onCreateThread;
-    final Workspace? workspace = widget.workspace;
-    if (create == null || workspace == null) return;
-    final _ThreadSettingsDraft? draft = await showDialog<_ThreadSettingsDraft>(
-      context: context,
-      builder: (BuildContext context) => _ThreadSettingsDialog(
-        repository: widget.provider.repository,
-        workspace: workspace,
-      ),
-    );
-    if (draft == null || !mounted) return;
-    setState(() => _error = null);
-    try {
-      await create(title: draft.title, toolsConfig: draft.toolsConfig);
-    } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
-    }
+  void _createThread() {
+    widget.onCreateThread?.call();
   }
 
   Future<void> _editThread() async {
-    final UpdateThreadCallback? update = widget.onUpdateThread;
     final Workspace? workspace = widget.workspace;
     final ThreadInfo? thread = widget.thread;
-    if (update == null || workspace == null || thread == null) return;
+    final UpdateThreadCallback? update = widget.onUpdateThread;
+    final UpdateThreadDraftCallback? updateDraft = widget.onUpdateThreadDraft;
+    if (workspace == null ||
+        (thread == null ? updateDraft == null : update == null)) {
+      return;
+    }
     final _ThreadSettingsDraft? draft = await showDialog<_ThreadSettingsDraft>(
       context: context,
       builder: (BuildContext context) => _ThreadSettingsDialog(
         repository: widget.provider.repository,
         workspace: workspace,
-        thread: thread,
+        initialTitle: widget.title,
+        initialToolsConfig: thread?.toolsConfig ?? widget.draftToolsConfig,
+        isDraft: thread == null,
       ),
     );
     if (draft == null || !mounted) return;
     setState(() => _error = null);
     try {
-      await update(
-        thread: thread,
-        title: draft.title,
-        toolsConfig: draft.toolsConfig,
-        clearToolsConfig: draft.useWorkspaceDefaults,
-      );
+      if (thread == null) {
+        updateDraft!(title: draft.title, toolsConfig: draft.toolsConfig);
+      } else {
+        await update!(
+          thread: thread,
+          title: draft.title,
+          toolsConfig: draft.toolsConfig,
+          clearToolsConfig: draft.useWorkspaceDefaults,
+        );
+      }
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
     }
@@ -198,9 +210,16 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
             title: widget.title?.trim().isNotEmpty ?? false
                 ? widget.title!
                 : 'New thread',
-            canCreateThread: widget.onCreateThread != null,
+            canCreateThread:
+                widget.isComposerEnabled &&
+                !_isSending &&
+                widget.onCreateThread != null,
             canEditThread:
-                widget.thread != null && widget.onUpdateThread != null,
+                widget.isComposerEnabled &&
+                !_isSending &&
+                (widget.thread == null
+                    ? widget.onUpdateThreadDraft != null
+                    : widget.onUpdateThread != null),
             onCreateThread: _createThread,
             onEditThread: _editThread,
           ),
@@ -360,10 +379,10 @@ final class _MessageBubble extends StatelessWidget {
     final bool isUser = message.origin == EngineChatMessageOrigin.user;
     final bool useNeutralForeground = isUser && useNeutralUserBubbleForeground;
     final Color? messageForeground = useNeutralForeground
-        ? colors.onPrimaryContainer
+        ? colors.onSecondaryContainer
         : null;
     final Color metadataForeground = useNeutralForeground
-        ? colors.onPrimaryContainer.withValues(alpha: 0.7)
+        ? colors.onSecondaryContainer.withValues(alpha: 0.7)
         : colors.onSurfaceVariant;
     final String text = message.text;
     final Widget content = Column(
@@ -390,7 +409,7 @@ final class _MessageBubble extends StatelessWidget {
               style: useNeutralForeground
                   ? IconButton.styleFrom(
                       foregroundColor: metadataForeground,
-                      disabledForegroundColor: colors.onPrimaryContainer
+                      disabledForegroundColor: colors.onSecondaryContainer
                           .withValues(alpha: 0.38),
                     )
                   : _compactControlStyle(context),
@@ -417,7 +436,7 @@ final class _MessageBubble extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.fromLTRB(13, 11, 8, 7),
           decoration: BoxDecoration(
-            color: colors.primaryContainer,
+            color: colors.secondaryContainer,
             borderRadius: BorderRadius.circular(6),
           ),
           child: content,
@@ -596,12 +615,16 @@ final class _ThreadSettingsDialog extends StatefulWidget {
   const _ThreadSettingsDialog({
     required this.repository,
     required this.workspace,
-    this.thread,
+    required this.initialTitle,
+    required this.initialToolsConfig,
+    required this.isDraft,
   });
 
   final EngineRepository repository;
   final Workspace workspace;
-  final ThreadInfo? thread;
+  final String? initialTitle;
+  final String? initialToolsConfig;
+  final bool isDraft;
 
   @override
   State<_ThreadSettingsDialog> createState() => _ThreadSettingsDialogState();
@@ -619,8 +642,8 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(text: widget.thread?.title ?? '');
-    _useWorkspaceDefaults = widget.thread?.toolsConfig == null;
+    _titleController = TextEditingController(text: widget.initialTitle ?? '');
+    _useWorkspaceDefaults = widget.initialToolsConfig == null;
     unawaited(_loadCatalog());
   }
 
@@ -629,7 +652,7 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
       final ToolCatalog catalog = await widget.repository.rest
           .listToolCatalog();
       final Map<String, dynamic> config = _decodeConfig(
-        widget.thread?.toolsConfig ?? widget.workspace.toolsConfig,
+        widget.initialToolsConfig ?? widget.workspace.toolsConfig,
       );
       final Map<String, dynamic> builtin = _objectValue(config['builtin']);
       final bool builtinEnabled = config['builtin_enabled'] is bool
@@ -714,7 +737,7 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.thread == null ? 'New thread' : 'Thread settings'),
+    title: Text(widget.isDraft ? 'Draft thread settings' : 'Thread settings'),
     content: SizedBox(
       width: 560,
       height: 520,
@@ -723,7 +746,7 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
         children: <Widget>[
           TextField(
             controller: _titleController,
-            autofocus: widget.thread == null,
+            autofocus: widget.isDraft,
             decoration: const InputDecoration(labelText: 'Title'),
           ),
           const SizedBox(height: 10),
@@ -749,7 +772,7 @@ final class _ThreadSettingsDialogState extends State<_ThreadSettingsDialog> {
       ),
       FilledButton(
         onPressed: _loading ? null : _submit,
-        child: Text(widget.thread == null ? 'Create' : 'Save'),
+        child: const Text('Save'),
       ),
     ],
   );

@@ -29,8 +29,8 @@ final class EngineLlmProvider extends ChangeNotifier {
   });
 
   core.EngineRepository repository;
-  final String? threadUuid;
-  final String? workspaceUuid;
+  String? threadUuid;
+  String? workspaceUuid;
   String? modelId;
   final List<EngineChatMessage> _history = <EngineChatMessage>[];
   final Map<EngineChatMessage, DateTime?> _timestamps =
@@ -39,6 +39,12 @@ final class EngineLlmProvider extends ChangeNotifier {
   void replaceRepository(core.EngineRepository repository) {
     if (identical(this.repository, repository)) return;
     this.repository = repository;
+    notifyListeners();
+  }
+
+  void bindThread(String uuid) {
+    threadUuid = uuid;
+    workspaceUuid = null;
     notifyListeners();
   }
 
