@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../chat/engine_llm_provider.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
@@ -31,12 +32,6 @@ final class _DesktopWebDashboardViewState
   static const double _minimumMainPanelWidth = 300;
   static const double _sidebarAndDividerWidth = 41;
   static const double _resizeDividerWidth = 5;
-
-  void _toggleContextPanelVisibility() {
-    widget.controller.updateLayoutState(
-      contextPanelVisible: !widget.controller.contextPanelVisible,
-    );
-  }
 
   void _selectPanel(DashboardSection section) {
     widget.controller.updateLayoutState(contextPanelVisible: true);
@@ -83,6 +78,8 @@ final class _DesktopWebDashboardViewState
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final double availableWidth = MediaQuery.sizeOf(context).width;
+    final bool isChatPanelVisible = widget.controller.chatPanelVisible;
+    final bool isMainPanelVisible = widget.controller.mainPanelVisible;
     final bool isContextPanelVisible = widget.controller.contextPanelVisible;
     final List<DashboardPanel> configuredPanelOrder =
         widget.controller.settings.panelOrder;
@@ -95,21 +92,24 @@ final class _DesktopWebDashboardViewState
     ];
     final List<DashboardPanel> panelOrder = normalizedPanelOrder
         .where(
-          (DashboardPanel panel) =>
-              panel != DashboardPanel.context || isContextPanelVisible,
+          (DashboardPanel panel) => switch (panel) {
+            DashboardPanel.chat => isChatPanelVisible,
+            DashboardPanel.main => isMainPanelVisible,
+            DashboardPanel.context => isContextPanelVisible,
+          },
         )
         .toList(growable: false);
-    final String panelArrangementKey = normalizedPanelOrder
+    final String panelArrangementKey = panelOrder
         .map((DashboardPanel panel) => panel.name)
         .join(':');
     final double dividerLayoutWidth =
-        _resizeDividerWidth * (panelOrder.length - 1);
+        _resizeDividerWidth * (panelOrder.isEmpty ? 0 : panelOrder.length - 1);
     final double maximumContextPanelWidth =
         (availableWidth -
                 _sidebarAndDividerWidth -
                 dividerLayoutWidth -
-                _minimumChatPanelWidth -
-                _minimumMainPanelWidth)
+                (isChatPanelVisible ? _minimumChatPanelWidth : 0) -
+                (isMainPanelVisible ? _minimumMainPanelWidth : 0))
             .clamp(_minimumContextPanelWidth, _maximumContextPanelWidth)
             .toDouble();
     final double contextPanelWidth = widget.controller.contextPanelWidth
@@ -120,7 +120,7 @@ final class _DesktopWebDashboardViewState
                 _sidebarAndDividerWidth -
                 dividerLayoutWidth -
                 (isContextPanelVisible ? contextPanelWidth : 0) -
-                _minimumMainPanelWidth)
+                (isMainPanelVisible ? _minimumMainPanelWidth : 0))
             .clamp(_minimumChatPanelWidth, _maximumChatPanelWidth)
             .toDouble();
     final double chatPanelWidth = widget.controller.chatPanelWidth
@@ -128,8 +128,6 @@ final class _DesktopWebDashboardViewState
         .toDouble();
     final Widget sidebar = _Sidebar(
       selectedPanel: widget.controller.selectedSection,
-      isContextPanelVisible: isContextPanelVisible,
-      onContextPanelVisibilityToggle: _toggleContextPanelVisibility,
       onPanelSelected: _selectPanel,
     );
     final Widget sidebarDivider = SizedBox(
@@ -189,10 +187,26 @@ final class _DesktopWebDashboardViewState
                 children: <Widget>[
                   if (!sidebarOnRight) ...<Widget>[sidebar, sidebarDivider],
                   Expanded(
-                    child: Row(
-                      key: ValueKey<String>(panelArrangementKey),
-                      children: configuredPanels,
-                    ),
+                    child: panelOrder.isEmpty
+                        ? Center(
+                            child: SvgPicture.asset(
+                              'windows/runner/resources/icon_title.svg',
+                              width: 88,
+                              height: 88,
+                              colorFilter: ColorFilter.mode(
+                                colors.onSurface,
+                                BlendMode.srcIn,
+                              ),
+                              semanticsLabel: 'Subconscious logo',
+                            ),
+                          )
+                        : Row(
+                            key: ValueKey<String>(panelArrangementKey),
+                            mainAxisAlignment: mainPanelIndex < 0
+                                ? MainAxisAlignment.center
+                                : MainAxisAlignment.start,
+                            children: configuredPanels,
+                          ),
                   ),
                   if (sidebarOnRight) ...<Widget>[sidebarDivider, sidebar],
                 ],
@@ -352,16 +366,9 @@ final class _PanelResizeDivider extends StatelessWidget {
 }
 
 final class _Sidebar extends StatelessWidget {
-  const _Sidebar({
-    required this.selectedPanel,
-    required this.isContextPanelVisible,
-    required this.onContextPanelVisibilityToggle,
-    required this.onPanelSelected,
-  });
+  const _Sidebar({required this.selectedPanel, required this.onPanelSelected});
 
   final DashboardSection selectedPanel;
-  final bool isContextPanelVisible;
-  final VoidCallback onContextPanelVisibilityToggle;
   final ValueChanged<DashboardSection> onPanelSelected;
 
   @override
@@ -371,14 +378,6 @@ final class _Sidebar extends StatelessWidget {
       width: 40,
       child: Column(
         children: <Widget>[
-          _SidebarButton(
-            icon: FluentIcons.panel_right_24_regular,
-            selectedIcon: FluentIcons.panel_right_24_regular,
-            tooltip: isContextPanelVisible
-                ? 'Hide context panel'
-                : 'Show context panel',
-            onPressed: onContextPanelVisibilityToggle,
-          ),
           _SidebarButton(
             icon: FluentIcons.apps_24_regular,
             selectedIcon: FluentIcons.apps_24_filled,

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
 
 const MethodChannel _windowFrameChannel = MethodChannel(
@@ -196,7 +197,10 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
   Widget build(BuildContext context) {
     if (!Platform.isWindows) return const SizedBox.shrink();
     return AnimatedBuilder(
-      animation: widget.controller,
+      animation: Listenable.merge(<Listenable>[
+        widget.controller,
+        widget.controller.settings,
+      ]),
       builder: (BuildContext context, Widget? child) {
         final ThemeData theme = Theme.of(context);
         final Brightness brightness = theme.brightness;
@@ -256,6 +260,10 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
                     ),
                   ),
                 ),
+                _PanelVisibilityControls(
+                  controller: widget.controller,
+                  brightness: brightness,
+                ),
                 _ThreadWorkspaceCaptionPicker(
                   controller: widget.controller,
                   brightness: brightness,
@@ -283,6 +291,124 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
           ),
         );
       },
+    );
+  }
+}
+
+final class _PanelVisibilityControls extends StatelessWidget {
+  const _PanelVisibilityControls({
+    required this.controller,
+    required this.brightness,
+  });
+
+  final DashboardController controller;
+  final Brightness brightness;
+
+  bool _isVisible(DashboardPanel panel) => switch (panel) {
+    DashboardPanel.chat => controller.chatPanelVisible,
+    DashboardPanel.main => controller.mainPanelVisible,
+    DashboardPanel.context => controller.contextPanelVisible,
+  };
+
+  void _toggle(DashboardPanel panel) {
+    final bool visible = _isVisible(panel);
+    switch (panel) {
+      case DashboardPanel.chat:
+        controller.updateLayoutState(chatPanelVisible: !visible);
+      case DashboardPanel.main:
+        controller.updateLayoutState(mainPanelVisible: !visible);
+      case DashboardPanel.context:
+        controller.updateLayoutState(contextPanelVisible: !visible);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<DashboardPanel> panels = controller.settings.panelOrder;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _PanelVisibilityButton(
+          brightness: brightness,
+          visible: _isVisible(panels[0]),
+          visibleIcon: FluentIcons.panel_left_24_filled,
+          hiddenIcon: FluentIcons.panel_left_24_regular,
+          panelName: panels[0].name,
+          onPressed: () => _toggle(panels[0]),
+        ),
+        _PanelVisibilityButton(
+          brightness: brightness,
+          visible: _isVisible(panels[1]),
+          visibleIcon: FluentIcons.layout_column_three_focus_center_24_filled,
+          hiddenIcon: FluentIcons.layout_column_three_24_regular,
+          panelName: panels[1].name,
+          onPressed: () => _toggle(panels[1]),
+        ),
+        _PanelVisibilityButton(
+          brightness: brightness,
+          visible: _isVisible(panels[2]),
+          visibleIcon: FluentIcons.panel_right_24_filled,
+          hiddenIcon: FluentIcons.panel_right_24_regular,
+          panelName: panels[2].name,
+          onPressed: () => _toggle(panels[2]),
+        ),
+      ],
+    );
+  }
+}
+
+final class _PanelVisibilityButton extends StatelessWidget {
+  const _PanelVisibilityButton({
+    required this.brightness,
+    required this.visible,
+    required this.visibleIcon,
+    required this.hiddenIcon,
+    required this.panelName,
+    required this.onPressed,
+  });
+
+  final Brightness brightness;
+  final bool visible;
+  final IconData visibleIcon;
+  final IconData hiddenIcon;
+  final String panelName;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color foreground = brightness == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    final Color hoverColor = brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+    return Tooltip(
+      message: '${visible ? 'Hide' : 'Show'} $panelName panel',
+      child: Semantics(
+        button: true,
+        toggled: visible,
+        label: '$panelName panel',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            hoverColor: hoverColor,
+            focusColor: hoverColor,
+            highlightColor: hoverColor,
+            child: SizedBox(
+              width: 42,
+              height: kWindowCaptionHeight,
+              child: Icon(
+                visible ? visibleIcon : hiddenIcon,
+                size: 18,
+                color: visible
+                    ? foreground
+                    : foreground.withValues(alpha: 0.55),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -326,7 +452,7 @@ final class _ThreadWorkspaceCaptionPicker extends StatelessWidget {
       builder:
           (BuildContext context, MenuController menuController, Widget? child) {
             return Tooltip(
-              message: 'Chat workspace: $label',
+              message: 'Active Workspace: $label',
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(

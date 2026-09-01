@@ -152,6 +152,8 @@ final class DashboardController extends ChangeNotifier {
   OpenWorkspaceFile? openFile;
   String? selectedFileTreeNodeKey;
 
+  bool chatPanelVisible = true;
+  bool mainPanelVisible = true;
   bool contextPanelVisible = true;
   double chatPanelWidth = 280;
   double contextPanelWidth = 280;
@@ -269,11 +271,21 @@ final class DashboardController extends ChangeNotifier {
   }
 
   void updateLayoutState({
+    bool? chatPanelVisible,
+    bool? mainPanelVisible,
     bool? contextPanelVisible,
     double? chatPanelWidth,
     double? contextPanelWidth,
   }) {
     bool changed = false;
+    if (chatPanelVisible != null && chatPanelVisible != this.chatPanelVisible) {
+      this.chatPanelVisible = chatPanelVisible;
+      changed = true;
+    }
+    if (mainPanelVisible != null && mainPanelVisible != this.mainPanelVisible) {
+      this.mainPanelVisible = mainPanelVisible;
+      changed = true;
+    }
     if (contextPanelVisible != null &&
         contextPanelVisible != this.contextPanelVisible) {
       this.contextPanelVisible = contextPanelVisible;
@@ -481,6 +493,8 @@ final class DashboardController extends ChangeNotifier {
     _restoreFileViewer(root['fileViewer']);
 
     final Map<String, dynamic> layout = _objectValue(root['layout']);
+    chatPanelVisible = _boolValue(layout['chatPanelVisible']) ?? true;
+    mainPanelVisible = _boolValue(layout['mainPanelVisible']) ?? true;
     contextPanelVisible = _boolValue(layout['contextPanelVisible']) ?? true;
     chatPanelWidth = _positiveDoubleValue(layout['chatPanelWidth']) ?? 280;
     contextPanelWidth =
@@ -600,6 +614,8 @@ final class DashboardController extends ChangeNotifier {
         },
     },
     'layout': <String, dynamic>{
+      'chatPanelVisible': chatPanelVisible,
+      'mainPanelVisible': mainPanelVisible,
       'contextPanelVisible': contextPanelVisible,
       'chatPanelWidth': _isPositiveFinite(chatPanelWidth)
           ? chatPanelWidth
