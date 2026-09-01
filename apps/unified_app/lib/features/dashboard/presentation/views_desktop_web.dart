@@ -386,15 +386,15 @@ final class _Sidebar extends StatelessWidget {
             onPressed: () => onPanelSelected(DashboardSection.workspaces),
           ),
           _SidebarButton(
-            icon: FluentIcons.chat_multiple_24_regular,
-            selectedIcon: FluentIcons.chat_multiple_24_filled,
+            icon: FluentIcons.chat_24_regular,
+            selectedIcon: FluentIcons.chat_24_filled,
             tooltip: 'Threads',
             selected: selectedPanel == DashboardSection.threads,
             onPressed: () => onPanelSelected(DashboardSection.threads),
           ),
           _SidebarButton(
-            icon: FluentIcons.folder_24_regular,
-            selectedIcon: FluentIcons.folder_24_filled,
+            icon: FluentIcons.document_copy_24_regular,
+            selectedIcon: FluentIcons.document_copy_24_filled,
             tooltip: 'Files',
             selected: selectedPanel == DashboardSection.files,
             onPressed: () => onPanelSelected(DashboardSection.files),
@@ -411,8 +411,8 @@ final class _Sidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: _SidebarButton(
-              icon: FluentIcons.person_circle_24_regular,
-              selectedIcon: FluentIcons.person_circle_24_filled,
+              icon: FluentIcons.person_24_regular,
+              selectedIcon: FluentIcons.person_24_filled,
               tooltip: 'Account',
               selected: selectedPanel == DashboardSection.account,
               onPressed: () => onPanelSelected(DashboardSection.account),
@@ -428,12 +428,12 @@ final class _SidebarDivider extends StatelessWidget {
   const _SidebarDivider();
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-    child: SizedBox(
-      height: 1,
-      child: ColoredBox(color: Theme.of(context).colorScheme.outlineVariant),
-    ),
+  Widget build(BuildContext context) => Divider(
+    height: 1,
+    thickness: 1,
+    indent: 4,
+    endIndent: 4,
+    color: Theme.of(context).colorScheme.outlineVariant,
   );
 }
 
