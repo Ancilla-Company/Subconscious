@@ -2,12 +2,16 @@
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+import os
 from typing import Any
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, Tool, UsageLimits
 from pydantic_ai.messages import (ModelMessage, ModelRequest, ModelResponse, SystemPromptPart,
                                   TextPart, ToolReturnPart, UserPromptPart)
+from pydantic_ai.models import Model
+from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from subconscious_engine.configuration.models import ModelConfig
@@ -63,8 +67,11 @@ class AgentManager:
         raise RuntimeError("The model exceeded the maximum of eight tool-call rounds.")
 
     @staticmethod
-    def _model(config: ModelConfig) -> OpenAIModel:
+    def _model(config: ModelConfig) -> Model:
         provider_name = config.provider.casefold().replace("_", "-")
+        if provider_name == "bedrock":
+            return AgentManager._bedrock_model(config)
+
         supported = {"openai", "openai-compatible", "openrouter", "ollama", "lmstudio", "vllm", "local"}
         if provider_name not in supported:
             raise ValueError(f"Unsupported Pydantic AI provider: {config.provider}")
@@ -72,6 +79,35 @@ class AgentManager:
             raise ValueError(f"Provider '{config.provider}' requires an OpenAI-compatible base URL.")
         provider = OpenAIProvider(base_url=config.base_url, api_key=config.api_key or "not-required")
         return OpenAIModel(config.model, provider=provider)
+
+    @staticmethod
+    def _bedrock_model(config: ModelConfig) -> BedrockConverseModel:
+        """Build a Bedrock model using credentials stored with the model configuration."""
+        provider_kwargs = {
+            key: value
+            for key, value in {
+                "api_key": (config.api_key or "").strip(),
+                "aws_access_key_id": (config.aws_access_key_id or "").strip(),
+                "aws_secret_access_key": (config.aws_secret_access_key or "").strip(),
+                "aws_session_token": (config.aws_session_token or "").strip(),
+                "region_name": AgentManager._bedrock_region(config),
+            }.items()
+            if value
+        }
+        provider = BedrockProvider(**provider_kwargs)
+        return BedrockConverseModel(config.model, provider=provider)
+
+    @staticmethod
+    def _bedrock_region(config: ModelConfig) -> str | None:
+        """Resolve a Bedrock region from configuration, ARN, then AWS environment variables."""
+        region = (config.region or config.base_url or "").strip()
+        if not region and config.model.startswith("arn:aws:bedrock:"):
+            parts = config.model.split(":")
+            if len(parts) > 3:
+                region = parts[3]
+        if not region:
+            region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "").strip()
+        return region or None
 
     @staticmethod
     def _history(history: Sequence[tuple[str, str]]) -> list[ModelMessage]:

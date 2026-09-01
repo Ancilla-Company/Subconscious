@@ -774,6 +774,60 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       children: <Widget>[
+        LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final Widget title = Text(
+              'Edit Thread',
+              style: Theme.of(context).textTheme.titleMedium
+                  ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
+            );
+            final Widget actions = Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(4)),
+                    ),
+                  ),
+                  onPressed: _saving ? null : widget.onCancel,
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(4)),
+                    ),
+                  ),
+                  onPressed: _loading || _saving ? null : _submit,
+                  icon: _saving
+                      ? const SizedBox.square(
+                          dimension: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(FluentIcons.save_20_regular, size: 16),
+                  label: const Text('Save'),
+                ),
+              ],
+            );
+            if (constraints.maxWidth >= 255) {
+              return Row(children: <Widget>[title, const Spacer(), actions]);
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Align(alignment: Alignment.centerLeft, child: title),
+                const SizedBox(height: 8),
+                actions,
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
         TextField(
           controller: _titleController,
           autofocus: widget.isDraft,
@@ -782,28 +836,6 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
             labelText: 'Thread name',
             hintText: 'New thread',
           ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 6,
-          runSpacing: 4,
-          children: <Widget>[
-            TextButton(
-              onPressed: _saving ? null : widget.onCancel,
-              child: const Text('Cancel'),
-            ),
-            FilledButton.icon(
-              onPressed: _loading || _saving ? null : _submit,
-              icon: _saving
-                  ? const SizedBox.square(
-                      dimension: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(FluentIcons.save_20_regular, size: 16),
-              label: const Text('Save'),
-            ),
-          ],
         ),
         const SizedBox(height: 8),
         _switchRow(

@@ -18,19 +18,24 @@ class ModelConfigurationDto(_ApiModel):
     model: str
     alias: str | None = None
     base_url: str | None = Field(default=None, alias="baseUrl")
+    region: str | None = None
     context_window: int | None = Field(default=None, alias="contextWindow")
     has_api_key: bool = Field(alias="hasApiKey")
 
 
 class UpsertModelConfigurationRequest(_ApiModel):
-    """Create/update payload with a write-only API key."""
+    """Create/update payload with write-only API and Bedrock credentials."""
 
     provider: str
     model: str
     alias: str | None = None
     base_url: str | None = Field(default=None, alias="baseUrl")
+    region: str | None = None
     context_window: int | None = Field(default=None, alias="contextWindow")
     api_key: str | None = Field(default=None, alias="apiKey")
+    aws_access_key_id: str | None = Field(default=None, alias="awsAccessKeyId")
+    aws_secret_access_key: str | None = Field(default=None, alias="awsSecretAccessKey")
+    aws_session_token: str | None = Field(default=None, alias="awsSessionToken")
     clear_api_key: bool = Field(default=False, alias="clearApiKey")
 
 

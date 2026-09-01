@@ -333,6 +333,7 @@ def _apply(
     model["model"] = request.model.strip()
     model["alias"] = request.alias.strip() if request.alias is not None else ""
     model["base_url"] = request.base_url.strip() if request.base_url is not None else ""
+    model["region"] = request.region.strip() if request.region is not None else ""
     if request.context_window is None:
         model.pop("context_window", None)
     else:
@@ -346,6 +347,17 @@ def _apply(
     elif is_new:
         model["api_key"] = ""
 
+    credentials = {
+        "aws_access_key_id": request.aws_access_key_id,
+        "aws_secret_access_key": request.aws_secret_access_key,
+        "aws_session_token": request.aws_session_token,
+    }
+    for field, value in credentials.items():
+        if value is not None:
+            model[field] = value
+        elif is_new:
+            model[field] = ""
+
 
 def _redacted(identifier: str, model: dict[str, Any]) -> ModelConfigurationDto:
     api_key = _string(model, "api_key")
@@ -355,6 +367,7 @@ def _redacted(identifier: str, model: dict[str, Any]) -> ModelConfigurationDto:
         model=_string(model, "model") or "",
         alias=_string(model, "alias"),
         baseUrl=_string(model, "base_url"),
+        region=_string(model, "region"),
         contextWindow=_integer(model, "context_window"),
         hasApiKey=bool(api_key and api_key.strip()),
     )
