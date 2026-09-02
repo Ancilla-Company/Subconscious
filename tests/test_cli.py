@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from subconscious_engine.__main__ import build_parser, main
+from subconscious_engine.__main__ import LOGO, build_parser, main
 
 
 class FakeHost:
@@ -45,15 +45,16 @@ def test_parser_exposes_detached_tray_network_identity_and_storage_options(tmp_p
     assert args.service_child is True
 
 
-def test_main_without_command_prints_help(capsys):
+def test_main_without_command_prints_logo_and_help(capsys):
     assert main([]) == 0
     output = capsys.readouterr()
+    assert LOGO.strip() in output.out
     assert "usage: subconscious" in output.out
     assert "start" in output.out
     assert output.err == ""
 
 
-def test_main_builds_config_and_runs_service_child(tmp_path):
+def test_main_builds_config_and_runs_service_child_without_logo(tmp_path, capsys):
     FakeHost.instances.clear()
     with patch("subconscious_engine.__main__.EngineHost", FakeHost):
         result = main(
@@ -73,6 +74,8 @@ def test_main_builds_config_and_runs_service_child(tmp_path):
             ]
         )
 
+    output = capsys.readouterr()
+    assert LOGO.strip() not in output.out
     assert result == 0
     host = FakeHost.instances[-1]
     assert host.served is True
@@ -95,7 +98,7 @@ def test_detached_spawns_background_child_without_implicitly_hiding_tray(tmp_pat
     assert popen.call_args.kwargs["stdout"] is not None
 
 
-def test_desktop_stub_accepts_copied_join_command_arguments():
+def test_desktop_stub_accepts_copied_join_command_arguments_without_logo(capsys):
     args = build_parser().parse_args(
         [
             "desktop",
@@ -108,6 +111,18 @@ def test_desktop_stub_accepts_copied_join_command_arguments():
     assert args.command == "desktop"
     assert args.engine_url == "http://192.168.1.5:8123/api/v1/"
     assert args.token == "secret"
+    assert main(
+        [
+            "desktop",
+            "--engine-url",
+            "http://192.168.1.5:8123/api/v1/",
+            "--token",
+            "secret",
+        ]
+    ) == 1
+    output = capsys.readouterr()
+    assert LOGO.strip() not in output.out
+    assert "not implemented yet" in output.err
 
 
 def test_main_treats_keyboard_interrupt_as_graceful_shutdown(tmp_path):

@@ -1,19 +1,19 @@
-"""Engine startup configuration matching the .NET composition root."""
+""" Engine startup configuration matching the .NET composition root """
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
 class EngineConfig:
-    dev: bool = False
+    port: int = 0
     api: bool = True
+    dev: bool = False
     gui: bool = False
     tui: bool = False
     headless: bool = False
-    port: int = 0
     lan_enabled: bool = False
     node_id: str | None = None
     data_directory: Path | None = None

@@ -1,14 +1,33 @@
-"""Command-line entry point for the Subconscious engine and clients."""
+""" Command-line entry point for the Subconscious engine and clients """
 
-import argparse
-import asyncio
-from collections.abc import Sequence
-from pathlib import Path
-import subprocess
 import sys
+import asyncio
+import argparse
+import subprocess
+from pathlib import Path
+from collections.abc import Sequence
 
-from .config import EngineConfig
 from .host import EngineHost
+from .config import EngineConfig
+
+
+LOGO = """
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣶⣶⣦⣠⣤⣤⣤⣄⣀⣠⣤⣤⡀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⣿⣿⣿⠏⠉⠉⠉⠙⢻⣿⣿⣿⡷⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⣰⣿⠋⠙⠛⠻⣷⣄⣀⠀⣠⣾⠟⠛⠛⠁⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⣰⣾⣿⣷⣄⣀⣀⣀⣹⣿⣿⣿⡟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⢻⣿⣿⣿⠟⠛⠛⠛⠻⣿⣿⣿⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠈⠻⣷⣤⣀⠀⠀⠀⢀⣿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⠻⠿⣶⣶⣿⣿⣷⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⢿⣶⣤⡀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣰⡿⠉⠀⠀⠈⠙⢿⣦⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⣿⣿⣷⡀⠀⠀⠀⠀⠈⣿⡆⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣿⣿⣿⠿⠿⣶⣦⣄⣀⣤⣿⣇⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⢀⣀⣀⣠⣾⠟⠁⢸⣿⠀⠀⠀⠉⠙⣿⣿⣿⣿⠆⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢠⣿⣿⣿⣿⠁⠀⢀⣼⣿⡀⠀⠀⢀⣠⣿⠿⠟⠋⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠈⠿⣿⡿⠿⠿⢷⣿⣿⣿⣿⣶⠿⠟⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠿⠿⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+"""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--workspace", help="Target workspace UUID or exact name.")
     target.add_argument("--thread", help="Continue an existing thread UUID.")
     chat.add_argument("--tools", action="store_true", help="Enable workspace-default tools.")
-    chat.add_argument("--dev", action="store_true", help="Discover the development engine.")
+    chat.add_argument("--dev", action="store_true", help="Enable development mode.")
     chat.add_argument("--data-dir", type=Path, help="Override runtime discovery data directory.")
     chat.add_argument("--timeout", type=_positive_float, default=300.0)
     chat.set_defaults(handler=_run_chat)
@@ -56,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("tui", "Start the terminal client."),
         ("desktop", "Start the desktop client."),
         ("web", "Start the web client."),
-        ("extension", "Start the editor extension."),
+        ("extension", "Start the browser client."),
     ):
         client = subcommands.add_parser(name, help=description)
         if name == "desktop":
@@ -169,7 +188,11 @@ def _client_stub(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    arguments = list(argv) if argv is not None else sys.argv[1:]
+    root_help = not arguments or arguments in (["-h"], ["--help"])
+    if root_help:
+        print(LOGO)
+    args = parser.parse_args(arguments)
     handler = getattr(args, "handler", None)
     if handler is None:
         parser.print_help()
