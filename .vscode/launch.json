@@ -30,9 +30,9 @@
       "deviceId": "${input:flutterDevice}",
       "toolArgs": [
         "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
+        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=50505",
         "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
         "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token",
-        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=${input:pythonEnginePort}",
       ],
       "flutterMode": "debug",
       "console": "terminal"
@@ -44,7 +44,7 @@
       "program": "${workspaceFolder}/apps/tui_app/bin/main.dart",
       "cwd": "${workspaceFolder}",
       "toolArgs": [
-        "--define=SUBCONSCIOUS_ENGINE_URL=http://127.0.0.1:7331",
+        "--define=SUBCONSCIOUS_ENGINE_URL=http://127.0.0.1:50505",
         "--define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token"
       ],
       "console": "terminal"

@@ -232,80 +232,92 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     );
     return ColoredBox(
       color: Theme.of(context).colorScheme.surface,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _ChatHeader(
-            title: widget.title?.trim().isNotEmpty ?? false
-                ? widget.title!
-                : 'New thread',
-            canCreateThread:
-                widget.isComposerEnabled &&
-                !_isSending &&
-                widget.onCreateThread != null,
-            canEditThread:
-                (widget.isComposerEnabled || _showThreadSettings) &&
-                !_isSending &&
-                widget.workspace != null &&
-                (widget.thread == null
-                    ? widget.onUpdateThreadDraft != null
-                    : widget.onUpdateThread != null),
-            settingsVisible: _showThreadSettings,
-            onCreateThread: _createThread,
-            onEditThread: _toggleThreadSettings,
-          ),
-          Expanded(
-            child: _showThreadSettings && widget.workspace != null
-                ? _ThreadSettingsPanel(
-                    repository: widget.provider.repository,
-                    workspace: widget.workspace!,
-                    initialTitle: widget.title,
-                    initialToolsConfig:
-                        widget.thread?.toolsConfig ?? widget.draftToolsConfig,
-                    isDraft: widget.thread == null,
-                    onCancel: _toggleThreadSettings,
-                    onSave: _saveThreadSettings,
-                  )
-                : messages.isEmpty
-                ? const _EmptyChat()
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-                    itemCount: messages.length,
-                    itemBuilder: (BuildContext context, int index) =>
-                        _MessageBubble(
-                          message: messages[index],
-                          timestamp: widget.provider.timestampFor(
-                            messages[index],
-                          ),
-                          useNeutralUserBubbleForeground:
-                              widget.useNeutralUserBubbleForeground,
-                        ),
-                  ),
-          ),
-          if (!_showThreadSettings)
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-                child: Text(
-                  '$_error',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall
-                      ?.copyWith(color: Theme.of(context).colorScheme.error),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final double horizontalPadding = constraints.maxWidth > 770
+              ? (constraints.maxWidth - 750) / 2
+              : 10;
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                _ChatHeader(
+                  title: widget.title?.trim().isNotEmpty ?? false
+                      ? widget.title!
+                      : 'New thread',
+                  canCreateThread:
+                      widget.isComposerEnabled &&
+                      !_isSending &&
+                      widget.onCreateThread != null,
+                  canEditThread:
+                      (widget.isComposerEnabled || _showThreadSettings) &&
+                      !_isSending &&
+                      widget.workspace != null &&
+                      (widget.thread == null
+                          ? widget.onUpdateThreadDraft != null
+                          : widget.onUpdateThread != null),
+                  settingsVisible: _showThreadSettings,
+                  onCreateThread: _createThread,
+                  onEditThread: _toggleThreadSettings,
                 ),
-              ),
-          if (!_showThreadSettings)
-            _Composer(
-              controller: _composer,
-              models: _models,
-              selectedModelId: widget.provider.modelId,
-              isSending: _isSending,
-              enabled: widget.isComposerEnabled,
-              onModelSelected: widget.provider.selectModel,
-              onSend: _send,
+                Expanded(
+                  child: _showThreadSettings && widget.workspace != null
+                      ? _ThreadSettingsPanel(
+                          repository: widget.provider.repository,
+                          workspace: widget.workspace!,
+                          initialTitle: widget.title,
+                          initialToolsConfig:
+                              widget.thread?.toolsConfig ??
+                              widget.draftToolsConfig,
+                          isDraft: widget.thread == null,
+                          onCancel: _toggleThreadSettings,
+                          onSave: _saveThreadSettings,
+                        )
+                      : messages.isEmpty
+                      ? const _EmptyChat()
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                          itemCount: messages.length,
+                          itemBuilder: (BuildContext context, int index) =>
+                              _MessageBubble(
+                                message: messages[index],
+                                timestamp: widget.provider.timestampFor(
+                                  messages[index],
+                                ),
+                                useNeutralUserBubbleForeground:
+                                    widget.useNeutralUserBubbleForeground,
+                              ),
+                        ),
+                ),
+                if (!_showThreadSettings)
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                      child: Text(
+                        '$_error',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                if (!_showThreadSettings)
+                  _Composer(
+                    controller: _composer,
+                    models: _models,
+                    selectedModelId: widget.provider.modelId,
+                    isSending: _isSending,
+                    enabled: widget.isComposerEnabled,
+                    onModelSelected: widget.provider.selectModel,
+                    onSend: _send,
+                  ),
+              ],
             ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -510,7 +522,7 @@ final class _Composer extends StatelessWidget {
     final bool interactive = enabled && !isSending;
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+      margin: const EdgeInsets.only(top: 4, bottom: 10),
       decoration: BoxDecoration(
         color: colors.surfaceContainerLowest,
         border: Border.all(color: colors.outlineVariant),

@@ -136,6 +136,14 @@ final class _DesktopWebDashboardViewState
       child: ColoredBox(color: colors.outlineVariant),
     );
     final int mainPanelIndex = panelOrder.indexOf(DashboardPanel.main);
+    final int chatPanelIndex = panelOrder.indexOf(DashboardPanel.chat);
+    final int flexiblePanelIndex = mainPanelIndex >= 0
+        ? mainPanelIndex
+        : chatPanelIndex >= 0
+        ? chatPanelIndex
+        : panelOrder.isEmpty
+        ? -1
+        : 0;
     final List<Widget> configuredPanels = <Widget>[
       for (int index = 0; index < panelOrder.length; index++) ...<Widget>[
         if (index > 0)
@@ -144,14 +152,14 @@ final class _DesktopWebDashboardViewState
               panel: _panelForDivider(
                 leftIndex: index - 1,
                 rightIndex: index,
-                mainPanelIndex: mainPanelIndex,
+                flexiblePanelIndex: flexiblePanelIndex,
                 panelOrder: panelOrder,
               ),
               isLeftPanel:
                   _panelForDivider(
                     leftIndex: index - 1,
                     rightIndex: index,
-                    mainPanelIndex: mainPanelIndex,
+                    flexiblePanelIndex: flexiblePanelIndex,
                     panelOrder: panelOrder,
                   ) ==
                   panelOrder[index - 1],
@@ -162,11 +170,20 @@ final class _DesktopWebDashboardViewState
               maximumContextPanelWidth: maximumContextPanelWidth,
             ),
           ),
-        _buildPanel(
-          panelOrder[index],
-          chatPanelWidth: chatPanelWidth,
-          contextPanelWidth: contextPanelWidth,
-        ),
+        if (index == flexiblePanelIndex && mainPanelIndex < 0)
+          Expanded(
+            child: _buildPanel(
+              panelOrder[index],
+              chatPanelWidth: chatPanelWidth,
+              contextPanelWidth: contextPanelWidth,
+            ),
+          )
+        else
+          _buildPanel(
+            panelOrder[index],
+            chatPanelWidth: chatPanelWidth,
+            contextPanelWidth: contextPanelWidth,
+          ),
       ],
     ];
     final bool sidebarOnRight =
@@ -293,14 +310,14 @@ final class _DesktopWebDashboardViewState
   DashboardPanel _panelForDivider({
     required int leftIndex,
     required int rightIndex,
-    required int mainPanelIndex,
+    required int flexiblePanelIndex,
     required List<DashboardPanel> panelOrder,
   }) {
     final DashboardPanel left = panelOrder[leftIndex];
     final DashboardPanel right = panelOrder[rightIndex];
-    if (left == DashboardPanel.main) return right;
-    if (right == DashboardPanel.main) return left;
-    return mainPanelIndex < leftIndex ? right : left;
+    if (leftIndex == flexiblePanelIndex) return right;
+    if (rightIndex == flexiblePanelIndex) return left;
+    return flexiblePanelIndex < leftIndex ? right : left;
   }
 
   void _resizePanel({
