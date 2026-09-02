@@ -40,6 +40,7 @@ final class DashboardMainPanel extends StatelessWidget {
         ),
         MainPanelDestination.settings => SettingsMainPanel(
           controller: controller.settings,
+          dashboardController: controller,
         ),
         MainPanelDestination.utility => const _UtilityPanel(),
       };

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
@@ -6,12 +8,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../connection/engine_connection_resolver.dart';
+import '../../dashboard/controller/dashboard_controller.dart';
 import '../controller/settings_controller.dart';
 
 final class SettingsMainPanel extends StatelessWidget {
-  const SettingsMainPanel({required this.controller, super.key});
+  const SettingsMainPanel({
+    required this.controller,
+    required this.dashboardController,
+    super.key,
+  });
 
   final DashboardSettingsController controller;
+  final DashboardController dashboardController;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -24,6 +32,7 @@ final class SettingsMainPanel extends StatelessWidget {
           child: switch (controller.activePage) {
             SettingsPage.general => _GeneralSettingsPage(
               controller: controller,
+              dashboardController: dashboardController,
             ),
             SettingsPage.models => _ModelsSettingsPage(controller: controller),
             SettingsPage.tools => _ToolsSettingsPage(controller: controller),
@@ -57,9 +66,13 @@ final class _SettingsBody extends StatelessWidget {
 }
 
 final class _GeneralSettingsPage extends StatelessWidget {
-  const _GeneralSettingsPage({required this.controller});
+  const _GeneralSettingsPage({
+    required this.controller,
+    required this.dashboardController,
+  });
 
   final DashboardSettingsController controller;
+  final DashboardController dashboardController;
 
   static const List<String> _modes = <String>['Device', 'Light', 'Dark'];
   static const List<String> _colours = <String>[
@@ -85,6 +98,10 @@ final class _GeneralSettingsPage extends StatelessWidget {
   Widget build(BuildContext context) => _SettingsBody(
     children: <Widget>[
       const _SectionHeading(title: 'General Settings'),
+      if (_supportsRemoteEngineConnection) ...<Widget>[
+        const _FieldLabel('Engine Connection'),
+        _RemoteEngineConnectionForm(controller: dashboardController),
+      ],
       if (controller.isLoadingGeneral) const LinearProgressIndicator(),
       if (controller.generalError case final Object error)
         _SettingsError(error: error),
@@ -124,10 +141,327 @@ final class _GeneralSettingsPage extends StatelessWidget {
           value,
         ),
       ),
-      const _FieldLabel('Data Folder'),
-      const _DataDirectoryField(),
-      const _FieldLabel('Joining Token'),
-      _JoiningTokenField(token: controller.joiningToken),
+      if (!_supportsRemoteEngineConnection) ...<Widget>[
+        const _FieldLabel('Data Folder'),
+        const _DataDirectoryField(),
+        const _FieldLabel('Joining Token'),
+        _JoiningTokenField(token: controller.joiningToken),
+        if (_supportsWindowsFirewall) const _WindowsFirewallSettings(),
+      ],
+    ],
+  );
+}
+
+final bool _supportsRemoteEngineConnection =
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+final bool _supportsWindowsFirewall =
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+const bool _preferDevEngine = bool.fromEnvironment('SUBCONSCIOUS_ENGINE_DEV');
+const MethodChannel _windowsFirewallChannel = MethodChannel(
+  'company.ancilla.subconscious/windows_firewall',
+);
+
+final class _WindowsFirewallSettings extends StatefulWidget {
+  const _WindowsFirewallSettings();
+
+  @override
+  State<_WindowsFirewallSettings> createState() =>
+      _WindowsFirewallSettingsState();
+}
+
+final class _WindowsFirewallSettingsState
+    extends State<_WindowsFirewallSettings> {
+  Uri? _engineEndpoint;
+  String? _error;
+  bool _isLoadingEndpoint = true;
+  bool _isUpdating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refreshEndpoint());
+  }
+
+  Future<Uri?> _refreshEndpoint() async {
+    final Uri? endpoint = await discoverLocalEngineLanEndpoint(
+      preferDev: _preferDevEngine,
+    );
+    if (mounted) {
+      setState(() {
+        _engineEndpoint = endpoint;
+        _isLoadingEndpoint = false;
+      });
+    }
+    return endpoint;
+  }
+
+  Future<void> _setFirewallRule(bool enabled) async {
+    setState(() {
+      _error = null;
+      _isUpdating = true;
+    });
+    try {
+      final Uri? endpoint = enabled ? await _refreshEndpoint() : null;
+      final int? port = endpoint?.port;
+      if (enabled && endpoint == null) {
+        throw StateError(
+          'No running local engine was found. Start the engine before enabling LAN access.',
+        );
+      }
+      await _windowsFirewallChannel.invokeMethod<void>(
+        'setEngineRule',
+        <String, Object>{'enabled': enabled, 'port': ?port},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'Windows Firewall now allows local-subnet access on TCP $port.'
+                : 'The Subconscious Engine firewall rule was removed.',
+          ),
+        ),
+      );
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.code == 'cancelled'
+            ? 'The Windows administrator prompt was cancelled.'
+            : error.message ?? 'Windows could not update the firewall rule.';
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _isUpdating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Uri? endpoint = _engineEndpoint;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const _FieldLabel('Engine IP Address'),
+        _EngineConnectionValueField(
+          value: endpoint?.host,
+          unavailableText: _isLoadingEndpoint
+              ? 'Finding the local engine…'
+              : 'No running local engine detected',
+          copyMessage: 'Engine IP address copied',
+          icon: FluentIcons.globe_20_regular,
+        ),
+        const _FieldLabel('Engine Port'),
+        _EngineConnectionValueField(
+          value: endpoint?.port.toString(),
+          unavailableText: _isLoadingEndpoint
+              ? 'Finding the local engine…'
+              : 'No running local engine detected',
+          copyMessage: 'Engine port copied',
+          icon: FluentIcons.plug_connected_20_regular,
+        ),
+        const _FieldLabel('Mobile and LAN Access'),
+        const Text(
+          'Allow devices on the local subnet to reach this computer’s engine. Windows will request administrator approval. The engine must also be started with --lan.',
+        ),
+        const SizedBox(height: 8),
+        Text(
+          endpoint == null
+              ? 'No firewall port is currently available.'
+              : 'Rule scope: TCP ${endpoint.port} · LocalSubnet · active Private/Public profile',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        if (_error != null) _SettingsError(error: _error!),
+        const SizedBox(height: 12),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            OutlinedButton(
+              onPressed: _isUpdating ? null : () => _setFirewallRule(false),
+              child: const Text('Remove access'),
+            ),
+            FilledButton.icon(
+              onPressed: _isUpdating || _isLoadingEndpoint || endpoint == null
+                  ? null
+                  : () => _setFirewallRule(true),
+              icon: const Icon(FluentIcons.shield_20_regular, size: 16),
+              label: Text(
+                _isUpdating ? 'Waiting for Windows…' : 'Allow access',
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+final class _EngineConnectionValueField extends StatelessWidget {
+  const _EngineConnectionValueField({
+    required this.value,
+    required this.unavailableText,
+    required this.copyMessage,
+    required this.icon,
+  });
+
+  final String? value;
+  final String unavailableText;
+  final String copyMessage;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      Expanded(
+        child: SizedBox(
+          height: 32,
+          child: TextFormField(
+            key: ValueKey<String?>(value),
+            initialValue: value ?? unavailableText,
+            readOnly: true,
+            textAlignVertical: TextAlignVertical.center,
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+              prefixIcon: Icon(icon, size: 17),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      _WindowsIconButton(
+        tooltip: copyMessage,
+        icon: FluentIcons.copy_20_regular,
+        onPressed: value == null
+            ? null
+            : () async {
+                await Clipboard.setData(ClipboardData(text: value!));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(copyMessage)));
+                }
+              },
+      ),
+    ],
+  );
+}
+
+final class _RemoteEngineConnectionForm extends StatefulWidget {
+  const _RemoteEngineConnectionForm({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  State<_RemoteEngineConnectionForm> createState() =>
+      _RemoteEngineConnectionFormState();
+}
+
+final class _RemoteEngineConnectionFormState
+    extends State<_RemoteEngineConnectionForm> {
+  late final TextEditingController _host;
+  late final TextEditingController _port;
+  final TextEditingController _token = TextEditingController();
+  String? _error;
+  bool _isConnecting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _host = TextEditingController(text: widget.controller.explicitHost);
+    _port = TextEditingController(text: widget.controller.explicitPort);
+  }
+
+  @override
+  void dispose() {
+    _host.dispose();
+    _port.dispose();
+    _token.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect() async {
+    setState(() {
+      _error = null;
+      _isConnecting = true;
+    });
+    final String? error = await widget.controller.connectToRemoteEngine(
+      host: _host.text,
+      port: _port.text,
+      token: _token.text,
+    );
+    if (!mounted) return;
+    setState(() {
+      _error = error;
+      _isConnecting = false;
+      if (error == null) _token.clear();
+    });
+    if (error == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Connected to the engine.')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      const Text(
+        'Connect to an engine on this Wi-Fi network. Enter the address and port shown by the engine, then its joining token.',
+      ),
+      const _FieldLabel('Engine host or IP address'),
+      TextField(
+        controller: _host,
+        enabled: !_isConnecting,
+        autocorrect: false,
+        enableSuggestions: false,
+        keyboardType: TextInputType.url,
+        textInputAction: TextInputAction.next,
+        decoration: const InputDecoration(hintText: '192.168.1.42'),
+      ),
+      const _FieldLabel('Engine port'),
+      TextField(
+        controller: _port,
+        enabled: !_isConnecting,
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.next,
+        decoration: const InputDecoration(hintText: 'Port shown by the engine'),
+      ),
+      const _FieldLabel('Joining token'),
+      TextField(
+        controller: _token,
+        enabled: !_isConnecting,
+        autocorrect: false,
+        enableSuggestions: false,
+        obscureText: true,
+        decoration: InputDecoration(
+          hintText: widget.controller.hasExplicitToken
+              ? 'A token is already configured'
+              : 'Paste the joining token',
+          helperText: widget.controller.hasExplicitToken
+              ? 'Leave blank to reuse the configured token for this session.'
+              : 'The token is retained only for this app session.',
+        ),
+        onSubmitted: (_) => _isConnecting ? null : _connect(),
+      ),
+      if (_error != null) _SettingsError(error: _error!),
+      const SizedBox(height: 12),
+      Align(
+        alignment: Alignment.centerRight,
+        child: FilledButton.icon(
+          onPressed: _isConnecting ? null : _connect,
+          icon: const Icon(FluentIcons.plug_connected_20_regular, size: 16),
+          label: Text(_isConnecting ? 'Connecting…' : 'Connect'),
+        ),
+      ),
     ],
   );
 }

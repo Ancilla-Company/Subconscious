@@ -44,6 +44,45 @@ Future<EngineRepository?> resolveEngineRepository({
   return null;
 }
 
+Future<int?> discoverLocalEnginePort({required bool preferDev}) async {
+  final String? directory = engineDataDirectory(preferDev: preferDev);
+  if (directory != null) {
+    try {
+      final EngineRuntimeInfo runtime = await EngineDiscovery(
+        loader: _FileRuntimeInfoLoader(directory),
+        healthProbe: _isReachable,
+      ).discover();
+      return runtime.port;
+    } on Object {
+      // Fall through to the stable development endpoint when requested.
+    }
+  }
+  if (preferDev && await _isReachable(_developmentRuntime)) {
+    return _developmentRuntime.port;
+  }
+  return null;
+}
+
+Future<Uri?> discoverLocalEngineLanEndpoint({required bool preferDev}) async {
+  final int? port = await discoverLocalEnginePort(preferDev: preferDev);
+  if (port == null) return null;
+  try {
+    final List<String> candidates = <String>[
+      for (final NetworkInterface interface in await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+        includeLinkLocal: false,
+      ))
+        for (final InternetAddress address in interface.addresses)
+          if (!address.isLoopback && !address.isLinkLocal) address.address,
+    ]..sort();
+    if (candidates.isEmpty) return null;
+    return Uri(scheme: 'http', host: candidates.first, port: port);
+  } on SocketException {
+    return null;
+  }
+}
+
 Future<bool> _isReachable(EngineRuntimeInfo runtime) async {
   final RestEngineClient client = RestEngineClient(
     baseUri: runtime.httpUri,

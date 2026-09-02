@@ -100,11 +100,20 @@ final class _WorkspaceViewerState {
   final Set<String> expandedDirectoryKeys;
 }
 
-typedef EngineRepositoryResolver = Future<EngineRepository?> Function();
+typedef EngineRepositoryResolver = Future<EngineRepository?> Function({
+  Uri? explicitEndpoint,
+  String? explicitToken,
+});
 
 /// Shared engine and context-panel state consumed by every Flutter layout.
 final class DashboardController extends ChangeNotifier {
-  DashboardController(this._repositoryResolver, {this.initialWorkspaceUuid}) {
+  DashboardController(
+    this._repositoryResolver, {
+    this.initialWorkspaceUuid,
+    Uri? initialEndpoint,
+    String? initialToken,
+  }) : _explicitEndpoint = initialEndpoint,
+       _explicitToken = initialToken {
     settings = DashboardSettingsController(
       repositoryProvider: () => repository,
     );
@@ -121,8 +130,58 @@ final class DashboardController extends ChangeNotifier {
   final String? initialWorkspaceUuid;
   late final DashboardSettingsController settings;
   EngineRepository? _repository;
+  Uri? _explicitEndpoint;
+  String? _explicitToken;
 
   EngineRepository? get repository => _repository;
+  Uri? get explicitEndpoint => _explicitEndpoint;
+  String? get explicitHost => _explicitEndpoint?.host;
+  String? get explicitPort => _explicitEndpoint == null
+      ? null
+      : '${_explicitEndpoint!.hasPort ? _explicitEndpoint!.port : 80}';
+  bool get hasExplicitToken => _explicitToken?.isNotEmpty ?? false;
+
+  /// Replaces the active engine connection with a LAN endpoint and token.
+  /// The connection details stay in memory for the current app session.
+  Future<String?> connectToRemoteEngine({
+    required String host,
+    required String port,
+    required String token,
+  }) async {
+    final String normalizedHost = _normalizeRemoteHost(host);
+    final int? parsedPort = int.tryParse(port.trim());
+    final String trimmedToken = token.trim();
+    if (normalizedHost.isEmpty ||
+        normalizedHost.contains(RegExp(r'[\s/?#]')) ||
+        parsedPort == null ||
+        parsedPort < 1 ||
+        parsedPort > 65535 ||
+        (trimmedToken.isEmpty && !hasExplicitToken)) {
+      return 'Enter a host, a port from 1 to 65535, and a joining token.';
+    }
+
+    try {
+      _explicitEndpoint = Uri(
+        scheme: 'http',
+        host: normalizedHost,
+        port: parsedPort,
+      );
+    } on FormatException {
+      return 'Enter a valid LAN host or IP address.';
+    }
+    if (trimmedToken.isNotEmpty) _explicitToken = trimmedToken;
+    await reconnectNow();
+    return isConnected
+        ? null
+        : '${error ?? 'Unable to connect to the specified engine.'}';
+  }
+
+  static String _normalizeRemoteHost(String host) {
+    final String trimmed = host.trim();
+    return trimmed.startsWith('[') && trimmed.endsWith(']')
+        ? trimmed.substring(1, trimmed.length - 1)
+        : trimmed;
+  }
 
   EngineLlmProvider? chatProvider;
   EngineConnectionStatus connectionStatus = EngineConnectionStatus.connecting;
@@ -747,8 +806,10 @@ final class DashboardController extends ChangeNotifier {
         await _closeRepository(currentRepository);
       }
 
-      final EngineRepository? discoveredRepository = await _repositoryResolver()
-          .timeout(requestTimeout);
+      final EngineRepository? discoveredRepository = await _repositoryResolver(
+        explicitEndpoint: _explicitEndpoint,
+        explicitToken: _explicitToken,
+      ).timeout(requestTimeout);
       if (discoveredRepository == null) {
         throw StateError(
           'No reachable Subconscious engine was discovered. Start the engine or configure an explicit endpoint.',

@@ -24,6 +24,11 @@ Future<EngineRepository?> resolveEngineRepository({
   );
 }
 
+Future<int?> discoverLocalEnginePort({required bool preferDev}) async => null;
+
+Future<Uri?> discoverLocalEngineLanEndpoint({required bool preferDev}) async =>
+    null;
+
 String? engineDataDirectory({required bool preferDev}) => null;
 
 Future<void> openEngineDataDirectory(String path) async {

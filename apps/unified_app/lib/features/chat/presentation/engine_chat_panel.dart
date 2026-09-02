@@ -62,6 +62,8 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   bool _showThreadSettings = false;
   Object? _error;
   int _modelLoadVersion = 0;
+  StreamSubscription<String>? _sendSubscription;
+  Completer<void>? _sendCompletion;
 
   @override
   void initState() {
@@ -75,6 +77,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   void didUpdateWidget(covariant EngineChatPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.provider != widget.provider) {
+      unawaited(_cancelActiveSend());
       oldWidget.provider.removeListener(_onProviderChanged);
       widget.provider.addListener(_onProviderChanged);
       _models = const <ModelInfo>[];
@@ -136,8 +139,33 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
         provider = await materialize(content);
       }
       _composer.clear();
-      await for (final String _ in provider.sendMessageStream(content)) {
-        // Provider notifications redraw the streaming response.
+      final Completer<void> completion = Completer<void>();
+      final StreamSubscription<String> subscription = provider
+          .sendMessageStream(content)
+          .listen(
+            (_) {
+              // Provider notifications redraw the streaming response.
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              if (!completion.isCompleted) {
+                completion.completeError(error, stackTrace);
+              }
+            },
+            onDone: () {
+              if (!completion.isCompleted) completion.complete();
+            },
+            cancelOnError: true,
+          );
+      _sendSubscription = subscription;
+      _sendCompletion = completion;
+      try {
+        await completion.future;
+      } finally {
+        if (identical(_sendSubscription, subscription)) {
+          _sendSubscription = null;
+          _sendCompletion = null;
+        }
+        await subscription.cancel();
       }
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
@@ -145,6 +173,15 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       if (mounted) setState(() => _isSending = false);
       _scheduleScrollToBottom();
     }
+  }
+
+  Future<void> _cancelActiveSend() async {
+    final StreamSubscription<String>? subscription = _sendSubscription;
+    final Completer<void>? completion = _sendCompletion;
+    _sendSubscription = null;
+    _sendCompletion = null;
+    await subscription?.cancel();
+    if (completion != null && !completion.isCompleted) completion.complete();
   }
 
   void _createThread() {
@@ -181,6 +218,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   @override
   void dispose() {
     _modelLoadVersion++;
+    unawaited(_cancelActiveSend());
     widget.provider.removeListener(_onProviderChanged);
     _composer.dispose();
     _scrollController.dispose();

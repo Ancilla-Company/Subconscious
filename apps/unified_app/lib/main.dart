@@ -19,11 +19,13 @@ Future<void> main() async {
   const bool preferDev = bool.fromEnvironment('SUBCONSCIOUS_ENGINE_DEV');
   final Uri? explicitEndpoint = Uri.tryParse(rawUrl);
   final DashboardController controller = DashboardController(
-    () => resolveEngineRepository(
+    ({Uri? explicitEndpoint, String? explicitToken}) => resolveEngineRepository(
       explicitEndpoint: explicitEndpoint,
-      explicitToken: token,
+      explicitToken: explicitToken ?? token,
       preferDev: preferDev,
     ),
+    initialEndpoint: explicitEndpoint,
+    initialToken: token,
     initialWorkspaceUuid: const String.fromEnvironment(
       'SUBCONSCIOUS_WORKSPACE_UUID',
     ),

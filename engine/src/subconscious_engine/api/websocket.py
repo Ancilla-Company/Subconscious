@@ -1,6 +1,7 @@
 """Camel-case-envelope WebSocket protocol for chat, tools, and approvals."""
 
 import asyncio
+from contextlib import suppress
 import json
 from typing import Any
 from uuid import uuid4
@@ -55,8 +56,7 @@ class WebSocketSession:
         except (WebSocketDisconnect, json.JSONDecodeError, ValueError):
             pass
         finally:
-            if self.active_turn is not None:
-                self.active_turn.cancel()
+            await self._stop_active_turn()
             for _, future in self.pending.values():
                 future.cancel()
             await self.app.state.client_registry.release(self.client_id)
@@ -110,8 +110,20 @@ class WebSocketSession:
         self.active_turn = asyncio.create_task(self._run_turn(turn_id, data))
 
     async def _cancel(self, turn_id: Any) -> None:
-        if isinstance(turn_id, str) and turn_id == self.active_turn_id and self.active_turn is not None:
-            self.active_turn.cancel()
+        if isinstance(turn_id, str) and turn_id == self.active_turn_id:
+            await self._stop_active_turn()
+
+    async def _stop_active_turn(self) -> None:
+        task = self.active_turn
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+        if self.active_turn is task:
+            self.active_turn = None
+            self.active_turn_id = None
 
     async def _approval(self, turn_id: str | None, data: dict[str, Any]) -> None:
         approval_id = data.get("approval_id")
@@ -215,7 +227,12 @@ class WebSocketSession:
                     self.pending.pop(approval_id, None)
                     if not future.done():
                         future.cancel()
-            self.active_turn_id = None
+            current_task = asyncio.current_task()
+            if self.active_turn is None:
+                self.active_turn_id = None
+            elif self.active_turn is current_task:
+                self.active_turn = None
+                self.active_turn_id = None
 
     async def _request_approval(self, turn_id: str, thread_uuid: str, call: ToolCallPart) -> bool:
         approval_id = uuid4().hex
