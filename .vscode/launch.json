@@ -2,57 +2,24 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python Engine (Dev)",
+      "name": "Engine (Dev, LAN)",
       "type": "debugpy",
       "request": "launch",
       "module": "subconscious_engine",
       "cwd": "${workspaceFolder}/engine",
       "python": "${command:python.interpreterPath}",
       "args": [
-        "--dev"
-      ],
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}/engine/src"
-      },
-      "justMyCode": true,
-      "console": "integratedTerminal"
-    },
-    {
-      "name": "Python Engine (Dev, Custom Port)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "subconscious_engine",
-      "cwd": "${workspaceFolder}/engine",
-      "python": "${command:python.interpreterPath}",
-      "args": [
-        "--dev",
-        "--port",
-        "${input:pythonEnginePort}"
-      ],
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}/engine/src"
-      },
-      "justMyCode": true,
-      "console": "integratedTerminal"
-    },
-    {
-      "name": "Python Engine (Dev, LAN)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "subconscious_engine",
-      "cwd": "${workspaceFolder}/engine",
-      "python": "${command:python.interpreterPath}",
-      "args": [
+        "start",
         "--dev",
         "--lan",
         "--port",
-        "${input:pythonEnginePort}"
+        "50505"
       ],
       "env": {
         "PYTHONPATH": "${workspaceFolder}/engine/src"
       },
       "justMyCode": true,
-      "console": "integratedTerminal"
+      "console": "internalConsole"
     },
     {
       "name": "Unified Flutter App (Connected)",
@@ -63,33 +30,10 @@
       "deviceId": "${input:flutterDevice}",
       "toolArgs": [
         "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
-        "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default"
-      ],
-      "flutterMode": "debug",
-      "console": "terminal"
-    },
-    {
-      "name": "Unified Flutter App (Android Emulator, Connected)",
-      "type": "dart",
-      "request": "launch",
-      "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
-      "cwd": "${workspaceFolder}/apps/unified_app",
-      "deviceId": "emulator-5554",
-      "toolArgs": [
-        "--dart-define=SUBCONSCIOUS_ENGINE_URL=http://10.0.2.2:55681",
+        "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
         "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token",
-        "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default"
+        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=${input:pythonEnginePort}",
       ],
-      "flutterMode": "debug",
-      "console": "terminal"
-    },
-    {
-      "name": "Unified Flutter App (Standalone)",
-      "type": "dart",
-      "request": "launch",
-      "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
-      "cwd": "${workspaceFolder}/apps/unified_app",
-      "deviceId": "${input:flutterDevice}",
       "flutterMode": "debug",
       "console": "terminal"
     },
@@ -108,22 +52,16 @@
   ],
   "inputs": [
     {
-      "id": "pythonEnginePort",
-      "type": "promptString",
-      "description": "Python engine port (0 selects an available port)",
-      "default": "7331",
-    },
-    {
       "id": "flutterDevice",
       "type": "pickString",
       "description": "Select a Flutter target: Windows, Android emulator, Chrome, or Edge",
       "options": [
+        "edge",
+        "chrome",
         "windows",
         "emulator-5554",
-        "chrome",
-        "edge"
       ],
-      "default": "emulator-5554"
+      "default": "windows"
     }
   ]
 }

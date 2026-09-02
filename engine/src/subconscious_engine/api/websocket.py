@@ -1,8 +1,10 @@
 """Camel-case-envelope WebSocket protocol for chat, tools, and approvals."""
 
 import asyncio
+from collections.abc import Callable
 from contextlib import suppress
 import json
+from threading import RLock
 from typing import Any
 from uuid import uuid4
 
@@ -19,21 +21,65 @@ from subconscious_engine.tools import ToolContext, merge_tool_config
 
 class ClientRegistry:
     def __init__(self) -> None:
-        self._clients: set[str] = set()
-        self._lock = asyncio.Lock()
+        self._clients: dict[str, str] = {}
+        self._listeners: set[Callable[[tuple[str, ...]], None]] = set()
+        self._lock = RLock()
 
-    async def acquire(self, requested: str | None) -> str | None:
-        async with self._lock:
+    async def acquire(
+        self, requested: str | None, *, label: str | None = None
+    ) -> str | None:
+        with self._lock:
             identifier = requested or uuid4().hex
             if identifier in self._clients:
                 return None
-            self._clients.add(identifier)
-            return identifier
+            display_name = label.strip() if isinstance(label, str) else ""
+            self._clients[identifier] = display_name or identifier
+            snapshot = self._snapshot_locked()
+        self._notify(snapshot)
+        return identifier
 
     async def release(self, identifier: str | None) -> None:
-        if identifier is not None:
-            async with self._lock:
-                self._clients.discard(identifier)
+        if identifier is None:
+            return
+        with self._lock:
+            if self._clients.pop(identifier, None) is None:
+                return
+            snapshot = self._snapshot_locked()
+        self._notify(snapshot)
+
+    def subscribe(
+        self, listener: Callable[[tuple[str, ...]], None]
+    ) -> Callable[[], None]:
+        with self._lock:
+            self._listeners.add(listener)
+            snapshot = self._snapshot_locked()
+        self._notify_listener(listener, snapshot)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                self._listeners.discard(listener)
+
+        return unsubscribe
+
+    def snapshot(self) -> tuple[str, ...]:
+        with self._lock:
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients.values(), key=str.casefold))
+
+    def _notify(self, snapshot: tuple[str, ...]) -> None:
+        with self._lock:
+            listeners = tuple(self._listeners)
+        for listener in listeners:
+            self._notify_listener(listener, snapshot)
+
+    @staticmethod
+    def _notify_listener(
+        listener: Callable[[tuple[str, ...]], None], snapshot: tuple[str, ...]
+    ) -> None:
+        with suppress(Exception):
+            listener(snapshot)
 
 
 class WebSocketSession:
@@ -94,7 +140,18 @@ class WebSocketSession:
 
     async def _hello(self, data: dict[str, Any]) -> None:
         requested = data.get("clientId") if isinstance(data.get("clientId"), str) else None
-        identifier = await self.app.state.client_registry.acquire(requested)
+        client_name = data.get("clientName") if isinstance(data.get("clientName"), str) else None
+        peer = getattr(self.socket, "client", None)
+        peer_host = getattr(peer, "host", None)
+        peer_port = getattr(peer, "port", None)
+        peer_label = (
+            f"{peer_host}:{peer_port}"
+            if isinstance(peer_host, str) and isinstance(peer_port, int)
+            else peer_host if isinstance(peer_host, str) else None
+        )
+        identifier = await self.app.state.client_registry.acquire(
+            requested, label=client_name or requested or peer_label
+        )
         if identifier is None:
             await self._send("client.hello.reject", {"reason": "Client_ID already in use by an active connection."})
             return
@@ -196,11 +253,23 @@ class WebSocketSession:
                         "threadId": thread.uuid, "workspaceId": workspace.uuid,
                         "title": thread.title or ""})
                 await self._publish_message(user_message, thread_uuid)
-                tools_raw = merge_tool_config(workspace.tools_config, thread.tools_config)
-                approval = ApprovalConfig.from_json(thread.approval_config or workspace.approval_config)
-                tools = self.app.state.tool_registry.tools_for_config(tools_raw,
-                    ToolContext(self.app.state.rag_service, self.app.state.database,
-                                workspace.uuid, thread.id), approval)
+                tools_enabled = data.get("tools_enabled", True) is not False
+                tools = []
+                if tools_enabled:
+                    tools_raw = merge_tool_config(workspace.tools_config, thread.tools_config)
+                    approval = ApprovalConfig.from_json(
+                        thread.approval_config or workspace.approval_config
+                    )
+                    tools = self.app.state.tool_registry.tools_for_config(
+                        tools_raw,
+                        ToolContext(
+                            self.app.state.rag_service,
+                            self.app.state.database,
+                            workspace.uuid,
+                            thread.id,
+                        ),
+                        approval,
+                    )
                 result = await self.app.state.agent_manager.execute(config, content, history, tools,
                     lambda call: self._request_approval(turn_id, thread_uuid, call))
                 for record in result.tool_records:

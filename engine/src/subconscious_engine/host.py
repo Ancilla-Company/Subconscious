@@ -23,7 +23,7 @@ from .services.rag_service import WorkspaceRagService
 from .storage import Database
 from .tools import ToolRegistry
 
-StatusIndicatorFactory = Callable[[str], BackgroundStatusIndicator]
+StatusIndicatorFactory = Callable[..., BackgroundStatusIndicator]
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,10 @@ class EngineHost:
         host = self._lan_address() if self.config.lan_enabled else "127.0.0.1"
         return f"http://{host}:{self.bound_port}/api/v1/"
 
+    @property
+    def local_address(self) -> str:
+        return f"http://localhost:{self.bound_port}/api/v1/"
+
     async def wait_until_ready(self, timeout: float = 10.0) -> None:
         await asyncio.wait_for(self._ready.wait(), timeout)
 
@@ -117,6 +121,7 @@ class EngineHost:
         self._loop = asyncio.get_running_loop()
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_task: asyncio.Task[None] | None = None
+        unsubscribe_clients: Callable[[], None] | None = None
         runtime_written = False
         try:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -150,8 +155,16 @@ class EngineHost:
             if self.config.lan_enabled:
                 logger.info("LAN joining token: %s", self.token.value)
             if not self.config.headless:
-                self._status_indicator = self._status_indicator_factory(self.address)
-                self._status_indicator.start(self.request_stop)
+                self._status_indicator = self._status_indicator_factory(
+                    self.address,
+                    local_address=self.local_address,
+                    lan_enabled=self.config.lan_enabled,
+                    dev=self.config.dev,
+                )
+                unsubscribe_clients = self.app.state.client_registry.subscribe(
+                    self._status_indicator.set_clients
+                )
+                self._status_indicator.start(self.request_stop, self.token.value)
             self._ready.set()
             await server_task
         finally:
@@ -159,6 +172,8 @@ class EngineHost:
             if server_task is not None and not server_task.done():
                 with suppress(asyncio.CancelledError):
                     await server_task
+            if unsubscribe_clients is not None:
+                unsubscribe_clients()
             if self._status_indicator is not None:
                 self._status_indicator.stop()
                 self._status_indicator = None

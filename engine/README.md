@@ -4,14 +4,41 @@ Python port of `subconscious-net/src/Subconscious.Engine`, with the .NET engine 
 
 The engine provides loopback-first hosting, bearer authentication, atomic `runtime.json` discovery, async SQLite persistence, REST CRUD, encrypted model and configured-tool credentials, scope-checked workspace files, local RAG indexing/retrieval, Pydantic AI execution, approval-gated built-in tools, SSE fan-out, and the camel-case-envelope WebSocket chat protocol.
 
-## Run
+## CLI
+
+Install the package in editable mode during development; this adds both the
+`subconscious` command and the compatibility alias `subconscious-engine`:
 
 ```powershell
 conda run -n subconscious python -m pip install -e .
-conda run -n subconscious subconscious-engine --dev
+subconscious
+subconscious start --dev
 ```
 
-Production mode uses a generated token and an OS-assigned port. Development mode defaults to port `55681` and token `subconscious-dev-token`. Pass `--data-dir` to isolate local state. Desktop runs show a system tray icon with the active endpoint and a graceful **Quit** action; pass `--headless` on servers or CI machines without a desktop session. Use `--lan` to bind the API to all IPv4 interfaces.
+Running `subconscious` without a command prints help. `subconscious start`
+runs the engine with its tray status indicator. Add `--detached` to launch it as
+a background process, and independently add `--no-tray` when no tray icon is
+wanted. Development mode defaults to port `55681` and token
+`subconscious-dev-token`; production chooses an available port and generated
+token. Use `--lan` for all-interface IPv4 binding.
+
+The tray menu can copy a future-compatible join command containing the engine
+URL and joining token. It also exposes desktop, browser, and web UI launch
+stubs; activating the tray icon invokes the desktop stub. Treat copied join
+commands as credentials because they contain the bearer token.
+
+A single response can be invoked as an agent harness against the running
+engine:
+
+```powershell
+subconscious chat "Summarize this workspace" --workspace General
+subconscious chat "Continue" --thread <thread-uuid> --tools
+```
+
+Without `--workspace` or `--thread`, chat uses (or creates) the `General`
+workspace and starts a new thread. Responses go to stdout; a newly created
+thread ID is written to stderr. The `tui`, `desktop`, `web`, and `extension`
+client launch commands are currently reserved stubs.
 
 ## API additions
 

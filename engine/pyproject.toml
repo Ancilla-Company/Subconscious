@@ -20,9 +20,11 @@ dependencies = [
   "sqlalchemy==2.0.45",
   "starlette==0.47.3",
   "uvicorn==0.40.0",
+  "websockets==15.0.1",
 ]
 
 [project.scripts]
+subconscious = "subconscious_engine.__main__:main"
 subconscious-engine = "subconscious_engine.__main__:main"
 
 [tool.setuptools.packages.find]

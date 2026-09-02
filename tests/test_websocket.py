@@ -42,21 +42,29 @@ class FakeToolCall:
         return {"path": "notes.txt"}
 
 
-def test_client_registry_rejects_duplicates_generates_ids_and_releases_idempotently():
+def test_client_registry_rejects_duplicates_notifies_snapshots_and_releases_idempotently():
     async def scenario():
         registry = ClientRegistry()
-        assert await registry.acquire("desktop") == "desktop"
+        snapshots = []
+        unsubscribe = registry.subscribe(snapshots.append)
+        assert snapshots == [()]
+        assert await registry.acquire("desktop", label="Desktop App") == "desktop"
+        assert registry.snapshot() == ("Desktop App",)
         assert await registry.acquire("desktop") is None
         with patch(
             "subconscious_engine.api.websocket.uuid4",
             return_value=SimpleNamespace(hex="generated"),
         ):
-            assert await registry.acquire(None) == "generated"
+            assert await registry.acquire(None, label="Android") == "generated"
             assert await registry.acquire(None) is None
+        assert registry.snapshot() == ("Android", "Desktop App")
         await registry.release("desktop")
         await registry.release("desktop")
         await registry.release(None)
+        assert snapshots[-1] == ("Android",)
+        unsubscribe()
         assert await registry.acquire("desktop") == "desktop"
+        assert snapshots[-1] == ("Android",)
     run(scenario())
 
 

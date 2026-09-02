@@ -1,0 +1,53 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Flutter: Start Android Emulator",
+      "type": "shell",
+      "command": "flutter",
+      "args": [
+        "emulators",
+        "--launch",
+        "${input:androidEmulator}"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": false
+      }
+    },
+    {
+      "label": "Flutter: Build Standalone Android APK",
+      "type": "shell",
+      "command": "flutter",
+      "args": [
+        "build",
+        "apk",
+        "--release"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/apps/unified_app"
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Builds build/app/outputs/flutter-apk/app-release.apk for standalone device testing.",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": false
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "androidEmulator",
+      "type": "pickString",
+      "description": "Select the Android emulator to start",
+      "options": [
+        "Medium_Phone_API_35",
+      ],
+      "default": "Medium_Phone_API_35"
+    }
+  ]
+}

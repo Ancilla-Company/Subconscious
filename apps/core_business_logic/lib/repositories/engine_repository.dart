@@ -9,26 +9,65 @@ final class EngineRepository {
 
   Future<void> connect() => socket.connect();
   Future<List<Workspace>> listWorkspaces() => rest.listWorkspaces();
-  Future<List<ThreadInfo>> listThreads(String workspaceUuid) => rest.listThreads(workspaceUuid);
-  Future<List<ChatMessage>> listMessages(String threadUuid) => rest.listMessages(threadUuid);
+  Future<List<ThreadInfo>> listThreads(String workspaceUuid) =>
+      rest.listThreads(workspaceUuid);
+  Future<List<ChatMessage>> listMessages(String threadUuid) =>
+      rest.listMessages(threadUuid);
   Future<List<ModelInfo>> listModels() => rest.listModels();
 
-  Stream<String> streamChat({required String content, String? threadUuid, String? workspaceUuid, String? modelId}) async* {
-    final String turnId = socket.sendChat(content: content, threadUuid: threadUuid, workspaceUuid: workspaceUuid, modelId: modelId);
-    const Set<String> terminalFrameTypes = <String>{'chat.delta', 'chat.done', 'chat.error', 'chat.cancelled'};
-    await for (final WireFrame frame in socket.frames) {
-      if (frame.id != turnId || !terminalFrameTypes.contains(frame.type)) continue;
-      final Map<String, dynamic> data = frame.data ?? <String, dynamic>{};
-      switch (frame.type) {
-        case 'chat.delta':
-          final String delta = data['delta'] as String? ?? '';
-          if (delta.isNotEmpty) yield delta;
-        case 'chat.done':
-          return;
-        case 'chat.cancelled':
-          throw StateError('Chat turn was cancelled.');
-        case 'chat.error':
-          throw StateError(data['error'] as String? ?? 'Chat turn failed.');
+  Stream<String> streamChat({
+    required String content,
+    String? threadUuid,
+    String? workspaceUuid,
+    String? modelId,
+  }) async* {
+    final String turnId = socket.sendChat(
+      content: content,
+      threadUuid: threadUuid,
+      workspaceUuid: workspaceUuid,
+      modelId: modelId,
+    );
+    const Set<String> turnFrameTypes = <String>{
+      'chat.delta',
+      'chat.done',
+      'chat.error',
+      'chat.cancelled',
+    };
+    bool receivedTerminalFrame = false;
+    try {
+      await for (final WireFrame frame in socket.frames) {
+        if (frame.type == 'error' && frame.id == null) {
+          throw StateError(
+            frame.data?['error'] as String? ??
+                'Engine WebSocket request failed.',
+          );
+        }
+        if (frame.id != turnId || !turnFrameTypes.contains(frame.type)) {
+          continue;
+        }
+        final Map<String, dynamic> data = frame.data ?? <String, dynamic>{};
+        switch (frame.type) {
+          case 'chat.delta':
+            final String delta = data['delta'] as String? ?? '';
+            if (delta.isNotEmpty) yield delta;
+          case 'chat.done':
+            receivedTerminalFrame = true;
+            return;
+          case 'chat.cancelled':
+            receivedTerminalFrame = true;
+            throw StateError('Chat turn was cancelled.');
+          case 'chat.error':
+            receivedTerminalFrame = true;
+            throw StateError(data['error'] as String? ?? 'Chat turn failed.');
+        }
+      }
+    } finally {
+      if (!receivedTerminalFrame && socket.isConnected) {
+        try {
+          socket.cancelChat(turnId);
+        } on Object {
+          // The transport may close while a stream cancellation is propagating.
+        }
       }
     }
   }

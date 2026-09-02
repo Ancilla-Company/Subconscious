@@ -14,15 +14,24 @@ from subconscious_engine.host import EngineHost
 
 
 class FakeIndicator:
-    def __init__(self, address):
+    def __init__(self, address, *, local_address, lan_enabled, dev):
         self.address = address
+        self.local_address = local_address
+        self.lan_enabled = lan_enabled
+        self.dev = dev
+        self.token = None
         self.on_quit = None
+        self.client_updates = []
         self.start_calls = 0
         self.stop_calls = 0
 
-    def start(self, on_quit):
+    def start(self, on_quit, token):
         self.on_quit = on_quit
+        self.token = token
         self.start_calls += 1
+
+    def set_clients(self, clients):
+        self.client_updates.append(clients)
 
     def stop(self):
         self.stop_calls += 1
@@ -32,8 +41,8 @@ class IndicatorFactory:
     def __init__(self):
         self.instances = []
 
-    def __call__(self, address):
-        indicator = FakeIndicator(address)
+    def __call__(self, address, **status):
+        indicator = FakeIndicator(address, **status)
         self.instances.append(indicator)
         return indicator
 
@@ -119,12 +128,22 @@ def test_host_starts_tray_after_readiness_and_tray_quit_stops_server(tmp_path):
         await host.wait_until_ready()
         indicator = factory.instances[-1]
         assert indicator.address == host.address
+        assert indicator.local_address == host.local_address
+        assert indicator.lan_enabled is False
+        assert indicator.dev is False
+        assert indicator.token == host.token.value
         assert indicator.start_calls == 1
+        assert indicator.client_updates == [()]
         assert indicator.on_quit is not None
 
+        await host.app.state.client_registry.acquire("desktop", label="Desktop App")
+        assert indicator.client_updates[-1] == ("Desktop App",)
         indicator.on_quit()
         await asyncio.wait_for(task, 10)
         assert indicator.stop_calls == 1
+        updates_after_stop = len(indicator.client_updates)
+        await host.app.state.client_registry.acquire("mobile", label="Android")
+        assert len(indicator.client_updates) == updates_after_stop
         assert not (tmp_path / "runtime.json").exists()
 
     run(scenario())

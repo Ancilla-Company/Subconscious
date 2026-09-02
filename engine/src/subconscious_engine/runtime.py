@@ -17,6 +17,16 @@ class RuntimeInfo(BaseModel):
     node_id: str | None = None
 
 
+class RuntimeInfoReader:
+    @classmethod
+    def read(cls, data_directory: Path) -> RuntimeInfo | None:
+        source = RuntimeInfoWriter.path_for(data_directory)
+        try:
+            return RuntimeInfo.model_validate_json(source.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+
 class RuntimeInfoWriter:
     file_name = "runtime.json"
 

@@ -31,15 +31,15 @@ Future<EngineRepository?> resolveEngineRepository({
     }
   }
 
-  if (preferDev && await _isReachable(_developmentRuntime)) {
-    return _repositoryFromRuntime(_developmentRuntime);
-  }
-
   final EngineRepository? explicit = _repositoryFromExplicit(
     explicitEndpoint,
     explicitToken,
   );
   if (explicit != null) return explicit;
+
+  if (preferDev && await _isReachable(_developmentRuntime)) {
+    return _repositoryFromRuntime(_developmentRuntime);
+  }
   if (discoveryError != null) throw discoveryError;
   return null;
 }

@@ -1,21 +1,30 @@
-"""Pydantic AI model construction, history conversion, and approval resumption."""
+""" Pydantic AI model construction, history conversion, and approval resumption """
 
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
 import os
 from typing import Any
+from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Sequence
 
-from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, Tool, UsageLimits
-from pydantic_ai.messages import (ModelMessage, ModelRequest, ModelResponse, SystemPromptPart,
-                                  TextPart, ToolReturnPart, UserPromptPart)
 from pydantic_ai.models import Model
-from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.models.openai import OpenAIModel
-from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.bedrock import BedrockProvider
+from pydantic_ai.models.bedrock import BedrockConverseModel
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, Tool, UsageLimits
+from pydantic_ai.messages import (
+    TextPart,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    ToolReturnPart,
+    UserPromptPart,
+    SystemPromptPart
+)
 
 from subconscious_engine.configuration.models import ModelConfig
 
+
+# Variable setup
 ApprovalCallback = Callable[[Any], Awaitable[bool]]
 
 

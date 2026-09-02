@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
@@ -14,10 +15,16 @@ import 'features/settings/controller/settings_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDesktopWindow();
-  const String rawUrl = String.fromEnvironment('SUBCONSCIOUS_ENGINE_URL');
-  const String token = String.fromEnvironment('SUBCONSCIOUS_ENGINE_TOKEN');
+  const String configuredToken = String.fromEnvironment(
+    'SUBCONSCIOUS_ENGINE_TOKEN',
+  );
   const bool preferDev = bool.fromEnvironment('SUBCONSCIOUS_ENGINE_DEV');
-  final Uri? explicitEndpoint = Uri.tryParse(rawUrl);
+  final String token = configuredToken.isNotEmpty
+      ? configuredToken
+      : preferDev
+      ? 'subconscious-dev-token'
+      : '';
+  final Uri? explicitEndpoint = _configuredEngineEndpoint(preferDev: preferDev);
   final DashboardController controller = DashboardController(
     ({Uri? explicitEndpoint, String? explicitToken}) => resolveEngineRepository(
       explicitEndpoint: explicitEndpoint,
@@ -32,6 +39,37 @@ Future<void> main() async {
   );
   unawaited(controller.load());
   runApp(SubconsciousApp(dashboardController: controller));
+}
+
+Uri? _configuredEngineEndpoint({required bool preferDev}) {
+  const String configuredUrl = String.fromEnvironment(
+    'SUBCONSCIOUS_ENGINE_URL',
+  );
+  const String configuredPort = String.fromEnvironment(
+    'SUBCONSCIOUS_ENGINE_PORT',
+    defaultValue: '55681',
+  );
+  final String defaultDevUrl =
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+      ? 'http://10.0.2.2'
+      : 'http://localhost';
+  final String endpointUrl = configuredUrl.trim().isNotEmpty
+      ? configuredUrl.trim()
+      : preferDev
+      ? defaultDevUrl
+      : '';
+  if (endpointUrl.isEmpty) return null;
+  final Uri? endpoint = Uri.tryParse(endpointUrl);
+  final int? port = int.tryParse(configuredPort.trim());
+  if (endpoint == null ||
+      endpoint.host.isEmpty ||
+      (endpoint.scheme != 'http' && endpoint.scheme != 'https') ||
+      port == null ||
+      port < 1 ||
+      port > 65535) {
+    return null;
+  }
+  return endpoint.replace(port: port);
 }
 
 final class SubconsciousApp extends StatelessWidget {
