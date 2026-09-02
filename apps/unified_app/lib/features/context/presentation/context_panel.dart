@@ -41,11 +41,13 @@ final class ContextPanel extends StatelessWidget {
   const ContextPanel({
     required this.screen,
     required this.controller,
+    this.onSelection,
     super.key,
   });
 
   final DashboardSection screen;
   final DashboardController controller;
+  final VoidCallback? onSelection;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -53,12 +55,22 @@ final class ContextPanel extends StatelessWidget {
     child: AnimatedBuilder(
       animation: controller,
       builder: (BuildContext context, Widget? child) => switch (screen) {
-        DashboardSection.threads => _ThreadsSection(controller: controller),
-        DashboardSection.files => _FilesSection(controller: controller),
+        DashboardSection.threads => _ThreadsSection(
+          controller: controller,
+          onSelection: onSelection,
+        ),
+        DashboardSection.files => _FilesSection(
+          controller: controller,
+          onSelection: onSelection,
+        ),
         DashboardSection.workspaces => _WorkspacesSection(
           controller: controller,
+          onSelection: onSelection,
         ),
-        DashboardSection.settings => _SettingsSection(controller: controller),
+        DashboardSection.settings => _SettingsSection(
+          controller: controller,
+          onSelection: onSelection,
+        ),
         DashboardSection.account => const _AccountSection(),
       },
     ),
@@ -97,18 +109,25 @@ final class _HeaderButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.onSelection,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
+  final VoidCallback? onSelection;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
     child: IconButton(
       constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-      onPressed: onPressed,
+      onPressed: onPressed == null
+          ? null
+          : () {
+              onPressed!();
+              onSelection?.call();
+            },
       padding: EdgeInsets.zero,
       style: IconButton.styleFrom(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
@@ -148,9 +167,10 @@ final class _PanelMessage extends StatelessWidget {
 }
 
 final class _ThreadsSection extends StatelessWidget {
-  const _ThreadsSection({required this.controller});
+  const _ThreadsSection({required this.controller, this.onSelection});
 
   final DashboardController controller;
+  final VoidCallback? onSelection;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -194,6 +214,7 @@ final class _ThreadsSection extends StatelessWidget {
                       }
                     }
                     controller.selectThreadWorkspace(workspace);
+                    onSelection?.call();
                   },
                 ),
               ),
@@ -206,30 +227,37 @@ final class _ThreadsSection extends StatelessWidget {
   );
 
   Widget _threadBody(BuildContext context) {
-    if (!controller.isConnected)
+    if (!controller.isConnected) {
       return const _PanelMessage(
         'Threads are available when the engine is connected.',
       );
-    if (controller.threadsWorkspace == null)
+    }
+    if (controller.threadsWorkspace == null) {
       return const _PanelMessage(
         'Choose a workspace in the title bar to see its threads.',
       );
-    if (controller.isLoadingThreads)
+    }
+    if (controller.isLoadingThreads) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
     if (controller.threadsError case final Object error) {
       return _PanelMessage(
         "Couldn't load threads\n$error",
         action: OutlinedButton(
-          onPressed: () => controller.selectThreadWorkspace(
-            controller.threadsWorkspace,
-            remember: false,
-          ),
+          onPressed: () {
+            controller.selectThreadWorkspace(
+              controller.threadsWorkspace,
+              remember: false,
+            );
+            onSelection?.call();
+          },
           child: const Text('Retry'),
         ),
       );
     }
-    if (controller.threads.isEmpty)
+    if (controller.threads.isEmpty) {
       return const _PanelMessage('No threads yet.');
+    }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       itemCount: controller.threads.length,
@@ -244,6 +272,7 @@ final class _ThreadsSection extends StatelessWidget {
               ? thread.title!
               : 'Untitled thread',
           onTap: () => controller.selectThread(thread),
+          onSelection: onSelection,
         );
       },
     );
@@ -255,6 +284,7 @@ final class _NavigationRow extends StatelessWidget {
     required this.selected,
     required this.label,
     required this.onTap,
+    this.onSelection,
     this.subtitle,
   });
 
@@ -262,6 +292,7 @@ final class _NavigationRow extends StatelessWidget {
   final String label;
   final String? subtitle;
   final VoidCallback onTap;
+  final VoidCallback? onSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -271,7 +302,10 @@ final class _NavigationRow extends StatelessWidget {
       borderRadius: BorderRadius.circular(6),
       child: InkWell(
         borderRadius: BorderRadius.circular(6),
-        onTap: onTap,
+        onTap: () {
+          onTap();
+          onSelection?.call();
+        },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
@@ -307,9 +341,10 @@ final class _NavigationRow extends StatelessWidget {
 }
 
 final class _WorkspacesSection extends StatelessWidget {
-  const _WorkspacesSection({required this.controller});
+  const _WorkspacesSection({required this.controller, this.onSelection});
 
   final DashboardController controller;
+  final VoidCallback? onSelection;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -323,6 +358,7 @@ final class _WorkspacesSection extends StatelessWidget {
             onPressed: controller.isConnected
                 ? controller.beginWorkspaceCreation
                 : null,
+            onSelection: onSelection,
           ),
         ],
       ),
@@ -331,23 +367,29 @@ final class _WorkspacesSection extends StatelessWidget {
   );
 
   Widget _workspaceBody(BuildContext context) {
-    if (controller.isLoadingWorkspaces)
+    if (controller.isLoadingWorkspaces) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
     if (controller.workspacesError case final Object error) {
       return _PanelMessage(
         "Couldn't load workspaces\n$error",
         action: OutlinedButton(
-          onPressed: controller.loadWorkspaces,
+          onPressed: () {
+            controller.loadWorkspaces();
+            onSelection?.call();
+          },
           child: const Text('Retry'),
         ),
       );
     }
-    if (!controller.isConnected && controller.workspaces.isEmpty)
+    if (!controller.isConnected && controller.workspaces.isEmpty) {
       return const _PanelMessage(
         'Workspaces are available when the engine is connected.',
       );
-    if (controller.workspaces.isEmpty)
+    }
+    if (controller.workspaces.isEmpty) {
       return const _PanelMessage('No workspaces yet.');
+    }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       itemCount: controller.workspaces.length,
@@ -366,6 +408,7 @@ final class _WorkspacesSection extends StatelessWidget {
             if (controller.selectedSection == DashboardSection.workspaces) {
               controller.settings.showWorkspace();
             }
+            onSelection?.call();
           },
         );
       },
@@ -374,9 +417,10 @@ final class _WorkspacesSection extends StatelessWidget {
 }
 
 final class _FilesSection extends StatelessWidget {
-  const _FilesSection({required this.controller});
+  const _FilesSection({required this.controller, this.onSelection});
 
   final DashboardController controller;
+  final VoidCallback? onSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -391,6 +435,7 @@ final class _FilesSection extends StatelessWidget {
               tooltip: 'Refresh files',
               icon: FluentIcons.arrow_clockwise_20_regular,
               onPressed: roots.isEmpty ? null : controller.refreshFiles,
+              onSelection: onSelection,
             ),
             _HeaderButton(
               tooltip: 'Create a file',
@@ -398,6 +443,7 @@ final class _FilesSection extends StatelessWidget {
               onPressed: roots.isEmpty
                   ? null
                   : () => _createWorkspaceFile(context, controller),
+              onSelection: onSelection,
             ),
             _HeaderButton(
               tooltip: 'Create a folder',
@@ -405,6 +451,7 @@ final class _FilesSection extends StatelessWidget {
               onPressed: roots.isEmpty
                   ? null
                   : () => _chooseWorkspaceFolder(context, controller),
+              onSelection: onSelection,
             ),
           ],
         ),
@@ -452,6 +499,7 @@ final class _FilesSection extends StatelessWidget {
                         path: '',
                         label: root.name,
                         isRoot: true,
+                        onSelection: onSelection,
                       ),
                   ],
                 ),
@@ -469,6 +517,7 @@ final class _DirectoryNode extends StatefulWidget {
     required this.label,
     this.isRoot = false,
     this.depth = 0,
+    this.onSelection,
     super.key,
   });
 
@@ -478,6 +527,7 @@ final class _DirectoryNode extends StatefulWidget {
   final String label;
   final bool isRoot;
   final int depth;
+  final VoidCallback? onSelection;
 
   @override
   State<_DirectoryNode> createState() => _DirectoryNodeState();
@@ -587,6 +637,7 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
                             path: entry.relativePath,
                             label: entry.name,
                             depth: widget.depth + 1,
+                            onSelection: widget.onSelection,
                           )
                         else
                           _FileTreeRow(
@@ -600,10 +651,13 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
                                   widget.rootIndex,
                                   entry.relativePath,
                                 ),
-                            onTap: () => widget.controller.openWorkspaceFile(
-                              widget.rootIndex,
-                              entry.relativePath,
-                            ),
+                            onTap: () {
+                              widget.controller.openWorkspaceFile(
+                                widget.rootIndex,
+                                entry.relativePath,
+                              );
+                              widget.onSelection?.call();
+                            },
                             leading: Icon(
                               OpenWorkspaceFile.supportsImagePreview(
                                     entry.relativePath,
@@ -833,9 +887,10 @@ void _showFileActionMessage(BuildContext context, String message) {
 }
 
 final class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({required this.controller});
+  const _SettingsSection({required this.controller, this.onSelection});
 
   final DashboardController controller;
+  final VoidCallback? onSelection;
 
   static const List<(String, IconData, SettingsPage)> _pages =
       <(String, IconData, SettingsPage)>[
@@ -871,6 +926,7 @@ final class _SettingsSection extends StatelessWidget {
                     controller.settings.activePage == page.$3,
                 label: page.$1,
                 onTap: () => controller.openSettingsPage(page.$3),
+                onSelection: onSelection,
               );
             },
           ),

@@ -202,6 +202,7 @@ final class _MobileFlyout extends StatelessWidget {
                   child: ContextPanel(
                     screen: controller.selectedSection,
                     controller: controller,
+                    onSelection: () => Navigator.of(context).pop(),
                   ),
                 ),
               ],
