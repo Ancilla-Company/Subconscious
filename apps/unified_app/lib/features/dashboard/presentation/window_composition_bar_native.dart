@@ -221,8 +221,8 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
                   child: DragToMoveArea(
                     child: Row(
                       children: <Widget>[
-                        SizedBox(
-                          width: 40,
+                        SizedBox.square(
+                          dimension: 40,
                           child: Center(
                             child: SvgPicture.asset(
                               'windows/runner/resources/icon_title.svg',

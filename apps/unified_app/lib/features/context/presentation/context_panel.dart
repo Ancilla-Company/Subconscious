@@ -458,7 +458,7 @@ final class _FilesSection extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
           child: Text(
-            controller.selectedWorkspace == null
+            controller.activeWorkspace == null
                 ? 'Select a workspace in Threads to browse its allowed folders.'
                 : roots.isEmpty
                 ? 'This workspace has no allowed folders.'
@@ -480,7 +480,7 @@ final class _FilesSection extends StatelessWidget {
             ),
           ),
         Expanded(
-          child: controller.selectedWorkspace == null
+          child: controller.activeWorkspace == null
               ? const _PanelMessage('No workspace selected.')
               : roots.isEmpty
               ? const _PanelMessage(
@@ -492,7 +492,7 @@ final class _FilesSection extends StatelessWidget {
                     for (final WorkspaceDirectoryRoot root in roots)
                       _DirectoryNode(
                         key: ValueKey<String>(
-                          '${controller.selectedWorkspace?.uuid}:${root.index}',
+                          '${controller.activeWorkspace?.uuid}:${root.index}',
                         ),
                         controller: controller,
                         rootIndex: root.index,
@@ -1021,7 +1021,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
         extensionSet: md.ExtensionSet.gitHubFlavored,
       ),
     );
-    _workspaceUuid = widget.controller.selectedWorkspace?.uuid;
+    _workspaceUuid = widget.controller.activeWorkspace?.uuid;
     widget.controller.addListener(_onControllerChanged);
     _startTabRestoration(_workspaceUuid);
   }
@@ -1036,13 +1036,13 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       _restoringTabs = false;
       _restorationWorkspaceUuid = null;
       _clearTabs();
-      _workspaceUuid = widget.controller.selectedWorkspace?.uuid;
+      _workspaceUuid = widget.controller.activeWorkspace?.uuid;
       _startTabRestoration(_workspaceUuid);
     }
   }
 
   void _onControllerChanged() {
-    final String? workspaceUuid = widget.controller.selectedWorkspace?.uuid;
+    final String? workspaceUuid = widget.controller.activeWorkspace?.uuid;
     if (workspaceUuid != _workspaceUuid) {
       _restorationGeneration++;
       _restoringTabs = false;
@@ -1089,7 +1089,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       mounted &&
       generation == _restorationGeneration &&
       identical(widget.controller, controller) &&
-      controller.selectedWorkspace?.uuid == workspaceUuid;
+      controller.activeWorkspace?.uuid == workspaceUuid;
 
   Future<void> _restoreTabs(
     DashboardController controller,
@@ -1204,7 +1204,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
 
   void _persistTabs() {
     if (_restoringTabs ||
-        widget.controller.selectedWorkspace?.uuid != _workspaceUuid) {
+        widget.controller.activeWorkspace?.uuid != _workspaceUuid) {
       return;
     }
     widget.controller.rememberOpenFiles(<WorkspaceFileReference>[

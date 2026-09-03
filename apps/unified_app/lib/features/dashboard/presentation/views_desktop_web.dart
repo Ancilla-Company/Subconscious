@@ -170,20 +170,12 @@ final class _DesktopWebDashboardViewState
               maximumContextPanelWidth: maximumContextPanelWidth,
             ),
           ),
-        if (index == flexiblePanelIndex && mainPanelIndex < 0)
-          Expanded(
-            child: _buildPanel(
-              panelOrder[index],
-              chatPanelWidth: chatPanelWidth,
-              contextPanelWidth: contextPanelWidth,
-            ),
-          )
-        else
-          _buildPanel(
-            panelOrder[index],
-            chatPanelWidth: chatPanelWidth,
-            contextPanelWidth: contextPanelWidth,
-          ),
+        _buildPanel(
+          panelOrder[index],
+          chatPanelWidth: chatPanelWidth,
+          contextPanelWidth: contextPanelWidth,
+          expandsToFill: index == flexiblePanelIndex,
+        ),
       ],
     ];
     final bool sidebarOnRight =
@@ -239,11 +231,11 @@ final class _DesktopWebDashboardViewState
     DashboardPanel panel, {
     required double chatPanelWidth,
     required double contextPanelWidth,
-  }) => switch (panel) {
-    DashboardPanel.chat => SizedBox(
-      key: const ValueKey<DashboardPanel>(DashboardPanel.chat),
-      width: chatPanelWidth,
-      child: ColoredBox(
+    required bool expandsToFill,
+  }) {
+    final Key key = ValueKey<DashboardPanel>(panel);
+    final Widget child = switch (panel) {
+      DashboardPanel.chat => ColoredBox(
         color: Theme.of(context).colorScheme.surface,
         child: AnimatedBuilder(
           animation: widget.controller,
@@ -292,20 +284,19 @@ final class _DesktopWebDashboardViewState
           },
         ),
       ),
-    ),
-    DashboardPanel.main => Expanded(
-      key: const ValueKey<DashboardPanel>(DashboardPanel.main),
-      child: DashboardMainPanel(controller: widget.controller),
-    ),
-    DashboardPanel.context => SizedBox(
-      key: const ValueKey<DashboardPanel>(DashboardPanel.context),
-      width: contextPanelWidth,
-      child: ContextPanel(
+      DashboardPanel.main => DashboardMainPanel(controller: widget.controller),
+      DashboardPanel.context => ContextPanel(
         screen: widget.controller.selectedSection,
         controller: widget.controller,
       ),
-    ),
-  };
+    };
+    if (expandsToFill) return Expanded(key: key, child: child);
+    return SizedBox(
+      key: key,
+      width: panel == DashboardPanel.chat ? chatPanelWidth : contextPanelWidth,
+      child: child,
+    );
+  }
 
   DashboardPanel _panelForDivider({
     required int leftIndex,

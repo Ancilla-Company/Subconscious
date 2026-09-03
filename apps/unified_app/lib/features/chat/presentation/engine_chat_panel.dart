@@ -549,6 +549,9 @@ final class _Composer extends StatelessWidget {
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
+              hintStyle: TextStyle(
+                color: colors.onSurfaceVariant.withValues(alpha: 0.33),
+              ),
               contentPadding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
             ),
           ),
@@ -567,6 +570,8 @@ final class _Composer extends StatelessWidget {
                         child: DropdownButton<String>(
                           isExpanded: true,
                           borderRadius: BorderRadius.circular(4),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.normal),
                           focusColor: colors.secondaryContainer,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           value: effectiveModelId ?? '',
@@ -643,6 +648,21 @@ String _formatTimestamp(DateTime value) {
 
 ButtonStyle _compactControlStyle(BuildContext context) => IconButton.styleFrom(
   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+);
+
+IconButton _compactIconButton({
+  required String tooltip,
+  required VoidCallback? onPressed,
+  required Widget icon,
+}) => IconButton(
+  tooltip: tooltip,
+  constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+  padding: EdgeInsets.zero,
+  style: IconButton.styleFrom(
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+  ),
+  onPressed: onPressed,
+  icon: icon,
 );
 
 final class _ThreadSettingsDraft {
@@ -836,31 +856,20 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
               spacing: 8,
               runSpacing: 8,
               children: <Widget>[
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(4)),
-                    ),
-                  ),
+                _compactIconButton(
+                  tooltip: 'Cancel thread settings',
                   onPressed: _saving ? null : widget.onCancel,
-                  child: const Text('Cancel'),
+                  icon: const Icon(FluentIcons.dismiss_20_regular, size: 18),
                 ),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(4)),
-                    ),
-                  ),
+                _compactIconButton(
+                  tooltip: 'Save thread settings',
                   onPressed: _loading || _saving ? null : _submit,
                   icon: _saving
                       ? const SizedBox.square(
                           dimension: 14,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(FluentIcons.save_20_regular, size: 16),
-                  label: const Text('Save'),
+                      : const Icon(FluentIcons.save_20_regular, size: 18),
                 ),
               ],
             );
@@ -882,9 +891,32 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
           controller: _titleController,
           autofocus: widget.isDraft,
           enabled: !_saving,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Thread name',
             hintText: 'New thread',
+            filled: true,
+            fillColor: colors.surfaceContainerLowest,
+            border: OutlineInputBorder(
+              borderRadius: const BorderRadius.all(Radius.circular(3)),
+              borderSide: BorderSide(color: colors.outlineVariant),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: const BorderRadius.all(Radius.circular(3)),
+              borderSide: BorderSide(color: colors.outlineVariant),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: const BorderRadius.all(Radius.circular(3)),
+              borderSide: BorderSide(color: colors.outlineVariant),
+            ),
+            disabledBorder: OutlineInputBorder(
+              borderRadius: const BorderRadius.all(Radius.circular(3)),
+              borderSide: BorderSide(
+                color: colors.outlineVariant.withValues(alpha: 0.5),
+              ),
+            ),
+            hintStyle: TextStyle(
+              color: colors.onSurfaceVariant.withValues(alpha: 0.33),
+            ),
           ),
         ),
         const SizedBox(height: 8),

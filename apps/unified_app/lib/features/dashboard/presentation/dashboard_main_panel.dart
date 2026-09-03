@@ -24,7 +24,7 @@ final class DashboardMainPanel extends StatelessWidget {
       final MainPanelDestination destination = controller.settings.destination;
       final Widget panel = switch (destination) {
         MainPanelDestination.workspace => Theme(
-          data: settingsFormTheme(context),
+          data: _workspaceFormTheme(context),
           child: controller.isCreatingWorkspace
               ? _WorkspaceCreatePanel(controller: controller)
               : workspace == null
@@ -56,6 +56,61 @@ final class DashboardMainPanel extends StatelessWidget {
     },
   );
 }
+
+ThemeData _workspaceFormTheme(BuildContext context) {
+  final ThemeData base = settingsFormTheme(context);
+  final ColorScheme colors = base.colorScheme;
+  return base.copyWith(
+    inputDecorationTheme: base.inputDecorationTheme.copyWith(
+      border: OutlineInputBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(
+          color: colors.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      hintStyle: TextStyle(
+        color: colors.onSurfaceVariant.withValues(alpha: 0.33),
+      ),
+    ),
+  );
+}
+
+IconButton _dashboardIconButton({
+  required String tooltip,
+  required VoidCallback? onPressed,
+  required Widget icon,
+  Color? foregroundColor,
+}) => IconButton(
+  tooltip: tooltip,
+  constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+  padding: EdgeInsets.zero,
+  style: IconButton.styleFrom(
+    foregroundColor: foregroundColor,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+  ),
+  onPressed: onPressed,
+  icon: icon,
+);
 
 final class _WorkspaceDetailsPanel extends StatefulWidget {
   const _WorkspaceDetailsPanel({
@@ -508,39 +563,45 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     height: 56,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: <Widget>[
-          Text(
-            'Edit workspace',
-            style: Theme.of(context).textTheme.titleMedium
-                ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
+      child: Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 750),
+          child: Row(
+            children: <Widget>[
+              Text(
+                'Edit workspace',
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              _dashboardIconButton(
+                tooltip: 'Delete workspace',
+                onPressed: _isBusy || !widget.controller.isConnected
+                    ? null
+                    : _confirmDelete,
+                foregroundColor: colors.error,
+                icon: _isDeleting
+                    ? const SizedBox.square(
+                        dimension: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(FluentIcons.delete_20_regular, size: 18),
+              ),
+              const SizedBox(width: 4),
+              _dashboardIconButton(
+                tooltip: 'Save workspace',
+                onPressed: _canSave ? _save : null,
+                icon: _isSaving
+                    ? const SizedBox.square(
+                        dimension: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(FluentIcons.save_20_regular, size: 18),
+              ),
+            ],
           ),
-          const Spacer(),
-          OutlinedButton.icon(
-            onPressed: _isBusy || !widget.controller.isConnected
-                ? null
-                : _confirmDelete,
-            style: OutlinedButton.styleFrom(foregroundColor: colors.error),
-            icon: _isDeleting
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(FluentIcons.delete_20_regular, size: 16),
-            label: const Text('Delete'),
-          ),
-          const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: _canSave ? _save : null,
-            icon: _isSaving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(FluentIcons.save_20_regular, size: 16),
-            label: const Text('Save'),
-          ),
-        ],
+        ),
       ),
     ),
   );
@@ -551,6 +612,8 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     return DropdownButtonFormField<String>(
       key: ValueKey<String>('model:$value'),
       initialValue: value,
+      style: Theme.of(context).textTheme.bodyMedium
+          ?.copyWith(fontWeight: FontWeight.normal),
       decoration: const InputDecoration(),
       items: <DropdownMenuItem<String>>[
         const DropdownMenuItem<String>(value: '', child: Text('Default model')),
@@ -592,9 +655,10 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(
+          _dashboardIconButton(
+            tooltip: 'Add workspace path',
             onPressed: _isBusy ? null : _addPath,
-            child: const Text('Add'),
+            icon: const Icon(FluentIcons.add_20_regular, size: 18),
           ),
         ],
       ),
@@ -613,7 +677,8 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             contentPadding: EdgeInsets.zero,
             dense: true,
             title: Text(path, overflow: TextOverflow.ellipsis),
-            trailing: TextButton(
+            trailing: _dashboardIconButton(
+              tooltip: 'Remove workspace path: $path',
               onPressed: _isBusy
                   ? null
                   : () => _change(
@@ -621,7 +686,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                           .where((String item) => item != path)
                           .toList(growable: false),
                     ),
-              child: const Text('Remove'),
+              icon: const Icon(FluentIcons.dismiss_20_regular, size: 18),
             ),
           ),
     ],
@@ -1025,32 +1090,47 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
             height: 56,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: <Widget>[
-                  Text(
-                    'New workspace',
-                    style: Theme.of(context).textTheme.titleMedium
-                        ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
+              child: Align(
+                alignment: Alignment.center,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 750),
+                  child: Row(
+                    children: <Widget>[
+                      Text(
+                        'New workspace',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const Spacer(),
+                      _dashboardIconButton(
+                        tooltip: 'Cancel workspace creation',
+                        onPressed: _isCreating
+                            ? null
+                            : widget.controller.cancelWorkspaceCreation,
+                        icon: const Icon(
+                          FluentIcons.dismiss_20_regular,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      _dashboardIconButton(
+                        tooltip: 'Create workspace',
+                        onPressed: _canCreate ? _create : null,
+                        icon: _isCreating
+                            ? const SizedBox.square(
+                                dimension: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(FluentIcons.add_20_regular, size: 18),
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  OutlinedButton(
-                    onPressed: _isCreating
-                        ? null
-                        : widget.controller.cancelWorkspaceCreation,
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: _canCreate ? _create : null,
-                    icon: _isCreating
-                        ? const SizedBox.square(
-                            dimension: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(FluentIcons.add_20_regular, size: 16),
-                    label: const Text('Create'),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

@@ -398,6 +398,8 @@ final class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Workspace? get _filesWorkspace => activeWorkspace;
+
   List<WorkspaceDirectoryRoot> get fileRoots {
     final String? rawDirectories = activeWorkspace?.directories;
     if (rawDirectories == null || rawDirectories.trim().isEmpty) {
@@ -1217,7 +1219,7 @@ final class DashboardController extends ChangeNotifier {
   }
 
   Future<void> loadDirectory(int rootIndex, String path) async {
-    final Workspace? workspace = selectedWorkspace;
+    final Workspace? workspace = _filesWorkspace;
     final RestEngineClient? client = repository?.rest;
     final String key = _directoryKey(rootIndex, path);
     if (workspace == null ||
@@ -1258,7 +1260,7 @@ final class DashboardController extends ChangeNotifier {
     int rootIndex,
     String path,
   ) async {
-    final Workspace? workspace = selectedWorkspace;
+    final Workspace? workspace = _filesWorkspace;
     final RestEngineClient? client = repository?.rest;
     if (workspace == null || client == null) return null;
     if (OpenWorkspaceFile.supportsImagePreview(path)) {
@@ -1296,7 +1298,7 @@ final class DashboardController extends ChangeNotifier {
     String path, {
     bool remember = true,
   }) async {
-    final Workspace? workspace = selectedWorkspace;
+    final Workspace? workspace = _filesWorkspace;
     if (workspace == null || repository?.rest == null) return false;
     final int requestVersion = ++_fileRequestVersion;
     selectedFileTreeNodeKey = _directoryKey(rootIndex, path);
@@ -1331,7 +1333,7 @@ final class DashboardController extends ChangeNotifier {
   }
 
   Future<void> saveOpenFile(String content) async {
-    final Workspace? workspace = selectedWorkspace;
+    final Workspace? workspace = _filesWorkspace;
     final OpenWorkspaceFile? file = openFile;
     final RestEngineClient? client = repository?.rest;
     if (workspace == null || file == null || client == null) return;
@@ -1363,7 +1365,7 @@ final class DashboardController extends ChangeNotifier {
   void activateOpenFile(OpenWorkspaceFile file) {
     openFile = file;
     selectedFileTreeNodeKey = _directoryKey(file.rootIndex, file.path);
-    _filesWorkspaceUuid = selectedWorkspace?.uuid;
+    _filesWorkspaceUuid = _filesWorkspace?.uuid;
     _filesRootIndex = file.rootIndex;
     _filesPath = file.path;
     _markNavigationChanged();
@@ -1383,7 +1385,7 @@ final class DashboardController extends ChangeNotifier {
     required int rootIndex,
     required String path,
   }) async {
-    final Workspace? workspace = selectedWorkspace;
+    final Workspace? workspace = _filesWorkspace;
     final RestEngineClient? client = repository?.rest;
     if (workspace == null || client == null) return;
     await client
@@ -1402,7 +1404,7 @@ final class DashboardController extends ChangeNotifier {
     required int rootIndex,
     required String path,
   }) async {
-    final Workspace? workspace = selectedWorkspace;
+    final Workspace? workspace = _filesWorkspace;
     final RestEngineClient? client = repository?.rest;
     if (workspace == null || client == null) return;
     await client

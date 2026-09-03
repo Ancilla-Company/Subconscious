@@ -491,6 +491,8 @@ final class _LabeledDropdown extends StatelessWidget {
         DropdownButtonFormField<String>(
           key: ValueKey<String>('$label:$value'),
           initialValue: options.contains(value) ? value : options.first,
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(fontWeight: FontWeight.normal),
           items: <DropdownMenuItem<String>>[
             for (final String option in options)
               DropdownMenuItem<String>(value: option, child: Text(option)),
@@ -1515,15 +1517,20 @@ final class _AboutSettingsPage extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            SvgPicture.asset(
-                              'windows/runner/resources/icon_title.svg',
-                              width: 88,
-                              height: 88,
-                              colorFilter: ColorFilter.mode(
-                                Theme.of(context).colorScheme.onSurface,
-                                BlendMode.srcIn,
+                            Align(
+                              alignment: Alignment.center,
+                              child: SizedBox.square(
+                                dimension: 88,
+                                child: SvgPicture.asset(
+                                  'windows/runner/resources/icon_title.svg',
+                                  fit: BoxFit.contain,
+                                  colorFilter: ColorFilter.mode(
+                                    Theme.of(context).colorScheme.onSurface,
+                                    BlendMode.srcIn,
+                                  ),
+                                  semanticsLabel: 'Subconscious logo',
+                                ),
                               ),
-                              semanticsLabel: 'Subconscious logo',
                             ),
                             const SizedBox(height: 12),
                             const Text(
@@ -1727,22 +1734,28 @@ ThemeData _windowsSettingsTheme(BuildContext context) {
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       border: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outline),
+        borderSide: BorderSide(color: colors.outlineVariant),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outline),
+        borderSide: BorderSide(color: colors.outlineVariant),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.primary, width: 1.5),
+        borderSide: BorderSide(color: colors.outlineVariant),
+      ),
+      hintStyle: TextStyle(
+        color: colors.onSurfaceVariant.withValues(alpha: 0.33),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(shape: buttonShape),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(shape: buttonShape),
+      style: OutlinedButton.styleFrom(
+        shape: buttonShape,
+        side: BorderSide(color: colors.outlineVariant),
+      ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(shape: buttonShape),
@@ -1888,7 +1901,7 @@ final class _WindowsIconButton extends StatelessWidget {
         constraints: const BoxConstraints.tightFor(width: 32, height: 32),
         style: IconButton.styleFrom(
           backgroundColor: colors.surfaceContainerLowest,
-          side: BorderSide(color: colors.outline),
+          side: BorderSide(color: colors.outlineVariant),
         ),
         icon: Icon(icon, size: 17),
       ),
