@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import math
+import os
 import re
+import threading
 from collections import Counter
 from collections.abc import Sequence
-from typing import Protocol, runtime_checkable
-from urllib.parse import urlparse
-
-import httpx
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
 
 _TOKEN_PATTERN = re.compile(r"[\w]+", re.UNICODE)
 
@@ -111,28 +111,28 @@ class HashingEmbedder:
         return cosine_similarity(a, b)
 
 
-class OpenAIEmbedder:
-    """Synchronous OpenAI-compatible dense embedder with bounded requests."""
+class SentenceTransformerEmbedder:
+    """Lazy, process-cached local semantic embedder backed by MiniLM."""
 
-    def __init__(self, api_key: str, *, base_url: str = "https://api.openai.com/v1",
-                 model: str = "text-embedding-3-small", dimensions: int = 1536,
-                 batch_size: int = 64, timeout_seconds: float = 30.0) -> None:
-        if not api_key.strip():
-            raise ValueError("OpenAI API key is required")
-        parsed = urlparse(base_url.strip())
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc \
-                or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("OpenAI base URL must be HTTP(S) without credentials or query data")
-        if dimensions <= 0 or batch_size <= 0 or timeout_seconds <= 0:
-            raise ValueError("embedding dimensions, batch size, and timeout must be positive")
-        self._api_key = api_key.strip()
-        self.base_url = base_url.strip().rstrip("/")
-        self.model = model.strip() or "text-embedding-3-small"
-        self.dim = dimensions
-        self.sparse_dim = 1024
+    MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+    REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+    DIMENSIONS = 384
+    _models: dict[tuple[str, str, str], Any] = {}
+    _model_lock = threading.Lock()
+    _inference_lock = threading.Lock()
+
+    def __init__(self, *, cache_folder: str | Path | None = None,
+                 batch_size: int = 32) -> None:
+        if batch_size <= 0:
+            raise ValueError("embedding batch size must be positive")
+        self.cache_folder = Path(cache_folder).expanduser() if cache_folder else None
         self.batch_size = batch_size
-        self.timeout_seconds = timeout_seconds
-        self.name = f"openai:{self.base_url}:{self.model}:{self.dim}"
+        self.dim = self.DIMENSIONS
+        self.sparse_dim = 1024
+        self.name = (
+            f"sentence-transformers:{self.MODEL}:{self.REVISION}:"
+            f"mean:l2:{self.dim}:v1"
+        )
         self._sparse = HashingEmbedder(dim=1, sparse_dim=self.sparse_dim)
 
     def embed(self, text: str) -> list[float]:
@@ -141,34 +141,70 @@ class OpenAIEmbedder:
     def embed_sparse(self, text: str) -> dict[int, float]:
         return self._sparse.embed_sparse(text)
 
+    def _model(self) -> Any:
+        cache_key = (
+            self.MODEL,
+            self.REVISION,
+            os.path.normcase(str(self.cache_folder.resolve()))
+            if self.cache_folder is not None else "",
+        )
+        with self._model_lock:
+            cached = self._models.get(cache_key)
+            if cached is not None:
+                return cached
+            try:
+                if self.cache_folder is not None:
+                    self.cache_folder.mkdir(parents=True, exist_ok=True)
+                from sentence_transformers import SentenceTransformer
+
+                model = SentenceTransformer(
+                    self.MODEL,
+                    revision=self.REVISION,
+                    cache_folder=str(self.cache_folder) if self.cache_folder else None,
+                    trust_remote_code=False,
+                )
+            except Exception as error:
+                raise EmbeddingError(
+                    "The local semantic embedding model is unavailable."
+                ) from error
+            self._models[cache_key] = model
+            return model
+
     def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
+        model = self._model()
         vectors: list[list[float]] = []
-        timeout = httpx.Timeout(self.timeout_seconds, connect=min(10.0, self.timeout_seconds))
         try:
-            with httpx.Client(timeout=timeout, trust_env=False) as client:
+            with self._inference_lock:
                 for start in range(0, len(texts), self.batch_size):
                     batch = list(texts[start:start + self.batch_size])
-                    response = client.post(
-                        f"{self.base_url}/embeddings",
-                        headers={"Authorization": f"Bearer {self._api_key}"},
-                        json={"model": self.model, "input": batch, "dimensions": self.dim},
+                    encoded = model.encode(
+                        batch,
+                        batch_size=min(self.batch_size, len(batch)),
+                        normalize_embeddings=True,
+                        convert_to_numpy=True,
+                        show_progress_bar=False,
                     )
-                    response.raise_for_status()
-                    payload = response.json()
-                    data = payload.get("data") if isinstance(payload, dict) else None
-                    if not isinstance(data, list) or len(data) != len(batch):
-                        raise ValueError("invalid embeddings response")
-                    ordered = sorted(data, key=lambda item: item.get("index", -1)
-                                     if isinstance(item, dict) else -1)
-                    for item in ordered:
-                        vector = item.get("embedding") if isinstance(item, dict) else None
-                        if not isinstance(vector, list) or len(vector) != self.dim:
+                    if len(encoded) != len(batch):
+                        raise ValueError("embedding row count mismatch")
+                    for row in encoded:
+                        vector = [float(value) for value in row]
+                        if len(vector) != self.dim or not all(
+                            math.isfinite(value) for value in vector
+                        ):
                             raise ValueError("invalid embedding vector")
-                        vectors.append([float(value) for value in vector])
-        except (httpx.HTTPError, TypeError, ValueError) as error:
-            raise EmbeddingError("The semantic embedding service is unavailable.") from error
+                        vectors.append(vector)
+        except EmbeddingError:
+            raise
+        except Exception as error:
+            raise EmbeddingError(
+                "The local semantic embedding model could not process the text."
+            ) from error
+        if len(vectors) != len(texts):
+            raise EmbeddingError(
+                "The local semantic embedding model returned incomplete results."
+            )
         return vectors
 
 

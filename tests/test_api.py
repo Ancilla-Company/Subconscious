@@ -1,7 +1,9 @@
 import asyncio
-import json
 from contextlib import asynccontextmanager
+from io import BytesIO
+import json
 from types import SimpleNamespace
+import zipfile
 
 import httpx
 import pytest
@@ -318,6 +320,37 @@ def test_settings_and_workspace_file_routes_through_asgi(tmp_path):
                 f"{base}/content?rootIndex=0&path=missing.txt", headers=auth()
             )
             assert missing.status_code == 404
+
+            png = b"\x89PNG\r\n\x1a\npreview"
+            pdf = b"%PDF-1.7\n%%EOF"
+            docx_buffer = BytesIO()
+            with zipfile.ZipFile(docx_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("[Content_Types].xml", "<Types/>")
+                archive.writestr("word/document.xml", "<w:document/>")
+            previews = {
+                "preview.png": ("image", "image/png", png),
+                "preview.pdf": ("pdf", "application/pdf", pdf),
+                "preview.docx": (
+                    "docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    docx_buffer.getvalue(),
+                ),
+            }
+            for filename, (kind, media_type, content) in previews.items():
+                (root / filename).write_bytes(content)
+                preview = await client.get(
+                    f"{base}/preview",
+                    headers=auth(),
+                    params={"rootIndex": 0, "path": filename},
+                )
+                assert preview.status_code == 200
+                assert preview.content == content
+                assert preview.headers["content-type"] == media_type
+                assert preview.headers["content-length"] == str(len(content))
+                assert preview.headers["x-preview-kind"] == kind
+                assert preview.headers["x-content-type-options"] == "nosniff"
+                assert preview.headers["cache-control"] == "no-store, private"
+                assert f'filename="{filename}"' in preview.headers["content-disposition"]
     run(scenario())
 
 

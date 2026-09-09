@@ -49,7 +49,9 @@ class EngineHost:
         )
         self.event_bus = EventBus()
         self.tool_registry = ToolRegistry()
-        self.rag_service = WorkspaceRagService(self.model_configuration_store)
+        self.rag_service = WorkspaceRagService(
+            model_cache_directory=config.resolved_data_directory / "models"
+        )
         self.agent_manager = AgentManager()
         self.app = create_app(
             self.database,

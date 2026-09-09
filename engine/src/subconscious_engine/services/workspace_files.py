@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+from dataclasses import dataclass
+from io import BytesIO
 import json
 import os
 from pathlib import Path
+import zipfile
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,9 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from subconscious_engine.api.extra_schemas import (
     WorkspaceFileContentDto,
     WorkspaceFileEntryDto,
-    WorkspaceFilePreviewDto,
 )
 from subconscious_engine.storage.models import Workspace
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceFilePreview:
+    content: bytes
+    media_type: str
+    kind: str
+    filename: str
 
 
 class WorkspaceFileError(RuntimeError):
@@ -40,6 +50,17 @@ class WorkspaceFileService:
         ".svg": "image/svg+xml",
         ".webp": "image/webp",
     }
+    PDF_MEDIA_TYPE = "application/pdf"
+    DOCX_MEDIA_TYPE = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    IMAGE_MAX_BYTES = 20 * 1024 * 1024
+    PDF_MAX_BYTES = 50 * 1024 * 1024
+    DOCX_MAX_BYTES = 25 * 1024 * 1024
+    DOCX_MAX_MEMBERS = 2_048
+    DOCX_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+    DOCX_MAX_MEMBER_BYTES = 25 * 1024 * 1024
+    DOCX_MAX_COMPRESSION_RATIO = 100
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -73,7 +94,8 @@ class WorkspaceFileService:
         root = await self.root(workspace_uuid, root_index)
         return await asyncio.to_thread(self._read_sync, root, relative_path)
 
-    async def preview(self, workspace_uuid: str, root_index: int, relative_path: str) -> WorkspaceFilePreviewDto:
+    async def preview(self, workspace_uuid: str, root_index: int,
+                      relative_path: str) -> WorkspaceFilePreview:
         root = await self.root(workspace_uuid, root_index)
         return await asyncio.to_thread(self._preview_sync, root, relative_path)
 
@@ -112,12 +134,92 @@ class WorkspaceFileService:
         except UnicodeDecodeError as error:
             raise WorkspaceFileError(400, "The requested file is not valid UTF-8 text.") from error
 
-    def _preview_sync(self, root: Path, relative_path: str) -> WorkspaceFilePreviewDto:
+    def _preview_sync(self, root: Path, relative_path: str) -> WorkspaceFilePreview:
         file = self._existing_regular_file(root, relative_path)
-        media_type = self.IMAGE_MEDIA_TYPES.get(file.suffix.casefold())
-        if media_type is None:
-            raise WorkspaceFileError(400, "The requested file is not a supported image.")
-        return WorkspaceFilePreviewDto(local_path=str(file), media_type=media_type)
+        extension = file.suffix.casefold()
+        media_type = self.IMAGE_MEDIA_TYPES.get(extension)
+        if media_type is not None:
+            kind, limit = "image", self.IMAGE_MAX_BYTES
+        elif extension == ".pdf":
+            kind, media_type, limit = "pdf", self.PDF_MEDIA_TYPE, self.PDF_MAX_BYTES
+        elif extension == ".docx":
+            kind, media_type, limit = "docx", self.DOCX_MEDIA_TYPE, self.DOCX_MAX_BYTES
+        else:
+            raise WorkspaceFileError(
+                400, "The requested file is not a supported image, PDF, or DOCX file."
+            )
+        if file.stat().st_size > limit:
+            raise WorkspaceFileError(400, f"The requested {kind} preview is too large.")
+        raw = self._existing_regular_file(root, relative_path).read_bytes()
+        if len(raw) > limit:
+            raise WorkspaceFileError(400, f"The requested {kind} preview is too large.")
+        if kind == "image":
+            self._validate_image(extension, raw)
+        elif kind == "pdf":
+            if not raw.startswith(b"%PDF-"):
+                raise WorkspaceFileError(400, "The requested file is not a valid PDF.")
+        else:
+            self._validate_docx(raw)
+        return WorkspaceFilePreview(raw, media_type, kind, file.name)
+
+    @classmethod
+    def _validate_image(cls, extension: str, raw: bytes) -> None:
+        valid = {
+            ".bmp": raw.startswith(b"BM"),
+            ".gif": raw.startswith((b"GIF87a", b"GIF89a")),
+            ".jpeg": raw.startswith(b"\xff\xd8\xff"),
+            ".jpg": raw.startswith(b"\xff\xd8\xff"),
+            ".png": raw.startswith(b"\x89PNG\r\n\x1a\n"),
+            ".webp": len(raw) >= 12
+            and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP",
+        }
+        if extension == ".svg":
+            try:
+                text = raw.removeprefix(b"\xef\xbb\xbf").decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise WorkspaceFileError(400, "The requested SVG is not valid UTF-8.") from error
+            folded = text.lstrip().casefold()
+            valid[extension] = "<svg" in folded[:1_024]
+            if any(value in folded for value in (
+                "<!doctype", "<!entity", "<script", "<foreignobject",
+                "javascript:", "http://", "https://", "file://",
+            )):
+                valid[extension] = False
+        if not valid.get(extension, False):
+            raise WorkspaceFileError(400, "The requested image signature is invalid.")
+
+    @classmethod
+    def _validate_docx(cls, raw: bytes) -> None:
+        if not raw.startswith(b"PK\x03\x04"):
+            raise WorkspaceFileError(400, "The requested file is not a valid DOCX archive.")
+        try:
+            with zipfile.ZipFile(BytesIO(raw)) as archive:
+                members = archive.infolist()
+                if len(members) > cls.DOCX_MAX_MEMBERS:
+                    raise WorkspaceFileError(400, "The DOCX archive has too many entries.")
+                names = {member.filename.replace("\\", "/") for member in members}
+                if not {"[Content_Types].xml", "word/document.xml"}.issubset(names) \
+                        or "xl/workbook.xml" in names \
+                        or "ppt/presentation.xml" in names:
+                    raise WorkspaceFileError(400, "The requested archive is not a DOCX file.")
+                total = 0
+                for member in members:
+                    if member.flag_bits & 0x1:
+                        raise WorkspaceFileError(400, "Encrypted DOCX archives are unsupported.")
+                    if member.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}:
+                        raise WorkspaceFileError(400, "The DOCX uses unsupported compression.")
+                    if member.file_size > cls.DOCX_MAX_MEMBER_BYTES:
+                        raise WorkspaceFileError(400, "A DOCX archive entry is too large.")
+                    if member.file_size and (
+                        member.file_size / max(1, member.compress_size)
+                        > cls.DOCX_MAX_COMPRESSION_RATIO
+                    ):
+                        raise WorkspaceFileError(400, "The DOCX compression ratio is unsafe.")
+                    total += member.file_size
+                    if total > cls.DOCX_MAX_UNCOMPRESSED_BYTES:
+                        raise WorkspaceFileError(400, "The DOCX expands beyond the safe limit.")
+        except (zipfile.BadZipFile, zipfile.LargeZipFile) as error:
+            raise WorkspaceFileError(400, "The requested DOCX archive is invalid.") from error
 
     def _create_sync(self, root: Path, relative_path: str, content: str, encoded: bytes) -> WorkspaceFileContentDto:
         file = self._new_target(root, relative_path, file_target=True)

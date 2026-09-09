@@ -49,7 +49,9 @@ def create_app(database: Database, token: EngineAuthToken,
     store = model_configuration_store or EncryptedModelConfigurationStore(database.path.parent)
     bus = event_bus or EventBus()
     builtins = tool_registry or ToolRegistry()
-    rag = rag_service or WorkspaceRagService(store)
+    rag = rag_service or WorkspaceRagService(
+        model_cache_directory=database.path.parent / "models"
+    )
     agents = agent_manager or AgentManager()
 
     @asynccontextmanager

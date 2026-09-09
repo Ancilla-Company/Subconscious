@@ -1,5 +1,7 @@
 """Workspace file routes with consistent safety error mapping."""
 
+from urllib.parse import quote
+
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -54,7 +56,26 @@ async def preview_file(request: Request) -> Response:
         async with request.app.state.database.session() as session:
             result = await WorkspaceFileService(session).preview(
                 request.path_params["uuid"], _root_index(request), _path(request) or "")
-        return json_response(result)
+        ascii_filename = "".join(
+            character if 32 <= ord(character) < 127 and character not in {'"', "\\"}
+            else "_"
+            for character in result.filename
+        ) or "preview"
+        disposition = (
+            f'inline; filename="{ascii_filename}"; '
+            f"filename*=UTF-8''{quote(result.filename, safe='')}"
+        )
+        return Response(
+            result.content,
+            media_type=result.media_type,
+            headers={
+                "Content-Disposition": disposition,
+                "Content-Length": str(len(result.content)),
+                "Cache-Control": "no-store, private",
+                "X-Content-Type-Options": "nosniff",
+                "X-Preview-Kind": result.kind,
+            },
+        )
     except (WorkspaceFileError, OSError) as error:
         return _failure(error)
 

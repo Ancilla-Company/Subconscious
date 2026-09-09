@@ -15,21 +15,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from subconscious_engine.configuration import (
-    EncryptedModelConfigurationStore, ModelConfigurationStoreError,
-)
-from subconscious_engine.configuration.models import ModelConfig
 from subconscious_engine.rag import (
-    EmbeddingError, HashingEmbedder, OpenAIEmbedder, SIDECAR_DIRNAME,
+    Embedder, EmbeddingError, SentenceTransformerEmbedder, SIDECAR_DIRNAME,
     SidecarStore, WorkspaceIndexer, WorkspaceRetriever,
 )
 from subconscious_engine.storage.models import Workspace
 
 _LOGGER = logging.getLogger(__name__)
 _DAY_SECONDS = 24 * 60 * 60
-_DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
-_DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
-_DEFAULT_EMBEDDING_DIMENSIONS = 1536
 
 
 class RagServiceError(RuntimeError):
@@ -47,8 +40,11 @@ class _Root:
 
 
 class WorkspaceRagService:
-    def __init__(self, configuration_store: EncryptedModelConfigurationStore | None = None) -> None:
-        self.configuration_store = configuration_store
+    def __init__(self, *, model_cache_directory: str | Path | None = None,
+                 embedder: Embedder | None = None) -> None:
+        self._embedder_instance = embedder or SentenceTransformerEmbedder(
+            cache_folder=model_cache_directory
+        )
         self._root_locks: dict[str, asyncio.Lock] = {}
 
     async def _workspace(self, session: AsyncSession, workspace_uuid: str) -> Workspace:
@@ -110,82 +106,8 @@ class WorkspaceRagService:
     def _lock(self, root: Path) -> asyncio.Lock:
         return self._root_locks.setdefault(os.path.normcase(str(root)), asyncio.Lock())
 
-    @staticmethod
-    def _rag_config(workspace: Workspace) -> dict[str, Any]:
-        try:
-            value = json.loads(workspace.rag_config) if workspace.rag_config else {}
-        except (TypeError, json.JSONDecodeError):
-            return {}
-        return value if isinstance(value, dict) else {}
-
-    @staticmethod
-    def _dimensions() -> int:
-        raw = os.environ.get("OPENAI_EMBEDDING_DIMENSIONS")
-        if raw is None:
-            return _DEFAULT_EMBEDDING_DIMENSIONS
-        try:
-            dimensions = int(raw)
-        except ValueError as error:
-            raise RagServiceError(503, "OpenAI embedding dimensions are invalid.") from error
-        if dimensions <= 0:
-            raise RagServiceError(503, "OpenAI embedding dimensions are invalid.")
-        return dimensions
-
-    def _openai_embedder(self, config: ModelConfig, workspace: Workspace) -> OpenAIEmbedder:
-        rag_config = self._rag_config(workspace)
-        configured_model = rag_config.get("embeddingModel")
-        model = configured_model.strip() if isinstance(configured_model, str) else ""
-        try:
-            return OpenAIEmbedder(
-                config.api_key or "",
-                base_url=config.base_url or _DEFAULT_OPENAI_BASE,
-                model=model or os.environ.get(
-                    "OPENAI_EMBEDDING_MODEL", _DEFAULT_EMBEDDING_MODEL
-                ),
-                dimensions=self._dimensions(),
-            )
-        except ValueError as error:
-            raise RagServiceError(503, "OpenAI embedding configuration is invalid.") from error
-
-    async def _embedder(self, workspace: Workspace):
-        if self.configuration_store is None:
-            return HashingEmbedder()
-        environment_key = os.environ.get("OPENAI_API_KEY")
-        if environment_key:
-            try:
-                return OpenAIEmbedder(
-                    environment_key,
-                    base_url=os.environ.get("OPENAI_BASE_URL", _DEFAULT_OPENAI_BASE),
-                    model=os.environ.get("OPENAI_EMBEDDING_MODEL", _DEFAULT_EMBEDDING_MODEL),
-                    dimensions=self._dimensions(),
-                )
-            except ValueError as error:
-                raise RagServiceError(503, "OpenAI embedding configuration is invalid.") from error
-
-        try:
-            rag_config = self._rag_config(workspace)
-            configured_id = rag_config.get("modelConfigurationId")
-            if isinstance(configured_id, str) and configured_id:
-                configured = await self.configuration_store.resolve(configured_id)
-                if configured and configured.provider.casefold() == "openai" and configured.api_key:
-                    return self._openai_embedder(configured, workspace)
-
-            if workspace.default_model_id:
-                default = await self.configuration_store.resolve(workspace.default_model_id)
-                if default and default.provider.casefold() == "openai" and default.api_key:
-                    return self._openai_embedder(default, workspace)
-
-            for item in await self.configuration_store.list():
-                if item.provider.casefold() != "openai" or not item.has_api_key:
-                    continue
-                configured = await self.configuration_store.resolve(item.id)
-                if configured and configured.provider.casefold() == "openai" and configured.api_key:
-                    return self._openai_embedder(configured, workspace)
-        except ModelConfigurationStoreError as error:
-            raise RagServiceError(503, "Model credentials are unavailable.") from error
-        raise RagServiceError(
-            503, "Semantic RAG requires an OpenAI API key or OpenAI model configuration."
-        )
+    async def _embedder(self, _workspace: Workspace) -> Embedder:
+        return self._embedder_instance
 
     async def _index_spec(self, workspace: Workspace, root: _Root,
                           *, only_if_due: bool = False) -> dict[str, Any] | None:

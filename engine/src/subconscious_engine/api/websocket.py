@@ -22,6 +22,7 @@ from subconscious_engine.tools import ToolContext, merge_tool_config
 class ClientRegistry:
     def __init__(self) -> None:
         self._clients: dict[str, str] = {}
+        self._sessions: dict[str, Any] = {}
         self._listeners: set[Callable[[tuple[str, ...]], None]] = set()
         self._lock = RLock()
 
@@ -44,8 +45,31 @@ class ClientRegistry:
         with self._lock:
             if self._clients.pop(identifier, None) is None:
                 return
+            self._sessions.pop(identifier, None)
             snapshot = self._snapshot_locked()
         self._notify(snapshot)
+
+    async def register_session(self, identifier: str, session: Any) -> None:
+        with self._lock:
+            if identifier in self._clients:
+                self._sessions[identifier] = session
+
+    async def broadcast(
+        self,
+        frame_type: str,
+        data: dict[str, Any],
+        *,
+        exclude_client_id: str | None = None,
+    ) -> None:
+        with self._lock:
+            recipients = tuple(
+                session
+                for identifier, session in self._sessions.items()
+                if identifier != exclude_client_id
+            )
+        for session in recipients:
+            with suppress(Exception):
+                await session._send(frame_type, data)
 
     def subscribe(
         self, listener: Callable[[tuple[str, ...]], None]
@@ -121,6 +145,8 @@ class WebSocketSession:
             await self._send("pong", None)
         elif frame_type == "chat.send":
             await self._start_turn(turn_id or uuid4().hex, data)
+        elif frame_type == "chat.notification":
+            await self._create_notification(turn_id or uuid4().hex, data)
         elif frame_type == "chat.cancel":
             await self._cancel(turn_id or data.get("turn_id"))
         elif frame_type == "tool.approval.response":
@@ -157,6 +183,7 @@ class WebSocketSession:
             return
         await self.app.state.client_registry.release(self.client_id)
         self.client_id = identifier
+        await self.app.state.client_registry.register_session(identifier, self)
         await self._send("client.hello.ack", {"clientId": identifier})
 
     async def _start_turn(self, turn_id: str, data: dict[str, Any]) -> None:
@@ -181,6 +208,57 @@ class WebSocketSession:
         if self.active_turn is task:
             self.active_turn = None
             self.active_turn_id = None
+
+    async def _create_notification(
+        self, notification_id: str, data: dict[str, Any]
+    ) -> None:
+        content = data.get("content")
+        thread_uuid = data.get("thread_uuid")
+        if (
+            not isinstance(content, str)
+            or not content.strip()
+            or not isinstance(thread_uuid, str)
+            or not thread_uuid
+        ):
+            await self._send(
+                "chat.notification.error",
+                {"error": "chat.notification requires non-empty content and thread_uuid."},
+                notification_id,
+            )
+            return
+        try:
+            async with self.app.state.database.session() as session:
+                thread = await session.scalar(
+                    select(ConversationThread).where(
+                        ConversationThread.uuid == thread_uuid
+                    )
+                )
+                if thread is None:
+                    await self._send(
+                        "chat.notification.error",
+                        {"error": f"Thread '{thread_uuid}' not found."},
+                        notification_id,
+                    )
+                    return
+                message = Message(
+                    uuid=str(uuid4()),
+                    thread_id=thread.id,
+                    role="system",
+                    content=content,
+                )
+                thread.updated_at = utc_now()
+                session.add(message)
+                await session.commit()
+            await self._publish_message(message, thread_uuid)
+            await self._send(
+                "chat.notification.done",
+                {"thread_uuid": thread_uuid, "message_uuid": message.uuid},
+                notification_id,
+            )
+        except Exception as error:
+            await self._send(
+                "chat.notification.error", {"error": str(error)}, notification_id
+            )
 
     async def _approval(self, turn_id: str | None, data: dict[str, Any]) -> None:
         approval_id = data.get("approval_id")
@@ -249,9 +327,7 @@ class WebSocketSession:
                 session.add(user_message)
                 await session.commit()
                 if created_thread:
-                    await self.app.state.event_bus.publish("thread.created", {
-                        "threadId": thread.uuid, "workspaceId": workspace.uuid,
-                        "title": thread.title or ""})
+                    await self._publish_thread_created(thread, workspace)
                 await self._publish_message(user_message, thread_uuid)
                 tools_enabled = data.get("tools_enabled", True) is not False
                 tools = []
@@ -315,9 +391,30 @@ class WebSocketSession:
         finally:
             self.pending.pop(approval_id, None)
 
+    async def _publish_thread_created(
+        self, thread: ConversationThread, workspace: Workspace
+    ) -> None:
+        data = {
+            "threadId": thread.uuid,
+            "workspaceId": workspace.uuid,
+            "title": thread.title or "",
+        }
+        await self.app.state.event_bus.publish("thread.created", data)
+        await self.app.state.client_registry.broadcast(
+            "thread.created", data, exclude_client_id=self.client_id
+        )
+
     async def _publish_message(self, message: Message, thread_uuid: str) -> None:
-        await self.app.state.event_bus.publish("message.created", {"messageId": message.uuid,
-            "threadId": thread_uuid, "role": message.role, "content": message.content})
+        data = {
+            "messageId": message.uuid,
+            "threadId": thread_uuid,
+            "role": message.role,
+            "content": message.content,
+        }
+        await self.app.state.event_bus.publish("message.created", data)
+        await self.app.state.client_registry.broadcast(
+            "message.created", data, exclude_client_id=self.client_id
+        )
 
     async def _error(self, message: str) -> None:
         await self._send("error", {"error": message})

@@ -167,7 +167,7 @@ def test_workspace_rag_service_validates_roots_indexes_and_combines_results(tmp_
         (second_root / "b.txt").write_text("shared beta", encoding="utf-8")
         database = Database(tmp_path / "rag-service.db")
         await database.initialize()
-        service = WorkspaceRagService()
+        service = WorkspaceRagService(embedder=HashingEmbedder())
         try:
             async with database.session() as session:
                 created = await WorkspaceService(session).create(CreateWorkspaceRequest(

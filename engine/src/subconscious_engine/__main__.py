@@ -67,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--workspace", help="Target workspace UUID or exact name.")
     target.add_argument("--thread", help="Continue an existing thread UUID.")
     chat.add_argument("--tools", action="store_true", help="Enable workspace-default tools.")
+    chat.add_argument(
+        "--notification",
+        action="store_true",
+        help="Append a system notification to an existing thread without running an agent.",
+    )
     chat.add_argument("--dev", action="store_true", help="Enable development mode.")
     chat.add_argument("--data-dir", type=Path, help="Override runtime discovery data directory.")
     chat.add_argument("--timeout", type=_positive_float, default=300.0)
@@ -150,31 +155,51 @@ def _spawn_background_service(args: argparse.Namespace) -> int:
 
 
 def _run_chat(args: argparse.Namespace) -> int:
-    from .client import EngineClientError, one_shot_chat
+    from .client import EngineClientError, one_shot_chat, one_shot_notification
 
     prompt = sys.stdin.read() if args.prompt == "-" else args.prompt
     if not prompt.strip():
         print("subconscious chat: the prompt cannot be empty", file=sys.stderr)
         return 2
-    try:
-        result = asyncio.run(
-            one_shot_chat(
-                prompt,
-                workspace=args.workspace,
-                thread=args.thread,
-                tools=args.tools,
-                dev=args.dev,
-                data_directory=args.data_dir,
-                timeout=args.timeout,
-            )
+    if args.notification and args.thread is None:
+        print(
+            "subconscious chat: --notification requires --thread <UUID>",
+            file=sys.stderr,
         )
+        return 2
+    try:
+        if args.notification:
+            result = asyncio.run(
+                one_shot_notification(
+                    prompt,
+                    thread=args.thread,
+                    dev=args.dev,
+                    data_directory=args.data_dir,
+                    timeout=args.timeout,
+                )
+            )
+        else:
+            result = asyncio.run(
+                one_shot_chat(
+                    prompt,
+                    workspace=args.workspace,
+                    thread=args.thread,
+                    tools=args.tools,
+                    dev=args.dev,
+                    data_directory=args.data_dir,
+                    timeout=args.timeout,
+                )
+            )
     except (EngineClientError, KeyboardInterrupt) as error:
         message = str(error) if str(error) else "Chat was interrupted."
         print(f"subconscious chat: {message}", file=sys.stderr)
         return 1
-    print(result.response)
-    if result.created_thread:
-        print(f"Thread: {result.thread_uuid}", file=sys.stderr)
+    if args.notification:
+        print(f"Notification added to thread: {result.thread_uuid}")
+    else:
+        print(result.response)
+        if result.created_thread:
+            print(f"Thread: {result.thread_uuid}", file=sys.stderr)
     return 0
 
 

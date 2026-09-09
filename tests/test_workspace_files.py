@@ -1,6 +1,8 @@
 import asyncio
+from io import BytesIO
 import json
 import os
+import zipfile
 
 import pytest
 
@@ -70,6 +72,19 @@ def test_sync_security_and_content_validation(tmp_path):
     (root / "bom.txt").write_bytes(b"\xef\xbb\xbfhello")
     (root / "binary.txt").write_bytes(b"\xff")
     (root / "folder").mkdir()
+    png = b"\x89PNG\r\n\x1a\npreview"
+    pdf = b"%PDF-1.7\n%%EOF"
+    docx_buffer = BytesIO()
+    with zipfile.ZipFile(docx_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<w:document/>")
+    docx = docx_buffer.getvalue()
+    (root / "preview.png").write_bytes(png)
+    (root / "preview.pdf").write_bytes(pdf)
+    (root / "preview.docx").write_bytes(docx)
+    (root / "invalid.png").write_bytes(b"not-a-png")
+    (root / "invalid.pdf").write_bytes(b"not-a-pdf")
+    (root / "invalid.docx").write_bytes(b"not-a-docx")
 
     assert service._read_sync(root, "bom.txt").content == "hello"
     assert_error(400, lambda: service._read_sync(root, "binary.txt"), "UTF-8")
@@ -79,6 +94,22 @@ def test_sync_security_and_content_validation(tmp_path):
     assert_error(409, lambda: service._create_sync(root, "bom.txt", "", b""), "already exists")
     assert_error(400, lambda: service._encode(None), "required")
     assert_error(400, lambda: service._encode("x" * (service.MAX_BYTES + 1)), "1 MB")
+
+    image_preview = service._preview_sync(root, "preview.png")
+    assert (image_preview.content, image_preview.media_type, image_preview.kind) == (
+        png, "image/png", "image"
+    )
+    pdf_preview = service._preview_sync(root, "preview.pdf")
+    assert (pdf_preview.content, pdf_preview.media_type, pdf_preview.kind) == (
+        pdf, "application/pdf", "pdf"
+    )
+    docx_preview = service._preview_sync(root, "preview.docx")
+    assert docx_preview.content == docx
+    assert docx_preview.kind == "docx"
+    assert docx_preview.media_type.endswith("wordprocessingml.document")
+    assert_error(400, lambda: service._preview_sync(root, "invalid.png"), "signature")
+    assert_error(400, lambda: service._preview_sync(root, "invalid.pdf"), "valid PDF")
+    assert_error(400, lambda: service._preview_sync(root, "invalid.docx"), "DOCX")
 
 
 def test_read_rejects_oversized_file_before_decoding(tmp_path):

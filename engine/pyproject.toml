@@ -17,10 +17,12 @@ dependencies = [
   "pystray==0.19.5",
   "pydantic==2.12.4",
   "pydantic-ai==1.51.0",
+  "sentence-transformers==5.6.1",
   "sqlalchemy==2.0.45",
   "starlette==0.47.3",
   "uvicorn==0.40.0",
   "websockets==15.0.1",
+  "huggingface_hub[hf_xet]",
 ]
 
 [project.scripts]

@@ -17,8 +17,8 @@ from .sidecar import SIDECAR_DIRNAME, SidecarStore
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_CHARACTERS: Final = 500_000
-_CHUNK_CHARACTERS: Final = 1_500
-_CHUNK_TOKENS: Final = 500
+_CHUNK_CHARACTERS: Final = 880
+_CHUNK_TOKENS: Final = 220
 _SENSITIVE_EXTENSIONS: Final = frozenset({
     ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx",
 })

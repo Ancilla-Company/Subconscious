@@ -26,6 +26,12 @@ class ChatResult:
     created_thread: bool
 
 
+@dataclass(frozen=True, slots=True)
+class NotificationResult:
+    thread_uuid: str
+    message_uuid: str
+
+
 async def one_shot_chat(
     prompt: str,
     *,
@@ -64,6 +70,39 @@ async def one_shot_chat(
         timeout=timeout,
         error_output=error_output,
     )
+
+
+async def one_shot_notification(
+    prompt: str,
+    *,
+    thread: str | None,
+    dev: bool = False,
+    data_directory: Path | None = None,
+    timeout: float = 300.0,
+) -> NotificationResult:
+    if thread is None:
+        raise EngineClientError("A thread UUID is required for a notification.")
+    config = EngineConfig(dev=dev, data_directory=data_directory)
+    runtime = RuntimeInfoReader.read(config.resolved_data_directory)
+    if runtime is None:
+        raise EngineClientError(
+            "The engine is not running or its runtime file is unavailable; "
+            "run 'subconscious start'."
+        )
+    headers = {"Authorization": f"Bearer {runtime.token}"}
+    base_url = f"http://{runtime.host}:{runtime.port}/api/v1/"
+    try:
+        async with httpx.AsyncClient(
+            base_url=base_url, headers=headers, timeout=10.0, trust_env=False
+        ) as client:
+            health = await client.get("health")
+            health.raise_for_status()
+            target = await _resolve_target(client, None, thread)
+    except (httpx.HTTPError, ValueError) as error:
+        raise EngineClientError(f"Could not connect to the engine: {error}") from error
+    return await _run_notification(runtime, prompt, target.value, timeout=timeout)
+
+
 @dataclass(frozen=True, slots=True)
 class _ChatTarget:
     key: str
@@ -210,6 +249,70 @@ async def _run_turn(
         raise
     except Exception as error:
         raise EngineClientError(f"Chat connection failed: {error}") from error
+
+
+async def _run_notification(
+    runtime: RuntimeInfo,
+    content: str,
+    thread_uuid: str,
+    *,
+    timeout: float,
+) -> NotificationResult:
+    query = urlencode({"token": runtime.token})
+    endpoint = f"ws://{runtime.host}:{runtime.port}/api/v1/events?{query}"
+    notification_id = f"cli-{uuid4().hex}"
+    client_id = f"cli-{uuid4().hex}"
+    try:
+        async with connect(endpoint, open_timeout=10, close_timeout=5) as socket:
+            await socket.send(
+                json.dumps(
+                    {"v": 1, "type": "client.hello", "data": {"clientId": client_id}}
+                )
+            )
+            await _wait_for_hello(socket, timeout)
+            await socket.send(
+                json.dumps(
+                    {
+                        "v": 1,
+                        "type": "chat.notification",
+                        "id": notification_id,
+                        "data": {"content": content, "thread_uuid": thread_uuid},
+                    }
+                )
+            )
+            while True:
+                frame = await _receive_frame(socket, timeout)
+                data = frame.get("data") if isinstance(frame.get("data"), dict) else {}
+                frame_type = frame.get("type")
+                if frame_type == "error":
+                    raise EngineClientError(
+                        str(data.get("error", "Engine request failed."))
+                    )
+                if frame.get("id") != notification_id:
+                    continue
+                if frame_type == "chat.notification.error":
+                    raise EngineClientError(
+                        str(data.get("error", "Notification delivery failed."))
+                    )
+                if frame_type == "chat.notification.done":
+                    message_uuid = data.get("message_uuid")
+                    acknowledged_thread = data.get("thread_uuid")
+                    if (
+                        not isinstance(message_uuid, str)
+                        or not message_uuid
+                        or not isinstance(acknowledged_thread, str)
+                        or not acknowledged_thread
+                    ):
+                        raise EngineClientError(
+                            "The engine omitted notification acknowledgement details."
+                        )
+                    return NotificationResult(acknowledged_thread, message_uuid)
+    except EngineClientError:
+        raise
+    except Exception as error:
+        raise EngineClientError(f"Notification connection failed: {error}") from error
+
+
 async def _wait_for_hello(socket: Any, timeout: float) -> None:
     while True:
         frame = await _receive_frame(socket, timeout)
