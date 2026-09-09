@@ -1,7 +1,7 @@
 import 'package:core_business_logic/core_business_logic.dart' as core;
 import 'package:flutter/foundation.dart';
 
-enum EngineChatMessageOrigin { user, assistant }
+enum EngineChatMessageOrigin { user, assistant, system }
 
 final class EngineChatMessage {
   EngineChatMessage.user(String text)
@@ -10,6 +10,10 @@ final class EngineChatMessage {
 
   EngineChatMessage.assistant([String text = ''])
     : origin = EngineChatMessageOrigin.assistant,
+      _text = text;
+
+  EngineChatMessage.system(String text)
+    : origin = EngineChatMessageOrigin.system,
       _text = text;
 
   final EngineChatMessageOrigin origin;
@@ -62,6 +66,7 @@ final class EngineLlmProvider extends ChangeNotifier {
       final EngineChatMessage? converted = switch (message.role.toLowerCase()) {
         'user' => EngineChatMessage.user(message.content),
         'assistant' => EngineChatMessage.assistant(message.content),
+        'system' => EngineChatMessage.system(message.content),
         _ => null,
       };
       if (converted != null) {

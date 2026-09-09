@@ -263,11 +263,13 @@ final class _DesktopWebDashboardViewState
                     ({
                       required ThreadInfo thread,
                       String? title,
+                      String? defaultModelId,
                       String? toolsConfig,
                       required bool clearToolsConfig,
                     }) => widget.controller.updateThreadSettings(
                       thread: thread,
                       title: title,
+                      defaultModelId: defaultModelId,
                       toolsConfig: toolsConfig,
                       clearToolsConfig: clearToolsConfig,
                     ),

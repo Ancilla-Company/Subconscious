@@ -121,6 +121,9 @@ Widget _dashboardIconButton({
   },
 );
 
+Widget _workspaceModelLabel(String name) =>
+    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis);
+
 final class _WorkspaceDetailsPanel extends StatefulWidget {
   const _WorkspaceDetailsPanel({
     required this.controller,
@@ -699,28 +702,40 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   );
 
   Widget _buildModelPicker() {
-    final String value = _selectedModelId ?? '';
+    final String? value = _selectedModelId?.trim().isNotEmpty ?? false
+        ? _selectedModelId
+        : null;
     final bool known = _models.any((ModelInfo model) => model.id == value);
+    final bool hasOptions = _models.isNotEmpty || value != null;
     return DropdownButtonFormField<String>(
-      key: ValueKey<String>('model:$value'),
+      key: ValueKey<String>('model:${value ?? ''}'),
       initialValue: value,
+      hint: Text(
+        _models.isEmpty ? 'No models available' : 'Select a model',
+        overflow: TextOverflow.ellipsis,
+      ),
       style: Theme.of(context).textTheme.bodyMedium
           ?.copyWith(fontWeight: FontWeight.normal),
       decoration: const InputDecoration(),
       items: <DropdownMenuItem<String>>[
-        const DropdownMenuItem<String>(value: '', child: Text('Default model')),
-        if (value.isNotEmpty && !known)
-          DropdownMenuItem<String>(value: value, child: Text(value)),
+        if (value != null && !known)
+          DropdownMenuItem<String>(
+            value: value,
+            child: _workspaceModelLabel(value),
+          ),
         for (final ModelInfo model in _models)
-          DropdownMenuItem<String>(value: model.id, child: Text(model.name)),
+          DropdownMenuItem<String>(
+            value: model.id,
+            child: _workspaceModelLabel(model.name),
+          ),
       ],
-      onChanged: _isBusy
+      onChanged: _isBusy || !hasOptions
           ? null
-          : (String? selected) => _change(
-              () => _selectedModelId = selected?.isEmpty ?? true
-                  ? null
-                  : selected,
-            ),
+          : (String? selected) {
+              if (selected != null) {
+                _change(() => _selectedModelId = selected);
+              }
+            },
     );
   }
 

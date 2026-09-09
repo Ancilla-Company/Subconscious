@@ -1,13 +1,15 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 final class WorkspaceImagePreview extends StatelessWidget {
   const WorkspaceImagePreview({
-    required this.path,
+    required this.bytes,
     required this.isSvg,
     super.key,
   });
 
-  final String path;
+  final Uint8List bytes;
   final bool isSvg;
 
   @override

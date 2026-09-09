@@ -19,6 +19,7 @@ typedef UpdateThreadDraftCallback = void Function({
 typedef UpdateThreadCallback = Future<void> Function({
   required ThreadInfo thread,
   String? title,
+  String? defaultModelId,
   String? toolsConfig,
   required bool clearToolsConfig,
 });
@@ -59,17 +60,30 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   final TextEditingController _composer = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   List<ModelInfo> _models = const <ModelInfo>[];
+  String? _workspaceDefaultModelId;
   bool _isSending = false;
+  bool _isUpdatingModel = false;
   bool _showThreadSettings = false;
   Object? _error;
   int _modelLoadVersion = 0;
+  int _modelUpdateVersion = 0;
+  int _workspaceDefaultLoadVersion = 0;
   StreamSubscription<String>? _sendSubscription;
   Completer<void>? _sendCompletion;
 
   @override
   void initState() {
     super.initState();
+    _workspaceDefaultModelId = _normalizedModelId(
+      widget.workspace?.defaultModelId,
+    );
+    if (widget.provider.modelId == null && _workspaceDefaultModelId != null) {
+      widget.provider.modelId = _workspaceDefaultModelId;
+    }
     widget.provider.addListener(_onProviderChanged);
+    if (_workspaceDefaultModelId == null && widget.workspace != null) {
+      unawaited(_loadWorkspaceDefaultModel());
+    }
     if (widget.isComposerEnabled) unawaited(_loadModels());
     _scheduleScrollToBottom();
   }
@@ -77,11 +91,30 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   @override
   void didUpdateWidget(covariant EngineChatPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.workspace?.uuid != widget.workspace?.uuid ||
+        oldWidget.workspace?.defaultModelId !=
+            widget.workspace?.defaultModelId) {
+      _workspaceDefaultLoadVersion++;
+      _workspaceDefaultModelId = _normalizedModelId(
+        widget.workspace?.defaultModelId,
+      );
+      if (widget.provider.modelId == null && _workspaceDefaultModelId != null) {
+        widget.provider.modelId = _workspaceDefaultModelId;
+      }
+      if (_workspaceDefaultModelId == null && widget.workspace != null) {
+        unawaited(_loadWorkspaceDefaultModel());
+      }
+    }
     if (oldWidget.provider != widget.provider) {
       unawaited(_cancelActiveSend());
+      _modelUpdateVersion++;
       oldWidget.provider.removeListener(_onProviderChanged);
       widget.provider.addListener(_onProviderChanged);
+      if (widget.provider.modelId == null && _workspaceDefaultModelId != null) {
+        widget.provider.modelId = _workspaceDefaultModelId;
+      }
       _models = const <ModelInfo>[];
+      _isUpdatingModel = false;
       _error = null;
       if (widget.isComposerEnabled) unawaited(_loadModels());
       _scheduleScrollToBottom();
@@ -103,6 +136,67 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     } on Object catch (error) {
       if (!mounted || version != _modelLoadVersion) return;
       setState(() => _error = error);
+    }
+  }
+
+  Future<void> _loadWorkspaceDefaultModel() async {
+    final Workspace? workspace = widget.workspace;
+    if (workspace == null) return;
+    final int version = ++_workspaceDefaultLoadVersion;
+    try {
+      final Workspace refreshed = await widget.provider.repository.rest
+          .getWorkspace(workspace.uuid);
+      final String? modelId = _normalizedModelId(refreshed.defaultModelId);
+      if (!mounted ||
+          version != _workspaceDefaultLoadVersion ||
+          widget.workspace?.uuid != workspace.uuid ||
+          modelId == null) {
+        return;
+      }
+      setState(() => _workspaceDefaultModelId = modelId);
+      if (widget.provider.modelId == null) {
+        widget.provider.selectModel(modelId);
+      }
+    } on Object {
+      // Keep the picker usable if the workspace refresh is unavailable.
+    }
+  }
+
+  Future<void> _selectModel(String modelId) async {
+    if (_isUpdatingModel || modelId.isEmpty) return;
+    final EngineLlmProvider provider = widget.provider;
+    final String? previousModelId = provider.modelId;
+    if (previousModelId == modelId) return;
+
+    final ThreadInfo? thread = widget.thread;
+    final UpdateThreadCallback? update = widget.onUpdateThread;
+    provider.selectModel(modelId);
+    if (thread == null || update == null) return;
+
+    final int version = ++_modelUpdateVersion;
+    setState(() {
+      _isUpdatingModel = true;
+      _error = null;
+    });
+    try {
+      await update(
+        thread: thread,
+        defaultModelId: modelId,
+        clearToolsConfig: false,
+      );
+    } on Object catch (error) {
+      if (!mounted ||
+          version != _modelUpdateVersion ||
+          !identical(widget.provider, provider) ||
+          widget.thread?.uuid != thread.uuid) {
+        return;
+      }
+      provider.selectModel(previousModelId);
+      setState(() => _error = error);
+    } finally {
+      if (mounted && version == _modelUpdateVersion) {
+        setState(() => _isUpdatingModel = false);
+      }
     }
   }
 
@@ -219,6 +313,8 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   @override
   void dispose() {
     _modelLoadVersion++;
+    _modelUpdateVersion++;
+    _workspaceDefaultLoadVersion++;
     unawaited(_cancelActiveSend());
     widget.provider.removeListener(_onProviderChanged);
     _composer.dispose();
@@ -311,9 +407,12 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                     controller: _composer,
                     models: _models,
                     selectedModelId: widget.provider.modelId,
+                    workspaceDefaultModelId: _workspaceDefaultModelId,
                     isSending: _isSending,
+                    isModelUpdating: _isUpdatingModel,
                     enabled: widget.isComposerEnabled,
-                    onModelSelected: widget.provider.selectModel,
+                    onModelSelected: (String modelId) =>
+                        unawaited(_selectModel(modelId)),
                     onSend: _send,
                   ),
               ],
@@ -425,6 +524,7 @@ final class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final bool isUser = message.origin == EngineChatMessageOrigin.user;
+    final bool isSystem = message.origin == EngineChatMessageOrigin.system;
     final bool useNeutralForeground = isUser && useNeutralUserBubbleForeground;
     final Color? messageForeground = useNeutralForeground
         ? colors.onSecondaryContainer
@@ -470,6 +570,33 @@ final class _MessageBubble extends StatelessWidget {
         ),
       ],
     );
+    if (isSystem) {
+      return Align(
+        alignment: Alignment.center,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 5),
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Notification',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 3),
+              content,
+            ],
+          ),
+        ),
+      );
+    }
     if (!isUser) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -499,7 +626,9 @@ final class _Composer extends StatelessWidget {
     required this.controller,
     required this.models,
     required this.selectedModelId,
+    required this.workspaceDefaultModelId,
     required this.isSending,
+    required this.isModelUpdating,
     required this.enabled,
     required this.onModelSelected,
     required this.onSend,
@@ -508,20 +637,33 @@ final class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final List<ModelInfo> models;
   final String? selectedModelId;
+  final String? workspaceDefaultModelId;
   final bool isSending;
+  final bool isModelUpdating;
   final bool enabled;
-  final ValueChanged<String?> onModelSelected;
+  final ValueChanged<String> onModelSelected;
   final VoidCallback onSend;
 
   @override
   Widget build(BuildContext context) {
+    final String? defaultModelId =
+        workspaceDefaultModelId?.trim().isNotEmpty ?? false
+        ? workspaceDefaultModelId
+        : null;
     final String? effectiveModelId = selectedModelId?.trim().isNotEmpty ?? false
         ? selectedModelId
-        : null;
+        : defaultModelId;
     final bool hasSelectedModel = models.any(
       (ModelInfo model) => model.id == effectiveModelId,
     );
+    final bool hasWorkspaceDefaultModel = models.any(
+      (ModelInfo model) => model.id == defaultModelId,
+    );
     final bool interactive = enabled && !isSending;
+    final bool modelInteractive =
+        interactive &&
+        !isModelUpdating &&
+        (models.isNotEmpty || effectiveModelId != null);
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(top: 4, bottom: 10),
@@ -576,36 +718,48 @@ final class _Composer extends StatelessWidget {
                               ?.copyWith(fontWeight: FontWeight.normal),
                           focusColor: colors.secondaryContainer,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
-                          value: effectiveModelId ?? '',
+                          value: effectiveModelId,
+                          hint: Text(
+                            models.isEmpty
+                                ? 'No models available'
+                                : 'Select a model',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           items: <DropdownMenuItem<String>>[
-                            const DropdownMenuItem<String>(
-                              value: '',
-                              child: Text(
-                                'Default model',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
                             if (effectiveModelId != null && !hasSelectedModel)
                               DropdownMenuItem<String>(
                                 value: effectiveModelId,
-                                child: Text(
+                                child: _modelDropdownLabel(
+                                  context,
                                   effectiveModelId,
-                                  overflow: TextOverflow.ellipsis,
+                                  isDefault: effectiveModelId == defaultModelId,
+                                ),
+                              ),
+                            if (defaultModelId != null &&
+                                defaultModelId != effectiveModelId &&
+                                !hasWorkspaceDefaultModel)
+                              DropdownMenuItem<String>(
+                                value: defaultModelId,
+                                child: _modelDropdownLabel(
+                                  context,
+                                  defaultModelId,
+                                  isDefault: true,
                                 ),
                               ),
                             for (final ModelInfo model in models)
                               DropdownMenuItem<String>(
                                 value: model.id,
-                                child: Text(
+                                child: _modelDropdownLabel(
+                                  context,
                                   model.name,
-                                  overflow: TextOverflow.ellipsis,
+                                  isDefault: model.id == defaultModelId,
                                 ),
                               ),
                           ],
-                          onChanged: interactive
-                              ? (String? value) => onModelSelected(
-                                  value == null || value.isEmpty ? null : value,
-                                )
+                          onChanged: modelInteractive
+                              ? (String? value) {
+                                  if (value != null) onModelSelected(value);
+                                }
                               : null,
                         ),
                       ),
@@ -637,6 +791,32 @@ final class _Composer extends StatelessWidget {
     );
   }
 }
+
+String? _normalizedModelId(String? value) {
+  final String? trimmed = value?.trim();
+  return trimmed == null || trimmed.isEmpty ? null : trimmed;
+}
+
+Widget _modelDropdownLabel(
+  BuildContext context,
+  String name, {
+  required bool isDefault,
+}) => Text.rich(
+  TextSpan(
+    text: name,
+    children: <InlineSpan>[
+      if (isDefault)
+        TextSpan(
+          text: ' (default)',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+    ],
+  ),
+  maxLines: 1,
+  overflow: TextOverflow.ellipsis,
+);
 
 String _formatTimestamp(DateTime value) {
   final DateTime local = value.toLocal();

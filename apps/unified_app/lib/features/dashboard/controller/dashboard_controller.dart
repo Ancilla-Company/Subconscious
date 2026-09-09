@@ -250,6 +250,8 @@ final class DashboardController extends ChangeNotifier {
       <String, _WorkspaceViewerState>{};
   Timer? _reconnectTimer;
   Timer? _appStateSaveTimer;
+  StreamSubscription<WireFrame>? _engineEventSubscription;
+  EngineRepository? _engineEventRepository;
   bool _connectionCheckInProgress = false;
   bool _isRestoringNavigation = false;
   Future<void>? _appStateWriteFuture;
@@ -258,6 +260,7 @@ final class DashboardController extends ChangeNotifier {
   int _chatRequestVersion = 0;
   int _fileRequestVersion = 0;
   int _sectionActivationVersion = 0;
+  int _engineEventVersion = 0;
   int _appStateVersion = 0;
   int _appStateSavedVersion = 0;
 
@@ -833,6 +836,7 @@ final class DashboardController extends ChangeNotifier {
           if (!currentRepository.socket.isConnected) {
             await currentRepository.connect().timeout(requestTimeout);
           }
+          await _listenToEngineEvents(currentRepository);
           connectionStatus = EngineConnectionStatus.connected;
           error = null;
           notifyListeners();
@@ -864,6 +868,7 @@ final class DashboardController extends ChangeNotifier {
       _repository = discoveredRepository;
       await discoveredRepository.rest.health().timeout(requestTimeout);
       await discoveredRepository.connect().timeout(requestTimeout);
+      await _listenToEngineEvents(discoveredRepository);
       chatProvider?.replaceRepository(discoveredRepository);
       await settings.loadGeneralSettings(force: true);
       await _loadNavigationState();
@@ -883,8 +888,98 @@ final class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<void> _listenToEngineEvents(EngineRepository eventRepository) async {
+    if (identical(_engineEventRepository, eventRepository) &&
+        _engineEventSubscription != null) {
+      return;
+    }
+    await _engineEventSubscription?.cancel();
+    if (_disposed) return;
+    _engineEventRepository = eventRepository;
+    _engineEventSubscription = eventRepository.socket.frames.listen(
+      _handleEngineEvent,
+      onError: (_) {},
+    );
+  }
+
+  void _handleEngineEvent(WireFrame frame) {
+    if (_disposed) return;
+    final Map<String, dynamic> data = frame.data ?? <String, dynamic>{};
+    switch (frame.type) {
+      case 'message.created':
+        final Object? threadId = data['threadId'];
+        if (threadId is String && selectedThread?.uuid == threadId) {
+          unawaited(_refreshSelectedThreadHistory(threadId));
+        }
+        return;
+      case 'thread.created':
+        final Object? workspaceId = data['workspaceId'];
+        if (workspaceId is String && activeWorkspace?.uuid == workspaceId) {
+          unawaited(_refreshThreadsForActiveWorkspace(workspaceId));
+        }
+        return;
+    }
+  }
+
+  Future<void> _refreshSelectedThreadHistory(String threadUuid) async {
+    final EngineRepository? currentRepository = repository;
+    final EngineLlmProvider? provider = chatProvider;
+    if (currentRepository == null || provider == null) return;
+    final int eventVersion = ++_engineEventVersion;
+    try {
+      final List<ChatMessage> messages = await currentRepository
+          .listMessages(threadUuid)
+          .timeout(requestTimeout);
+      if (_disposed ||
+          eventVersion != _engineEventVersion ||
+          !identical(repository, currentRepository) ||
+          !identical(chatProvider, provider) ||
+          selectedThread?.uuid != threadUuid) {
+        return;
+      }
+      provider.replaceEngineHistory(messages);
+    } on Object {
+      // Remote updates are opportunistic; the current view remains usable on failure.
+    }
+  }
+
+  Future<void> _refreshThreadsForActiveWorkspace(String workspaceUuid) async {
+    final EngineRepository? currentRepository = repository;
+    if (currentRepository == null || activeWorkspace?.uuid != workspaceUuid) {
+      return;
+    }
+    final int eventVersion = ++_engineEventVersion;
+    try {
+      final List<ThreadInfo> loaded = await currentRepository
+          .listThreads(workspaceUuid)
+          .timeout(requestTimeout);
+      if (_disposed ||
+          eventVersion != _engineEventVersion ||
+          !identical(repository, currentRepository) ||
+          activeWorkspace?.uuid != workspaceUuid) {
+        return;
+      }
+      threads = loaded;
+      final String? selectedThreadUuid = selectedThread?.uuid;
+      if (selectedThreadUuid != null) {
+        selectedThread = _threadByUuid(selectedThreadUuid);
+      }
+      notifyListeners();
+    } on Object {
+      // A later navigation load will reconcile the sidebar after a transient failure.
+    }
+  }
+
   Future<void> _closeRepository(EngineRepository repositoryToClose) async {
     if (identical(_repository, repositoryToClose)) _repository = null;
+    if (identical(_engineEventRepository, repositoryToClose)) {
+      _engineEventRepository = null;
+      _engineEventVersion++;
+      final StreamSubscription<WireFrame>? subscription =
+          _engineEventSubscription;
+      _engineEventSubscription = null;
+      await subscription?.cancel();
+    }
     _chatRequestVersion++;
     isLoadingChat = false;
     try {
@@ -1130,6 +1225,7 @@ final class DashboardController extends ChangeNotifier {
           title: draftTitle == null || draftTitle.isEmpty
               ? _titleFromFirstMessage(firstMessage)
               : draftTitle,
+          defaultModelId: draftProvider.modelId,
           toolsConfig: pendingDraftToolsConfig,
         )
         .timeout(requestTimeout);
@@ -1166,6 +1262,7 @@ final class DashboardController extends ChangeNotifier {
         .createThread(
           workspaceUuid: workspace.uuid,
           title: title,
+          defaultModelId: workspace.defaultModelId,
           toolsConfig: toolsConfig,
         )
         .timeout(requestTimeout);
@@ -1188,6 +1285,7 @@ final class DashboardController extends ChangeNotifier {
   Future<void> updateThreadSettings({
     required ThreadInfo thread,
     String? title,
+    String? defaultModelId,
     String? toolsConfig,
     bool clearToolsConfig = false,
   }) async {
@@ -1198,6 +1296,7 @@ final class DashboardController extends ChangeNotifier {
         .updateThread(
           threadUuid: thread.uuid,
           title: title,
+          defaultModelId: defaultModelId,
           toolsConfig: toolsConfig,
           clearToolsConfig: clearToolsConfig,
         )
@@ -1635,6 +1734,11 @@ final class DashboardController extends ChangeNotifier {
     _disposed = true;
     _reconnectTimer?.cancel();
     _appStateSaveTimer?.cancel();
+    _engineEventRepository = null;
+    final StreamSubscription<WireFrame>? subscription =
+        _engineEventSubscription;
+    _engineEventSubscription = null;
+    unawaited(subscription?.cancel() ?? Future<void>.value());
     chatProvider?.dispose();
     settings.dispose();
     unawaited(repository?.socket.dispose());

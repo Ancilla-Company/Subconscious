@@ -74,11 +74,13 @@ final class MobileDashboardView extends StatelessWidget {
             ({
               required ThreadInfo thread,
               String? title,
+              String? defaultModelId,
               String? toolsConfig,
               required bool clearToolsConfig,
             }) => controller.updateThreadSettings(
               thread: thread,
               title: title,
+              defaultModelId: defaultModelId,
               toolsConfig: toolsConfig,
               clearToolsConfig: clearToolsConfig,
             ),
