@@ -35,6 +35,7 @@ import 'package:markdown_quill/markdown_quill.dart';
 
 import '../../dashboard/controller/dashboard_controller.dart';
 import '../../settings/controller/settings_controller.dart';
+import 'workspace_document_preview.dart';
 import 'workspace_image_preview.dart';
 
 final class ContextPanel extends StatelessWidget {
@@ -659,7 +660,7 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
                               widget.onSelection?.call();
                             },
                             leading: Icon(
-                              OpenWorkspaceFile.supportsImagePreview(
+                              OpenWorkspaceFile.supportsPreview(
                                     entry.relativePath,
                                   )
                                   ? FluentIcons.image_20_regular
@@ -975,7 +976,7 @@ final class _WorkspaceFileTab {
   TextSelection selection = const TextSelection.collapsed(offset: 0);
 
   String get key => '${file.rootIndex}:${file.path}';
-  bool get isDirty => !file.isImage && draftContent != cleanContent;
+  bool get isDirty => !file.isReadOnlyPreview && draftContent != cleanContent;
 
   void resetFromRemote(OpenWorkspaceFile nextFile) {
     file = nextFile;
@@ -1197,7 +1198,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
   bool _refreshCleanTab(_WorkspaceFileTab tab, OpenWorkspaceFile file) {
     final bool contentChanged = file.content != tab.savedContent;
     tab.file = file;
-    if (file.isImage || tab.isDirty || !contentChanged) return false;
+    if (file.isReadOnlyPreview || tab.isDirty || !contentChanged) return false;
     tab.resetFromRemote(file);
     return true;
   }
@@ -1219,7 +1220,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
   void _activateEditor(_WorkspaceFileTab tab) {
     _disposeEditorControllers();
     _activeKey = tab.key;
-    if (tab.file.isImage) return;
+    if (tab.file.isReadOnlyPreview) return;
     _syncingEditor = true;
     if (_usesQuill(tab.file.path)) {
       _createQuillController(tab);
@@ -1279,7 +1280,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
   void _onEditorChanged() {
     if (_syncingEditor) return;
     final _WorkspaceFileTab? tab = _activeTab;
-    if (tab == null || tab.file.isImage) return;
+    if (tab == null || tab.file.isReadOnlyPreview) return;
     final quill.QuillController? quillController = _quillController;
     if (quillController != null) tab.selection = quillController.selection;
     final String content = _currentContent(tab);
@@ -1290,7 +1291,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
 
   void _captureActiveContent() {
     final _WorkspaceFileTab? tab = _activeTab;
-    if (tab == null || tab.file.isImage) return;
+    if (tab == null || tab.file.isReadOnlyPreview) return;
     final quill.QuillController? quillController = _quillController;
     if (quillController != null) tab.selection = quillController.selection;
     tab.draftContent = _currentContent(tab);
@@ -1337,7 +1338,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
 
   Future<void> _saveActive() async {
     final _WorkspaceFileTab? tab = _activeTab;
-    if (tab == null || tab.file.isImage || !tab.isDirty) return;
+    if (tab == null || tab.file.isReadOnlyPreview || !tab.isDirty) return;
     _captureActiveContent();
     await widget.controller.saveOpenFile(tab.draftContent);
     if (!mounted || widget.controller.filesError != null) return;
@@ -1501,7 +1502,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
                 ),
               ),
               const SizedBox(width: 8),
-              if (!activeTab.file.isImage)
+              if (!activeTab.file.isReadOnlyPreview)
                 FilledButton.icon(
                   style: FilledButton.styleFrom(
                     shape: const RoundedRectangleBorder(
@@ -1528,17 +1529,22 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       );
 
   Widget _buildEditor(BuildContext context, _WorkspaceFileTab tab) {
-    if (tab.file.isImage) {
+    if (tab.file.isReadOnlyPreview) {
       return Padding(
         padding: const EdgeInsets.all(12),
         child: ClipRRect(
           borderRadius: const BorderRadius.all(Radius.circular(6)),
           child: ColoredBox(
             color: Theme.of(context).colorScheme.surfaceContainerLowest,
-            child: WorkspaceImagePreview(
-              path: tab.file.localPath!,
-              isSvg: tab.file.isSvg,
-            ),
+            child: tab.file.isImage
+                ? WorkspaceImagePreview(
+                    bytes: tab.file.previewBytes!,
+                    isSvg: tab.file.isSvg,
+                  )
+                : WorkspaceDocumentPreview(
+                    bytes: tab.file.previewBytes!,
+                    kind: tab.file.previewKind!.name,
+                  ),
           ),
         ),
       );

@@ -108,13 +108,6 @@ class ToolRegistry:
                         session, context.workspace_uuid, query, mode, limit)
             return search_knowledge
 
-        def search_graph_tool(context: ToolContext) -> ToolFunction:
-            async def search_knowledge_graph(query: str, limit: int = 8) -> list[dict[str, Any]]:
-                async with context.database.session() as session:
-                    return await context.rag.search(
-                        session, context.workspace_uuid, query, "graph", limit)
-            return search_knowledge_graph
-
         specs = [
             ToolSpec("time", "get_current_time", "Get the current time in an IANA timezone.",
                      plain(get_current_time)),
@@ -136,10 +129,12 @@ class ToolRegistry:
         ]
         specs.extend(ToolSpec(*entry) for entry in database_tool_entries())
         specs.extend([
-            ToolSpec("knowledge", "search_knowledge", "Search indexed workspace text.",
-                     search_knowledge_tool),
-            ToolSpec("knowledge", "search_knowledge_graph", "Search the workspace knowledge graph.",
-                     search_graph_tool),
+            ToolSpec(
+                "knowledge",
+                "search_knowledge",
+                "Semantically search enabled workspace folders; sensitive files return names only.",
+                search_knowledge_tool,
+            ),
         ])
         return specs
 

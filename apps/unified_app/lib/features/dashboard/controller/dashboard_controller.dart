@@ -31,23 +31,29 @@ final class OpenWorkspaceFile {
     required this.rootIndex,
     required this.path,
     required this.content,
-    this.localPath,
+    this.previewBytes,
+    this.previewKind,
     this.mediaType,
   });
 
   final int rootIndex;
   final String path;
   final String content;
-  final String? localPath;
+  final Uint8List? previewBytes;
+  final WorkspacePreviewKind? previewKind;
   final String? mediaType;
 
   String get name => path.replaceAll('\\', '/').split('/').last;
-  bool get isImage => localPath != null;
+  bool get isReadOnlyPreview => previewKind != null && previewBytes != null;
+  bool get isImage => previewKind == WorkspacePreviewKind.image;
+  bool get isDocumentPreview =>
+      previewKind == WorkspacePreviewKind.pdf ||
+      previewKind == WorkspacePreviewKind.docx;
   bool get isSvg => mediaType == 'image/svg+xml';
 
-  static bool supportsImagePreview(String path) {
+  static WorkspacePreviewKind? previewKindForPath(String path) {
     final String lower = path.toLowerCase();
-    return const <String>[
+    if (const <String>[
       '.bmp',
       '.gif',
       '.jpeg',
@@ -55,8 +61,15 @@ final class OpenWorkspaceFile {
       '.png',
       '.svg',
       '.webp',
-    ].any(lower.endsWith);
+    ].any(lower.endsWith)) {
+      return WorkspacePreviewKind.image;
+    }
+    if (lower.endsWith('.pdf')) return WorkspacePreviewKind.pdf;
+    if (lower.endsWith('.docx')) return WorkspacePreviewKind.docx;
+    return null;
   }
+
+  static bool supportsPreview(String path) => previewKindForPath(path) != null;
 }
 
 /// A stable reference to a file within one of a workspace's directory roots.
@@ -225,6 +238,7 @@ final class DashboardController extends ChangeNotifier {
   String? _workspacesWorkspaceUuid;
   String? _threadsWorkspaceUuid;
   String? _threadsThreadUuid;
+  final Map<String, String> _threadUuidsByWorkspace = <String, String>{};
   String? _filesWorkspaceUuid;
   int? _filesRootIndex;
   String? _filesPath;
@@ -451,7 +465,11 @@ final class DashboardController extends ChangeNotifier {
       if (thread != null) {
         await selectThread(thread, remember: false);
       } else if (_threadsThreadUuid != null) {
-        _threadsThreadUuid = null;
+        if (_threadsWorkspaceUuid case final String workspaceUuid) {
+          _setRememberedThread(workspaceUuid, null);
+        } else {
+          _threadsThreadUuid = null;
+        }
       }
     } else if (section == DashboardSection.files) {
       final int? rootIndex = _filesRootIndex;
@@ -584,7 +602,28 @@ final class DashboardController extends ChangeNotifier {
     );
     _workspacesWorkspaceUuid = _stringValue(workspaces['workspaceUuid']);
     _threadsWorkspaceUuid = _stringValue(threads['workspaceUuid']);
-    _threadsThreadUuid = _stringValue(threads['threadUuid']);
+    _threadUuidsByWorkspace.clear();
+    final Map<String, dynamic> rememberedThreads = _objectValue(
+      threads['threadUuidsByWorkspace'],
+    );
+    for (final MapEntry<String, dynamic> entry in rememberedThreads.entries) {
+      final String? threadUuid = _stringValue(entry.value);
+      if (entry.key.isNotEmpty && threadUuid?.isNotEmpty == true) {
+        _threadUuidsByWorkspace[entry.key] = threadUuid!;
+      }
+    }
+    final String? legacyThreadUuid = _stringValue(threads['threadUuid']);
+    if (_threadsWorkspaceUuid case final String workspaceUuid) {
+      if (legacyThreadUuid != null) {
+        _threadUuidsByWorkspace.putIfAbsent(
+          workspaceUuid,
+          () => legacyThreadUuid,
+        );
+      }
+      _threadsThreadUuid = _threadUuidsByWorkspace[workspaceUuid];
+    } else {
+      _threadsThreadUuid = null;
+    }
     _filesWorkspaceUuid = _stringValue(files['workspaceUuid']);
     _filesRootIndex = _nonNegativeIntValue(files['rootIndex']);
     _filesPath = _stringValue(files['path']);
@@ -651,6 +690,11 @@ final class DashboardController extends ChangeNotifier {
         if (_threadsWorkspaceUuid != null)
           'workspaceUuid': _threadsWorkspaceUuid,
         if (_threadsThreadUuid != null) 'threadUuid': _threadsThreadUuid,
+        'threadUuidsByWorkspace': <String, String>{
+          for (final MapEntry<String, String> entry
+              in _threadUuidsByWorkspace.entries)
+            entry.key: entry.value,
+        },
       },
       'files': <String, dynamic>{
         if (_filesWorkspaceUuid != null) 'workspaceUuid': _filesWorkspaceUuid,
@@ -866,6 +910,17 @@ final class DashboardController extends ChangeNotifier {
           .listWorkspaces()
           .timeout(requestTimeout);
       workspaces = loaded;
+      final Set<String> workspaceUuids = <String>{
+        for (final Workspace workspace in loaded) workspace.uuid,
+      };
+      final int rememberedThreadCount = _threadUuidsByWorkspace.length;
+      _threadUuidsByWorkspace.removeWhere(
+        (String workspaceUuid, String _) =>
+            !workspaceUuids.contains(workspaceUuid),
+      );
+      if (_threadUuidsByWorkspace.length != rememberedThreadCount) {
+        _markNavigationChanged();
+      }
 
       final Workspace? managementWorkspace =
           _workspaceByUuid(
@@ -928,7 +983,9 @@ final class DashboardController extends ChangeNotifier {
       threadsError = null;
       isLoadingThreads = false;
       _threadRequestVersion++;
-      _threadsThreadUuid = null;
+      _threadsThreadUuid = workspace == null
+          ? null
+          : _threadUuidsByWorkspace[workspace.uuid];
       _clearFiles();
       chatSessionVersion++;
       _setChatScope(
@@ -946,12 +1003,19 @@ final class DashboardController extends ChangeNotifier {
     isLoadingThreads = true;
     threadsError = null;
     notifyListeners();
+    ThreadInfo? rememberedThread;
     try {
       final List<ThreadInfo> loaded = await repository!
           .listThreads(workspace.uuid)
           .timeout(requestTimeout);
       if (requestVersion != _threadRequestVersion) return;
       threads = loaded;
+      final String? rememberedUuid = _threadUuidsByWorkspace[workspace.uuid];
+      rememberedThread = _threadByUuid(rememberedUuid);
+      if (rememberedUuid != null && rememberedThread == null) {
+        _setRememberedThread(workspace.uuid, null);
+        _markNavigationChanged();
+      }
     } on Object catch (caughtError) {
       if (requestVersion == _threadRequestVersion) threadsError = caughtError;
     } finally {
@@ -960,6 +1024,17 @@ final class DashboardController extends ChangeNotifier {
         notifyListeners();
       }
     }
+    if (rememberedThread == null ||
+        requestVersion != _threadRequestVersion ||
+        activeWorkspace?.uuid != workspace.uuid) {
+      return;
+    }
+    if (selectedThread?.uuid == rememberedThread.uuid) {
+      selectedThread = rememberedThread;
+      notifyListeners();
+      return;
+    }
+    await selectThread(rememberedThread, remember: false);
   }
 
   Future<void> selectThread(ThreadInfo thread, {bool remember = true}) async {
@@ -969,11 +1044,10 @@ final class DashboardController extends ChangeNotifier {
     pendingDraftTitle = null;
     pendingDraftToolsConfig = null;
     chatSessionVersion++;
-    if (remember) {
-      _threadsWorkspaceUuid = threadsWorkspace?.uuid ?? thread.workspaceUuid;
-      _threadsThreadUuid = thread.uuid;
-      _markNavigationChanged();
-    }
+    final String workspaceUuid = threadsWorkspace?.uuid ?? thread.workspaceUuid;
+    _threadsWorkspaceUuid = workspaceUuid;
+    _setRememberedThread(workspaceUuid, thread.uuid);
+    if (remember) _markNavigationChanged();
     chatProvider?.dispose();
     chatProvider = null;
     chatError = null;
@@ -1020,7 +1094,7 @@ final class DashboardController extends ChangeNotifier {
     selectedThread = null;
     pendingDraftTitle = null;
     pendingDraftToolsConfig = null;
-    _threadsThreadUuid = null;
+    _setRememberedThread(workspace.uuid, null);
     chatSessionVersion++;
     _setChatScope(
       workspaceUuid: workspace.uuid,
@@ -1075,7 +1149,7 @@ final class DashboardController extends ChangeNotifier {
     pendingDraftTitle = null;
     pendingDraftToolsConfig = null;
     _threadsWorkspaceUuid = workspace.uuid;
-    _threadsThreadUuid = created.uuid;
+    _setRememberedThread(workspace.uuid, created.uuid);
     draftProvider.bindThread(created.uuid);
     _markNavigationChanged();
     notifyListeners();
@@ -1263,7 +1337,7 @@ final class DashboardController extends ChangeNotifier {
     final Workspace? workspace = _filesWorkspace;
     final RestEngineClient? client = repository?.rest;
     if (workspace == null || client == null) return null;
-    if (OpenWorkspaceFile.supportsImagePreview(path)) {
+    if (OpenWorkspaceFile.supportsPreview(path)) {
       final WorkspaceFilePreview preview = await client
           .previewFile(
             workspaceUuid: workspace.uuid,
@@ -1275,7 +1349,8 @@ final class DashboardController extends ChangeNotifier {
         rootIndex: rootIndex,
         path: path,
         content: '',
-        localPath: preview.localPath,
+        previewBytes: preview.bytes,
+        previewKind: preview.kind,
         mediaType: preview.mediaType,
       );
     }
@@ -1448,8 +1523,20 @@ final class DashboardController extends ChangeNotifier {
     return null;
   }
 
+  void _setRememberedThread(String workspaceUuid, String? threadUuid) {
+    if (threadUuid == null) {
+      _threadUuidsByWorkspace.remove(workspaceUuid);
+    } else {
+      _threadUuidsByWorkspace[workspaceUuid] = threadUuid;
+    }
+    if (_threadsWorkspaceUuid == workspaceUuid) {
+      _threadsThreadUuid = threadUuid;
+    }
+  }
+
   void _forgetWorkspace(String workspaceUuid) {
     bool changed = _workspaceViewerStates.remove(workspaceUuid) != null;
+    if (_threadUuidsByWorkspace.remove(workspaceUuid) != null) changed = true;
     if (_workspacesWorkspaceUuid == workspaceUuid) {
       _workspacesWorkspaceUuid = null;
       changed = true;

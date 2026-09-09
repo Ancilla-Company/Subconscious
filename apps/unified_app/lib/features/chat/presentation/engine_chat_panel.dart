@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../engine_llm_provider.dart';
+import '../../settings/presentation/settings_main_panel.dart';
 
 typedef MaterializeThreadDraftCallback = Future<EngineLlmProvider> Function(
   String firstMessage,
@@ -270,6 +271,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                           initialToolsConfig:
                               widget.thread?.toolsConfig ??
                               widget.draftToolsConfig,
+                          threadUuid: widget.thread?.uuid,
                           isDraft: widget.thread == null,
                           onCancel: _toggleThreadSettings,
                           onSave: _saveThreadSettings,
@@ -687,6 +689,7 @@ final class _ThreadSettingsPanel extends StatefulWidget {
     required this.workspace,
     required this.initialTitle,
     required this.initialToolsConfig,
+    required this.threadUuid,
     required this.isDraft,
     required this.onCancel,
     required this.onSave,
@@ -696,6 +699,7 @@ final class _ThreadSettingsPanel extends StatefulWidget {
   final Workspace workspace;
   final String? initialTitle;
   final String? initialToolsConfig;
+  final String? threadUuid;
   final bool isDraft;
   final VoidCallback onCancel;
   final _SaveThreadSettingsCallback onSave;
@@ -886,16 +890,27 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
             );
           },
         ),
-        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6, top: 18),
+          child: Text(
+            'Thread name',
+            style: Theme.of(context).textTheme.labelMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ),
         TextField(
           controller: _titleController,
           autofocus: widget.isDraft,
           enabled: !_saving,
           decoration: InputDecoration(
-            labelText: 'Thread name',
+            isDense: true,
             hintText: 'New thread',
             filled: true,
             fillColor: colors.surfaceContainerLowest,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 8,
+            ),
             border: OutlineInputBorder(
               borderRadius: const BorderRadius.all(Radius.circular(3)),
               borderSide: BorderSide(color: colors.outlineVariant),
@@ -919,6 +934,68 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
             ),
           ),
         ),
+        if (widget.threadUuid case final String threadUuid) ...<Widget>[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6, top: 18),
+            child: Text(
+              'Thread UUID',
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: SizedBox(
+                  height: 32,
+                  child: Theme(
+                    data: settingsFormTheme(context),
+                    child: TextFormField(
+                      key: ValueKey<String>(threadUuid),
+                      initialValue: threadUuid,
+                      readOnly: true,
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.center,
+                      decoration: const InputDecoration(
+                        constraints: BoxConstraints.tightFor(height: 32),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox.square(
+                dimension: 32,
+                child: IconButton(
+                  tooltip: 'Copy thread UUID',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 32,
+                  ),
+                  style: IconButton.styleFrom(
+                    backgroundColor: colors.surfaceContainerLowest,
+                    side: BorderSide(color: colors.outlineVariant),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(3)),
+                    ),
+                  ),
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: threadUuid));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Thread UUID copied')),
+                      );
+                    }
+                  },
+                  icon: const Icon(FluentIcons.copy_20_regular, size: 17),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 8),
         _switchRow(
           context,

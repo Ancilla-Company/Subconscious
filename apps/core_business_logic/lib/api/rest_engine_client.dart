@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -192,13 +193,25 @@ final class RestEngineClient {
     required String workspaceUuid,
     required int rootIndex,
     required String path,
-  }) async => WorkspaceFilePreview.fromJson(
-    await _getMap(
+  }) async {
+    final _BinaryResponse response = await _requestBinary(
       'workspaces/${_segment(workspaceUuid)}/files/preview',
-      authenticate: true,
       query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
-    ),
-  );
+      maxBytes: 50 * 1024 * 1024,
+    );
+    return WorkspaceFilePreview(
+      kind: WorkspacePreviewKind.fromHeader(
+        response.headers['x-preview-kind'] ?? '',
+      ),
+      mediaType:
+          response.headers['content-type']?.split(';').first.trim() ??
+          'application/octet-stream',
+      bytes: response.bytes,
+      filename: _contentDispositionFilename(
+        response.headers['content-disposition'],
+      ),
+    );
+  }
 
   Future<WorkspaceFileContent> createFile({
     required String workspaceUuid,
@@ -238,6 +251,14 @@ final class RestEngineClient {
       'workspaces/${_segment(workspaceUuid)}/files/directory',
       query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
     ),
+  );
+
+  Future<Map<String, dynamic>> indexWorkspaceRagRoot({
+    required String workspaceUuid,
+    required int rootIndex,
+  }) => _requestMap(
+    'POST',
+    'workspaces/${_segment(workspaceUuid)}/rag/roots/$rootIndex/index',
   );
 
   Future<List<ModelConfiguration>> listModelConfigurations() async =>
@@ -391,6 +412,48 @@ final class RestEngineClient {
     return value.cast<String, dynamic>();
   }
 
+  Future<_BinaryResponse> _requestBinary(
+    String path, {
+    required int maxBytes,
+    Map<String, String> query = const <String, String>{},
+  }) async {
+    final Uri uri = _baseUri
+        .resolve(path)
+        .replace(queryParameters: query.isEmpty ? null : query);
+    final http.Request request = http.Request('GET', uri)
+      ..headers['Accept'] =
+          'image/*, application/pdf, '
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (token.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    final http.StreamedResponse response = await _client.send(request);
+    final int? declaredLength = int.tryParse(
+      response.headers['content-length'] ?? '',
+    );
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        declaredLength != null &&
+        declaredLength > maxBytes) {
+      throw const FormatException(
+        'Workspace preview exceeds the client limit.',
+      );
+    }
+    final int bodyLimit =
+        response.statusCode >= 200 && response.statusCode < 300
+        ? maxBytes
+        : 1024 * 1024;
+    final Uint8List bytes = await _readBounded(response.stream, bodyLimit);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw apiException(
+        request,
+        response,
+        utf8.decode(bytes, allowMalformed: true),
+      );
+    }
+    return _BinaryResponse(bytes, response.headers);
+  }
+
   Future<dynamic> _request(
     String method,
     String path, {
@@ -416,6 +479,47 @@ final class RestEngineClient {
     if (text.trim().isEmpty) return null;
     return jsonDecode(text);
   }
+}
+
+final class _BinaryResponse {
+  const _BinaryResponse(this.bytes, this.headers);
+
+  final Uint8List bytes;
+  final Map<String, String> headers;
+}
+
+Future<Uint8List> _readBounded(Stream<List<int>> stream, int maxBytes) async {
+  final BytesBuilder builder = BytesBuilder(copy: false);
+  var length = 0;
+  await for (final List<int> chunk in stream) {
+    length += chunk.length;
+    if (length > maxBytes) {
+      throw const FormatException(
+        'Workspace preview exceeds the client limit.',
+      );
+    }
+    builder.add(chunk);
+  }
+  return builder.takeBytes();
+}
+
+String? _contentDispositionFilename(String? value) {
+  if (value == null) return null;
+  final RegExpMatch? encoded = RegExp(
+    r"filename\*=UTF-8''([^;]+)",
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (encoded != null) {
+    try {
+      return Uri.decodeComponent(encoded.group(1)!);
+    } on FormatException {
+      return null;
+    }
+  }
+  return RegExp(
+    r'filename="([^"]*)"',
+    caseSensitive: false,
+  ).firstMatch(value)?.group(1);
 }
 
 String _segment(String value) => Uri.encodeComponent(value);

@@ -21,8 +21,8 @@ class WorkspaceRetriever:
         embedder: Embedder | None = None,
         store: SidecarStore | None = None,
     ) -> None:
-        self.embedder = embedder or HashingEmbedder()
-        self.store = store or SidecarStore(root, create=False)
+        self.embedder = embedder if embedder is not None else HashingEmbedder()
+        self.store = store if store is not None else SidecarStore(root, create=False)
         self._owns_store = store is None
 
     async def search(

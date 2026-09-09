@@ -22,6 +22,21 @@ async def index_workspace(request: Request) -> Response:
         return _failure(error)
 
 
+async def index_workspace_root(request: Request) -> Response:
+    try:
+        root_index = int(request.path_params["root_index"])
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "root_index must be an integer."}, 400)
+    try:
+        async with request.app.state.database.session() as session:
+            result = await request.app.state.rag_service.index_root(
+                session, request.path_params["uuid"], root_index
+            )
+        return json_response(result)
+    except RagServiceError as error:
+        return _failure(error)
+
+
 async def search_workspace(request: Request) -> Response:
     try:
         body = RagSearchRequest.model_validate(await request.json())
@@ -37,5 +52,12 @@ async def search_workspace(request: Request) -> Response:
 
 
 def rag_routes() -> list[Route]:
-    return [Route("/api/v1/workspaces/{uuid}/rag/index", index_workspace, methods=["POST"]),
-            Route("/api/v1/workspaces/{uuid}/rag/search", search_workspace, methods=["POST"])]
+    return [
+        Route("/api/v1/workspaces/{uuid}/rag/index", index_workspace, methods=["POST"]),
+        Route(
+            "/api/v1/workspaces/{uuid}/rag/roots/{root_index}/index",
+            index_workspace_root,
+            methods=["POST"],
+        ),
+        Route("/api/v1/workspaces/{uuid}/rag/search", search_workspace, methods=["POST"]),
+    ]

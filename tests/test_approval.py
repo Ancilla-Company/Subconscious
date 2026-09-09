@@ -1,25 +1,35 @@
 import pytest
 
 from subconscious_engine.approval import (
-    MUTATION, QUERY, ApprovalConfig, classify_operation,
+    CREATE, DELETE, READ, UPDATE, ApprovalConfig, classify_operation,
 )
 
 
-@pytest.mark.parametrize("name", ["read_file", "list_todos", "search_custom", "get_status"])
-def test_known_and_prefixed_read_operations_are_queries(name):
-    assert classify_operation(name) == QUERY
-
-
-@pytest.mark.parametrize("name", ["delete_note", "run_command", "custom_tool", "Read_File", ""])
-def test_known_unknown_and_ambiguous_operations_fail_closed_as_mutations(name):
-    assert classify_operation(name) == MUTATION
+@pytest.mark.parametrize(("name", "operation"), [
+    ("read_file", READ),
+    ("list_todos", READ),
+    ("search_custom", READ),
+    ("get_status", READ),
+    ("delete_note", DELETE),
+    ("add_todo", CREATE),
+    ("run_command", UPDATE),
+    ("custom_tool", UPDATE),
+    ("Read_File", UPDATE),
+    ("", UPDATE),
+])
+def test_tools_are_classified_as_crud_and_unknown_operations_fail_closed(name, operation):
+    assert classify_operation(name) == operation
 
 
 def test_valid_config_controls_each_operation_class():
-    config = ApprovalConfig.from_json('{"query": false, "mutation": true}')
-    assert config == ApprovalConfig(query=False, mutation=True)
+    config = ApprovalConfig.from_json(
+        '{"create": true, "read": false, "update": true, "delete": false}'
+    )
+    assert config == ApprovalConfig(create=True, read=False, update=True, delete=False)
     assert config.requires("read_file") is False
+    assert config.requires("add_todo") is True
     assert config.requires("run_command") is True
+    assert config.requires("delete_note") is False
 
 
 @pytest.mark.parametrize("raw", [None, "", "not-json", "[]", "null", "1"])

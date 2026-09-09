@@ -95,21 +95,30 @@ ThemeData _workspaceFormTheme(BuildContext context) {
   );
 }
 
-IconButton _dashboardIconButton({
+Widget _dashboardIconButton({
   required String tooltip,
   required VoidCallback? onPressed,
   required Widget icon,
   Color? foregroundColor,
-}) => IconButton(
-  tooltip: tooltip,
-  constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-  padding: EdgeInsets.zero,
-  style: IconButton.styleFrom(
-    foregroundColor: foregroundColor,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-  ),
-  onPressed: onPressed,
-  icon: icon,
+}) => Builder(
+  builder: (BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return SizedBox.square(
+      dimension: 32,
+      child: IconButton(
+        tooltip: tooltip,
+        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        padding: EdgeInsets.zero,
+        style: IconButton.styleFrom(
+          foregroundColor: foregroundColor,
+          backgroundColor: colors.surfaceContainerLowest,
+          side: BorderSide(color: colors.outlineVariant),
+        ),
+        onPressed: onPressed,
+        icon: icon,
+      ),
+    );
+  },
 );
 
 final class _WorkspaceDetailsPanel extends StatefulWidget {
@@ -141,9 +150,10 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   Map<String, bool> _configuredTools = <String, bool>{};
   String? _selectedModelId;
   late String _savedSignature;
-  bool _buildKnowledgeGraph = false;
-  bool _approveQueries = true;
-  bool _approveMutations = true;
+  bool _approveCreate = true;
+  bool _approveRead = true;
+  bool _approveUpdate = true;
+  bool _approveDelete = true;
   bool _builtinEnabled = true;
   bool _configuredEnabled = true;
   bool _builtinExpanded = false;
@@ -152,9 +162,11 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   bool _isLoadingOptions = true;
   bool _isSaving = false;
   bool _isDeleting = false;
+  final Set<int> _reindexingRootIndexes = <int>{};
   Object? _error;
 
-  bool get _isBusy => _isSaving || _isDeleting;
+  bool get _isBusy =>
+      _isSaving || _isDeleting || _reindexingRootIndexes.isNotEmpty;
   String get _name => _nameController.text.trim();
   String get _description => _descriptionController.text.trim();
   bool get _isDirty => _signature() != _savedSignature;
@@ -164,6 +176,17 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
       !_isLoadingOptions &&
       _name.isNotEmpty &&
       _isDirty;
+  bool get _canAddPath =>
+      widget.controller.isConnected &&
+      !_isBusy &&
+      !_isLoadingOptions &&
+      _name.isNotEmpty &&
+      _pathController.text.trim().isNotEmpty;
+  bool get _canPersistRag =>
+      widget.controller.isConnected &&
+      !_isBusy &&
+      !_isLoadingOptions &&
+      _name.isNotEmpty;
 
   @override
   void initState() {
@@ -174,6 +197,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     _synchronizeWorkspace(widget.workspace);
     _nameController.addListener(_onFieldChanged);
     _descriptionController.addListener(_onFieldChanged);
+    _pathController.addListener(_onFieldChanged);
     unawaited(_loadOptions());
   }
 
@@ -194,13 +218,28 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     _rawApproval = _decodeObject(workspace.approvalConfig);
     _rawRag = _decodeObject(workspace.ragConfig);
     _rawTools = _decodeObject(workspace.toolsConfig);
-    _buildKnowledgeGraph = _readBool(
-      _rawRag,
-      'semantic_graph',
-      fallback: false,
+    final bool legacyQuery = _readBool(_rawApproval, 'query', fallback: true);
+    final bool legacyMutation = _readBool(
+      _rawApproval,
+      'mutation',
+      fallback: true,
     );
-    _approveQueries = _readBool(_rawApproval, 'query', fallback: true);
-    _approveMutations = _readBool(_rawApproval, 'mutation', fallback: true);
+    _approveCreate = _readBool(
+      _rawApproval,
+      'create',
+      fallback: legacyMutation,
+    );
+    _approveRead = _readBool(_rawApproval, 'read', fallback: legacyQuery);
+    _approveUpdate = _readBool(
+      _rawApproval,
+      'update',
+      fallback: legacyMutation,
+    );
+    _approveDelete = _readBool(
+      _rawApproval,
+      'delete',
+      fallback: legacyMutation,
+    );
     _builtinEnabled = _readBool(_rawTools, 'builtin_enabled', fallback: true);
     _configuredEnabled = _readBool(
       _rawTools,
@@ -290,7 +329,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     });
   }
 
-  void _addPath() {
+  Future<void> _addPath() async {
     final String raw = _pathController.text.trim();
     final String? path = _normalizeAbsolutePath(raw);
     if (path == null) {
@@ -309,8 +348,54 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     }
     _change(() {
       _paths = <String>[..._paths, path];
-      _pathController.clear();
+      _setRagEnabled(path, true);
     });
+    _pathController.clear();
+    await _save();
+  }
+
+  void _removePath(String path) => _change(() {
+    _paths = _paths
+        .where((String item) => item != path)
+        .toList(growable: false);
+    _setRagEnabled(path, true);
+  });
+
+  Future<void> _toggleRag(String path, bool enabled) async {
+    if (!_canPersistRag) return;
+    _change(() => _setRagEnabled(path, enabled));
+    await _save();
+  }
+
+  Future<void> _reindexRoot(int rootIndex, String path) async {
+    if (_isBusy || !widget.controller.isConnected || !_isRagEnabled(path)) {
+      return;
+    }
+    final RestEngineClient? client = widget.controller.repository?.rest;
+    if (client == null) {
+      setState(
+        () => _error = StateError('The Subconscious engine is not connected.'),
+      );
+      return;
+    }
+    setState(() {
+      _reindexingRootIndexes.add(rootIndex);
+      _error = null;
+    });
+    try {
+      await client
+          .indexWorkspaceRagRoot(
+            workspaceUuid: widget.workspace.uuid,
+            rootIndex: rootIndex,
+          )
+          .timeout(DashboardController.requestTimeout);
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = error);
+    } finally {
+      if (mounted) {
+        setState(() => _reindexingRootIndexes.remove(rootIndex));
+      }
+    }
   }
 
   Future<void> _save() async {
@@ -327,7 +412,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
         defaultModelId: _selectedModelId,
         directories: jsonEncode(_paths),
         approvalConfig: _serializeApproval(),
-        ragConfig: _serializeRag(),
+        ragConfig: jsonEncode(_rawRag),
         toolsConfig: _serializeTools(),
       );
       if (!mounted) return;
@@ -343,14 +428,12 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
 
   String _serializeApproval() {
     final Map<String, dynamic> value = _deepCopy(_rawApproval)
-      ..['query'] = _approveQueries
-      ..['mutation'] = _approveMutations;
-    return jsonEncode(value);
-  }
-
-  String _serializeRag() {
-    final Map<String, dynamic> value = _deepCopy(_rawRag)
-      ..['semantic_graph'] = _buildKnowledgeGraph;
+      ..remove('query')
+      ..remove('mutation')
+      ..['create'] = _approveCreate
+      ..['read'] = _approveRead
+      ..['update'] = _approveUpdate
+      ..['delete'] = _approveDelete;
     return jsonEncode(value);
   }
 
@@ -428,9 +511,11 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     'description': _description,
     'model': _selectedModelId,
     'paths': _paths,
-    'graph': _buildKnowledgeGraph,
-    'queries': _approveQueries,
-    'mutations': _approveMutations,
+    'rag': _rawRag,
+    'approveCreate': _approveCreate,
+    'approveRead': _approveRead,
+    'approveUpdate': _approveUpdate,
+    'approveDelete': _approveDelete,
     'builtinEnabled': _builtinEnabled,
     'configuredEnabled': _configuredEnabled,
     'builtinGroups': _builtinGroups,
@@ -446,7 +531,9 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     _descriptionController
       ..removeListener(_onFieldChanged)
       ..dispose();
-    _pathController.dispose();
+    _pathController
+      ..removeListener(_onFieldChanged)
+      ..dispose();
     super.dispose();
   }
 
@@ -495,29 +582,34 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                       const SizedBox(height: 18),
                       _buildPathEditor(context, colors),
                       const SizedBox(height: 18),
-                      _switchRow(
-                        context,
-                        title: 'Build knowledge graph',
-                        subtitle: 'Enable semantic_graph for this workspace.',
-                        value: _buildKnowledgeGraph,
-                        onChanged: (bool value) =>
-                            _change(() => _buildKnowledgeGraph = value),
-                      ),
-                      const SizedBox(height: 18),
                       _label(context, 'Require approval'),
                       _switchRow(
                         context,
-                        title: 'Queries',
-                        value: _approveQueries,
+                        title: 'Create',
+                        value: _approveCreate,
                         onChanged: (bool value) =>
-                            _change(() => _approveQueries = value),
+                            _change(() => _approveCreate = value),
                       ),
                       _switchRow(
                         context,
-                        title: 'Mutations',
-                        value: _approveMutations,
+                        title: 'Read',
+                        value: _approveRead,
                         onChanged: (bool value) =>
-                            _change(() => _approveMutations = value),
+                            _change(() => _approveRead = value),
+                      ),
+                      _switchRow(
+                        context,
+                        title: 'Update',
+                        value: _approveUpdate,
+                        onChanged: (bool value) =>
+                            _change(() => _approveUpdate = value),
+                      ),
+                      _switchRow(
+                        context,
+                        title: 'Delete',
+                        value: _approveDelete,
+                        onChanged: (bool value) =>
+                            _change(() => _approveDelete = value),
                       ),
                       const SizedBox(height: 18),
                       _label(context, 'Tool allow list'),
@@ -586,7 +678,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                         dimension: 14,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(FluentIcons.delete_20_regular, size: 18),
+                    : const Icon(FluentIcons.delete_20_regular, size: 17),
               ),
               const SizedBox(width: 4),
               _dashboardIconButton(
@@ -597,7 +689,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                         dimension: 14,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(FluentIcons.save_20_regular, size: 18),
+                    : const Icon(FluentIcons.save_20_regular, size: 17),
               ),
             ],
           ),
@@ -635,9 +727,9 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   Widget _buildPathEditor(BuildContext context, ColorScheme colors) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      _label(context, 'Workspace path allow list'),
+      _label(context, 'RAG & workspace folders'),
       Text(
-        'Only listed absolute folders may be granted to filesystem, image, download, and terminal tools for this workspace.',
+        'These folders appear in the Files view and, when RAG is enabled, are indexed daily for semantic RAG so the model can choose to search their content. Sensitive files are represented by name only.',
         style: Theme.of(context).textTheme.bodySmall
             ?.copyWith(color: colors.onSurfaceVariant),
       ),
@@ -651,14 +743,16 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
               decoration: const InputDecoration(
                 hintText: r'C:\Projects\example',
               ),
-              onSubmitted: (_) => _addPath(),
+              onSubmitted: (_) {
+                if (_canAddPath) unawaited(_addPath());
+              },
             ),
           ),
           const SizedBox(width: 8),
           _dashboardIconButton(
             tooltip: 'Add workspace path',
-            onPressed: _isBusy ? null : _addPath,
-            icon: const Icon(FluentIcons.add_20_regular, size: 18),
+            onPressed: _canAddPath ? _addPath : null,
+            icon: const Icon(FluentIcons.add_20_regular, size: 17),
           ),
         ],
       ),
@@ -666,31 +760,59 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
         Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Text(
-            'No workspace paths have been allowed yet. Local file-oriented tools will have no workspace scope.',
+            'No workspace folders have been added yet.',
             style: Theme.of(context).textTheme.bodySmall
                 ?.copyWith(color: colors.onSurfaceVariant),
           ),
         )
       else
-        for (final String path in _paths)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: Text(path, overflow: TextOverflow.ellipsis),
-            trailing: _dashboardIconButton(
-              tooltip: 'Remove workspace path: $path',
-              onPressed: _isBusy
-                  ? null
-                  : () => _change(
-                      () => _paths = _paths
-                          .where((String item) => item != path)
-                          .toList(growable: false),
-                    ),
-              icon: const Icon(FluentIcons.dismiss_20_regular, size: 18),
-            ),
-          ),
+        for (int rootIndex = 0; rootIndex < _paths.length; rootIndex++)
+          _buildPathRow(rootIndex, _paths[rootIndex]),
     ],
   );
+
+  Widget _buildPathRow(int rootIndex, String path) {
+    final bool ragEnabled = _isRagEnabled(path);
+    final bool isReindexing = _reindexingRootIndexes.contains(rootIndex);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      title: Text(path, overflow: TextOverflow.ellipsis),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Text('RAG'),
+          const SizedBox(width: 2),
+          _RectangularSwitch(
+            value: ragEnabled,
+            onChanged: _canPersistRag
+                ? (bool enabled) => unawaited(_toggleRag(path, enabled))
+                : null,
+            semanticLabel: 'Enable RAG for $path',
+          ),
+          const SizedBox(width: 4),
+          _dashboardIconButton(
+            tooltip: 'Reindex workspace folder: $path',
+            onPressed: _isBusy || !widget.controller.isConnected || !ragEnabled
+                ? null
+                : () => unawaited(_reindexRoot(rootIndex, path)),
+            icon: isReindexing
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(FluentIcons.arrow_sync_20_regular, size: 17),
+          ),
+          const SizedBox(width: 4),
+          _dashboardIconButton(
+            tooltip: 'Remove workspace path: $path',
+            onPressed: _isBusy ? null : () => _removePath(path),
+            icon: const Icon(FluentIcons.dismiss_20_regular, size: 17),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _switchRow(
     BuildContext context, {
@@ -908,7 +1030,45 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
       _label(context, 'UUID'),
-      SelectableText(widget.workspace.uuid),
+      Row(
+        children: <Widget>[
+          Expanded(
+            child: SizedBox(
+              height: 32,
+              child: Theme(
+                data: settingsFormTheme(context),
+                child: TextFormField(
+                  key: ValueKey<String>(widget.workspace.uuid),
+                  initialValue: widget.workspace.uuid,
+                  readOnly: true,
+                  maxLines: null,
+                  expands: true,
+                  textAlignVertical: TextAlignVertical.center,
+                  decoration: const InputDecoration(
+                    constraints: BoxConstraints.tightFor(height: 32),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _dashboardIconButton(
+            tooltip: 'Copy workspace UUID',
+            onPressed: () async {
+              await Clipboard.setData(
+                ClipboardData(text: widget.workspace.uuid),
+              );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Workspace UUID copied')),
+                );
+              }
+            },
+            icon: const Icon(FluentIcons.copy_20_regular, size: 17),
+          ),
+        ],
+      ),
       const SizedBox(height: 16),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -961,6 +1121,42 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
 
   static Map<String, dynamic> _deepCopy(Map<String, dynamic> value) =>
       _objectValue(jsonDecode(jsonEncode(value)));
+
+  bool _isRagEnabled(String path) {
+    final Object? rawRoots = _rawRag['roots'];
+    if (rawRoots is! List) return true;
+    for (final Object? rawRoot in rawRoots) {
+      if (rawRoot is! Map) continue;
+      final Map<String, dynamic> root = _objectValue(rawRoot);
+      if (_samePath(root['path'], path) && root['enabled'] == false) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _setRagEnabled(String path, bool enabled) {
+    final Map<String, dynamic> value = _deepCopy(_rawRag);
+    final Object? rawRoots = value['roots'];
+    if (enabled && rawRoots is! List) return;
+    final List<dynamic> roots = rawRoots is List
+        ? List<dynamic>.from(rawRoots)
+        : <dynamic>[];
+    final int previousLength = roots.length;
+    roots.removeWhere((dynamic rawRoot) {
+      if (rawRoot is! Map) return false;
+      return _samePath(_objectValue(rawRoot)['path'], path);
+    });
+    if (enabled && roots.length == previousLength) return;
+    if (!enabled) roots.add(<String, dynamic>{'path': path, 'enabled': false});
+    value['roots'] = roots;
+    _rawRag = value;
+  }
+
+  static bool _samePath(Object? left, String right) =>
+      left is String &&
+      left.replaceAll('\\', '/').toLowerCase() ==
+          right.replaceAll('\\', '/').toLowerCase();
 
   static bool _readBool(
     Map<String, dynamic> value,
@@ -1112,7 +1308,7 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
                             : widget.controller.cancelWorkspaceCreation,
                         icon: const Icon(
                           FluentIcons.dismiss_20_regular,
-                          size: 18,
+                          size: 17,
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -1126,7 +1322,7 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Icon(FluentIcons.add_20_regular, size: 18),
+                            : const Icon(FluentIcons.add_20_regular, size: 17),
                       ),
                     ],
                   ),

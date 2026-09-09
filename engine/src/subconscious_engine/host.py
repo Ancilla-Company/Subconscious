@@ -49,7 +49,7 @@ class EngineHost:
         )
         self.event_bus = EventBus()
         self.tool_registry = ToolRegistry()
-        self.rag_service = WorkspaceRagService()
+        self.rag_service = WorkspaceRagService(self.model_configuration_store)
         self.agent_manager = AgentManager()
         self.app = create_app(
             self.database,

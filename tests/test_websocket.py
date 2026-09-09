@@ -212,7 +212,7 @@ def test_approval_request_envelope_resolves_and_always_removes_pending_future():
                     "thread_uuid": "thread-3",
                     "tool_name": "read_file",
                     "arguments": {"path": "notes.txt"},
-                    "operation": "query",
+                    "operation": "read",
                 },
             }]
             assert "approval-fixed" in session.pending

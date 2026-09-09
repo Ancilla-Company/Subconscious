@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 DateTime? _dateTimeFromJson(Object? value) {
   if (value is! String || value.isEmpty) return null;
@@ -330,24 +331,31 @@ final class WorkspaceFileContent {
       );
 }
 
+enum WorkspacePreviewKind {
+  image,
+  pdf,
+  docx;
+
+  factory WorkspacePreviewKind.fromHeader(String value) => switch (value) {
+    'image' => WorkspacePreviewKind.image,
+    'pdf' => WorkspacePreviewKind.pdf,
+    'docx' => WorkspacePreviewKind.docx,
+    _ => throw const FormatException('Unsupported workspace preview kind.'),
+  };
+}
+
 final class WorkspaceFilePreview {
   const WorkspaceFilePreview({
-    required this.localPath,
+    required this.kind,
     required this.mediaType,
+    required this.bytes,
+    this.filename,
   });
 
-  final String localPath;
+  final WorkspacePreviewKind kind;
   final String mediaType;
-
-  factory WorkspaceFilePreview.fromJson(Map<String, dynamic> json) =>
-      WorkspaceFilePreview(
-        localPath:
-            _stringValue(json, 'localPath', 'local_path') ??
-            (throw const FormatException('Preview path is required.')),
-        mediaType:
-            _stringValue(json, 'mediaType', 'media_type') ??
-            'application/octet-stream',
-      );
+  final Uint8List bytes;
+  final String? filename;
 }
 
 final class ModelConfiguration {
@@ -432,7 +440,7 @@ final class BuiltinToolCatalogEntry {
       BuiltinToolCatalogEntry(
         name: _stringValue(json, 'name', 'name') ?? '',
         doc: _stringValue(json, 'doc', 'doc') ?? '',
-        operation: _stringValue(json, 'operation', 'operation') ?? 'query',
+        operation: _stringValue(json, 'operation', 'operation') ?? 'read',
       );
 }
 

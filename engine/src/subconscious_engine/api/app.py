@@ -1,7 +1,8 @@
 """Starlette application exposing the engine REST, SSE, and WebSocket surfaces."""
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 
 from starlette.applications import Starlette
 from starlette.datastructures import State
@@ -48,15 +49,21 @@ def create_app(database: Database, token: EngineAuthToken,
     store = model_configuration_store or EncryptedModelConfigurationStore(database.path.parent)
     bus = event_bus or EventBus()
     builtins = tool_registry or ToolRegistry()
-    rag = rag_service or WorkspaceRagService()
+    rag = rag_service or WorkspaceRagService(store)
     agents = agent_manager or AgentManager()
 
     @asynccontextmanager
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
         await database.initialize()
+        scheduler = asyncio.create_task(rag.run_daily_indexing(database)) \
+            if isinstance(rag, WorkspaceRagService) else None
         try:
             yield
         finally:
+            if scheduler is not None:
+                scheduler.cancel()
+                with suppress(asyncio.CancelledError):
+                    await scheduler
             await database.close()
 
     routes = [

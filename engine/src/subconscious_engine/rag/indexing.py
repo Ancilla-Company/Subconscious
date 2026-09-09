@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -17,6 +19,21 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_CHARACTERS: Final = 500_000
 _CHUNK_CHARACTERS: Final = 1_500
 _CHUNK_TOKENS: Final = 500
+_SENSITIVE_EXTENSIONS: Final = frozenset({
+    ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx",
+})
+_SENSITIVE_FILENAMES: Final = frozenset({
+    ".env", ".git-credentials", ".netrc", "_netrc", ".npmrc", ".pypirc",
+    "auth.json", "credentials", "credentials.json", "service-account.json",
+})
+_SENSITIVE_NAME: Final = re.compile(
+    r"(?:secret|credential|private[-_. ]?key|api[-_. ]?key|service[-_. ]?account)",
+    re.IGNORECASE,
+)
+_SSH_PRIVATE_NAME: Final = re.compile(
+    r"^(?:id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?|identity|"
+    r"ssh_host_(?:rsa|dsa|ecdsa|ed25519)_key)$", re.IGNORECASE,
+)
 _DEFAULT_SKIPS: Final = frozenset(
     {
         SIDECAR_DIRNAME,
@@ -77,6 +94,9 @@ class WorkspaceIndexer:
     def index_directory_sync(self, only_changed: bool = True) -> IndexSummary:
         if not self.root.is_dir():
             raise NotADirectoryError(self.root)
+        signature = self.embedder.name
+        if self.store.get_metadata("embedding_signature") != signature:
+            only_changed = False
         indexed = unchanged = skipped = errors = 0
         seen: set[str] = set()
         for path in self._walk():
@@ -96,6 +116,8 @@ class WorkspaceIndexer:
             else:
                 skipped += 1
         removed = self.store.prune_documents(seen)
+        self.store.set_metadata("embedding_signature", signature)
+        self.store.set_metadata("last_indexed_at", str(int(time.time())))
         return IndexSummary(indexed, unchanged, skipped, errors, removed)
 
     def _walk(self):
@@ -114,16 +136,33 @@ class WorkspaceIndexer:
                 yield path
 
     def _index_file(self, path: Path, rel_path: str, only_changed: bool) -> str:
+        stat = path.stat()
+        directory = Path(rel_path).parent.as_posix()
+        if directory == ".":
+            directory = ""
+        if self._is_sensitive(rel_path):
+            digest = hashlib.sha256(
+                f"{stat.st_size}:{stat.st_mtime_ns}".encode("ascii")
+            ).hexdigest()
+            existing = self.store.get_document(rel_path)
+            if only_changed and existing and existing.get("content_hash") == digest:
+                return "unchanged"
+            placeholder = (
+                f"Sensitive file exists at {rel_path}; its content was deliberately excluded."
+            )
+            self.store.replace_document(
+                rel_path, directory, stat.st_size, int(stat.st_mtime), digest,
+                [(placeholder, None, None, max(1, (len(placeholder) + 3) // 4))],
+                self.embedder.embed_batch([placeholder]), status="metadata_only",
+            )
+            return "indexed"
+
         raw = path.read_bytes()
         digest = hashlib.sha256(raw).hexdigest()
         existing = self.store.get_document(rel_path)
         if only_changed and existing and existing.get("content_hash") == digest:
             return "unchanged"
         text = raw.decode("utf-8", errors="replace")
-        stat = path.stat()
-        directory = Path(rel_path).parent.as_posix()
-        if directory == ".":
-            directory = ""
         if len(text) > _MAX_CHARACTERS:
             self.store.replace_document(
                 rel_path,
@@ -163,6 +202,21 @@ class WorkspaceIndexer:
             vectors,
         )
         return "indexed"
+
+    @staticmethod
+    def _is_sensitive(rel_path: str) -> bool:
+        path = Path(rel_path)
+        folded_parts = [part.casefold() for part in path.parts]
+        filename = folded_parts[-1] if folded_parts else ""
+        if filename in _SENSITIVE_FILENAMES or filename.startswith(".env."):
+            return True
+        if path.suffix.casefold() in _SENSITIVE_EXTENSIONS:
+            return True
+        if _SSH_PRIVATE_NAME.fullmatch(filename):
+            return True
+        if len(folded_parts) >= 2 and folded_parts[-2:] == [".docker", "config.json"]:
+            return True
+        return any(_SENSITIVE_NAME.search(part) for part in folded_parts)
 
     @staticmethod
     def chunk_text(text: str) -> list[tuple[str, int, int, int]]:

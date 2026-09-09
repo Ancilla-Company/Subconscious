@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
 
+CREATE TABLE IF NOT EXISTS metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS chunk_vectors (
     chunk_id INTEGER PRIMARY KEY,
     vector BLOB NOT NULL,
@@ -169,6 +174,21 @@ class SidecarStore:
                 (path,),
             ).fetchone()
         return self._dict(row)
+
+    def get_metadata(self, key: str) -> str | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT value FROM metadata WHERE key=?", (key,)
+            ).fetchone()
+        return str(row["value"]) if row is not None else None
+
+    def set_metadata(self, key: str, value: str) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT INTO metadata (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
 
     def list_documents(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -380,7 +400,7 @@ class SidecarStore:
 
     @staticmethod
     def _result(row: sqlite3.Row, score: float) -> dict[str, Any]:
-        return {
+        result = {
             "chunk_id": int(row["chunk_id"]),
             "document_id": int(row["document_id"]),
             "path": row["path"],
@@ -390,9 +410,14 @@ class SidecarStore:
             "start_line": row["start_line"],
             "end_line": row["end_line"],
             "token_estimate": row["token_estimate"],
+            "status": row["status"],
             "score": float(score),
             "result_type": "chunk",
         }
+        if row["status"] == "metadata_only":
+            result["sensitive"] = True
+            result["metadata_only"] = True
+        return result
 
     def keyword_search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         terms = list(dict.fromkeys(term for term in query.casefold().split() if term))
@@ -405,7 +430,7 @@ class SidecarStore:
         parameters.append(max(limit * 8, 50))
         sql = (
             "SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.content, c.start_line, "
-            "c.end_line, c.token_estimate, d.path FROM chunks c "
+            "c.end_line, c.token_estimate, d.path, d.status FROM chunks c "
             "JOIN documents d ON d.id=c.document_id WHERE "
             + predicates
             + " ORDER BY c.id LIMIT ?"
@@ -438,7 +463,7 @@ class SidecarStore:
         with self._lock:
             rows = self._connection.execute(
                 "SELECT c.id AS chunk_id, c.document_id, c.ordinal, c.content, c.start_line, "
-                "c.end_line, c.token_estimate, d.path, v.vector FROM chunk_vectors v "
+                "c.end_line, c.token_estimate, d.path, d.status, v.vector FROM chunk_vectors v "
                 "JOIN chunks c ON c.id=v.chunk_id JOIN documents d ON d.id=c.document_id"
             ).fetchall()
         results: list[dict[str, Any]] = []
