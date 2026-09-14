@@ -66,10 +66,20 @@ final class MobileDashboardView extends StatelessWidget {
         provider: provider,
         isComposerEnabled: controller.isConnected,
         workspace: controller.threadsWorkspace,
+        activeFile: controller.openFile == null
+            ? null
+            : ChatFileReference(
+                rootIndex: controller.openFile!.rootIndex,
+                path: controller.openFile!.path,
+              ),
         thread: controller.selectedThread,
         onCreateThread: controller.beginThreadDraft,
         onMaterializeThreadDraft: controller.materializeThreadDraft,
         onUpdateThreadDraft: controller.updateThreadDraft,
+        onRefreshActiveFile: controller.refreshOpenFile,
+        toolApproval: controller.pendingToolApproval,
+        onToolApproval: (bool approved) =>
+            unawaited(controller.respondToToolApproval(approved)),
         onUpdateThread:
             ({
               required ThreadInfo thread,

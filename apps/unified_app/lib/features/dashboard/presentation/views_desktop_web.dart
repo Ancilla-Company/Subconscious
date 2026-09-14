@@ -254,11 +254,22 @@ final class _DesktopWebDashboardViewState
                 provider: provider,
                 isComposerEnabled: widget.controller.isConnected,
                 workspace: widget.controller.threadsWorkspace,
+                activeFile: widget.controller.openFile == null
+                    ? null
+                    : ChatFileReference(
+                        rootIndex: widget.controller.openFile!.rootIndex,
+                        path: widget.controller.openFile!.path,
+                      ),
                 thread: widget.controller.selectedThread,
                 onCreateThread: widget.controller.beginThreadDraft,
                 onMaterializeThreadDraft:
                     widget.controller.materializeThreadDraft,
                 onUpdateThreadDraft: widget.controller.updateThreadDraft,
+                onRefreshActiveFile: widget.controller.refreshOpenFile,
+                toolApproval: widget.controller.pendingToolApproval,
+                onToolApproval: (bool approved) => unawaited(
+                  widget.controller.respondToToolApproval(approved),
+                ),
                 onUpdateThread:
                     ({
                       required ThreadInfo thread,

@@ -92,7 +92,10 @@ final class EngineLlmProvider extends ChangeNotifier {
     yield* _stream(prompt);
   }
 
-  Stream<String> sendMessageStream(String prompt) async* {
+  Stream<String> sendMessageStream(
+    String prompt, {
+    core.ChatFileContext? fileContext,
+  }) async* {
     final EngineChatMessage user = EngineChatMessage.user(prompt);
     _history.add(user);
     _timestamps[user] = DateTime.now();
@@ -101,7 +104,10 @@ final class EngineLlmProvider extends ChangeNotifier {
     _timestamps[response] = DateTime.now();
     notifyListeners();
     try {
-      await for (final String delta in _stream(prompt)) {
+      await for (final String delta in _stream(
+        prompt,
+        fileContext: fileContext,
+      )) {
         response.append(delta);
         notifyListeners();
         yield delta;
@@ -114,10 +120,12 @@ final class EngineLlmProvider extends ChangeNotifier {
     }
   }
 
-  Stream<String> _stream(String prompt) => repository.streamChat(
-    content: prompt,
-    threadUuid: threadUuid,
-    workspaceUuid: workspaceUuid,
-    modelId: modelId,
-  );
+  Stream<String> _stream(String prompt, {core.ChatFileContext? fileContext}) =>
+      repository.streamChat(
+        content: prompt,
+        threadUuid: threadUuid,
+        workspaceUuid: workspaceUuid,
+        modelId: modelId,
+        fileContext: fileContext,
+      );
 }

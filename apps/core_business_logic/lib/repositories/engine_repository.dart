@@ -20,12 +20,14 @@ final class EngineRepository {
     String? threadUuid,
     String? workspaceUuid,
     String? modelId,
+    ChatFileContext? fileContext,
   }) async* {
     final String turnId = socket.sendChat(
       content: content,
       threadUuid: threadUuid,
       workspaceUuid: workspaceUuid,
       modelId: modelId,
+      fileContext: fileContext,
     );
     const Set<String> turnFrameTypes = <String>{
       'chat.delta',

@@ -214,6 +214,9 @@ final class DashboardController extends ChangeNotifier {
   Object? chatError;
   Object? filesError;
   Object? navigationError;
+  ToolApprovalRequest? pendingToolApproval;
+  final List<ToolApprovalRequest> _toolApprovalQueue = <ToolApprovalRequest>[];
+  final Map<String, int> _approvedUiToolActions = <String, int>{};
   bool isLoadingWorkspaces = false;
   bool isLoadingThreads = false;
   bool isLoadingChat = false;
@@ -475,8 +478,10 @@ final class DashboardController extends ChangeNotifier {
         }
       }
     } else if (section == DashboardSection.files) {
-      final int? rootIndex = _filesRootIndex;
-      final String? path = _filesPath;
+      final bool matchesActiveWorkspace =
+          _filesWorkspaceUuid == activeWorkspace?.uuid;
+      final int? rootIndex = matchesActiveWorkspace ? _filesRootIndex : null;
+      final String? path = matchesActiveWorkspace ? _filesPath : null;
       if (rootIndex != null && path != null && openFile == null) {
         final bool opened = await openWorkspaceFile(
           rootIndex,
@@ -891,21 +896,41 @@ final class DashboardController extends ChangeNotifier {
   Future<void> _listenToEngineEvents(EngineRepository eventRepository) async {
     if (identical(_engineEventRepository, eventRepository) &&
         _engineEventSubscription != null) {
+      eventRepository.socket.registerUiTools();
       return;
     }
     await _engineEventSubscription?.cancel();
     if (_disposed) return;
+    pendingToolApproval = null;
+    _toolApprovalQueue.clear();
+    _approvedUiToolActions.clear();
     _engineEventRepository = eventRepository;
     _engineEventSubscription = eventRepository.socket.frames.listen(
       _handleEngineEvent,
       onError: (_) {},
     );
+    eventRepository.socket.registerUiTools();
   }
 
   void _handleEngineEvent(WireFrame frame) {
     if (_disposed) return;
     final Map<String, dynamic> data = frame.data ?? <String, dynamic>{};
     switch (frame.type) {
+      case 'tool.approval.request':
+        _enqueueToolApproval(frame, data);
+        return;
+      case 'client.tool.request':
+        unawaited(_handleClientToolRequest(frame, data));
+        return;
+      case 'chat.done':
+      case 'chat.error':
+      case 'chat.cancelled':
+        if (frame.id case final String turnId) {
+          _approvedUiToolActions.removeWhere(
+            (String key, int _) => key.startsWith('$turnId\u0000'),
+          );
+        }
+        return;
       case 'message.created':
         final Object? threadId = data['threadId'];
         if (threadId is String && selectedThread?.uuid == threadId) {
@@ -918,6 +943,371 @@ final class DashboardController extends ChangeNotifier {
           unawaited(_refreshThreadsForActiveWorkspace(workspaceId));
         }
         return;
+    }
+  }
+
+  void _enqueueToolApproval(WireFrame frame, Map<String, dynamic> data) {
+    final String? turnId = frame.id;
+    final Object? rawArguments = data['arguments'];
+    if (turnId == null ||
+        data['approval_id'] is! String ||
+        data['thread_uuid'] is! String ||
+        data['tool_name'] is! String ||
+        rawArguments is! Map) {
+      return;
+    }
+    final ToolApprovalRequest request = ToolApprovalRequest(
+      turnId: turnId,
+      approvalId: data['approval_id']! as String,
+      threadUuid: data['thread_uuid']! as String,
+      toolName: data['tool_name']! as String,
+      arguments: rawArguments.cast<String, dynamic>(),
+      operation: data['operation'] is String
+          ? data['operation']! as String
+          : 'update',
+    );
+    if (pendingToolApproval?.approvalId == request.approvalId ||
+        _toolApprovalQueue.any(
+          (ToolApprovalRequest item) => item.approvalId == request.approvalId,
+        )) {
+      return;
+    }
+    if (pendingToolApproval == null) {
+      pendingToolApproval = request;
+    } else {
+      _toolApprovalQueue.add(request);
+    }
+    // Surface consent even when the chat panel or mobile thread view is hidden.
+    chatPanelVisible = true;
+    selectedSection = DashboardSection.threads;
+    settings.showUtility();
+    notifyListeners();
+  }
+
+  Future<void> respondToToolApproval(bool approved) async {
+    final ToolApprovalRequest? request = pendingToolApproval;
+    final WebSocketEngineClient? socket = repository?.socket;
+    if (request == null || socket == null) return;
+    pendingToolApproval = _toolApprovalQueue.isEmpty
+        ? null
+        : _toolApprovalQueue.removeAt(0);
+    notifyListeners();
+    try {
+      socket.respondToolApproval(
+        turnId: request.turnId,
+        approvalId: request.approvalId,
+        approved: approved,
+      );
+      if (approved && _uiToolNames.contains(request.toolName)) {
+        final String key = _uiToolActionKey(
+          request.turnId,
+          request.toolName,
+          request.arguments,
+        );
+        _approvedUiToolActions[key] = (_approvedUiToolActions[key] ?? 0) + 1;
+      }
+    } on Object catch (caughtError) {
+      error = caughtError;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _handleClientToolRequest(
+    WireFrame frame,
+    Map<String, dynamic> data,
+  ) async {
+    final WebSocketEngineClient? socket = repository?.socket;
+    final String? turnId = frame.id;
+    final String? requestId = data['request_id'] is String
+        ? data['request_id']! as String
+        : null;
+    final String? toolName = data['tool_name'] is String
+        ? data['tool_name']! as String
+        : null;
+    final Object? rawArguments = data['arguments'];
+    if (socket == null || turnId == null || requestId == null) return;
+    if (toolName == null || rawArguments is! Map) {
+      socket.sendClientToolResult(
+        turnId: turnId,
+        requestId: requestId,
+        ok: false,
+        error: 'The UI tool request is malformed.',
+      );
+      return;
+    }
+    final Map<String, dynamic> arguments = rawArguments.cast<String, dynamic>();
+    final String approvalKey = _uiToolActionKey(turnId, toolName, arguments);
+    final int approvalCount = _approvedUiToolActions[approvalKey] ?? 0;
+    if (approvalCount <= 0) {
+      socket.sendClientToolResult(
+        turnId: turnId,
+        requestId: requestId,
+        ok: false,
+        error: 'The UI tool request was not explicitly approved.',
+      );
+      return;
+    }
+    if (approvalCount == 1) {
+      _approvedUiToolActions.remove(approvalKey);
+    } else {
+      _approvedUiToolActions[approvalKey] = approvalCount - 1;
+    }
+    try {
+      final Object? result = await _executeUiTool(toolName, arguments);
+      socket.sendClientToolResult(
+        turnId: turnId,
+        requestId: requestId,
+        ok: true,
+        result: result,
+      );
+    } on Object catch (caughtError) {
+      socket.sendClientToolResult(
+        turnId: turnId,
+        requestId: requestId,
+        ok: false,
+        error: '$caughtError',
+      );
+    }
+  }
+
+  Future<Object?> _executeUiTool(
+    String toolName,
+    Map<String, dynamic> arguments,
+  ) async => switch (toolName) {
+    'set_ui_theme_color' => _setUiThemeColor(arguments),
+    'set_ui_lighting_mode' => _setUiLightingMode(arguments),
+    'open_ui_workspace_file' => _openUiWorkspaceFile(arguments),
+    'navigate_ui' => _navigateUi(arguments),
+    'set_workspace_builtin_tool_enabled' => _setWorkspaceBuiltinToolEnabled(
+      arguments,
+    ),
+    _ => throw StateError('The requested UI tool is not allowed.'),
+  };
+
+  Future<Map<String, dynamic>> _setUiThemeColor(
+    Map<String, dynamic> arguments,
+  ) async {
+    final String color = _requiredString(arguments, 'color').toLowerCase();
+    final String value = switch (color) {
+      'device' => 'Device',
+      'neutral' => 'Default',
+      'blue' => 'Blue',
+      'purple' => 'Purple',
+      'green' => 'Green',
+      'orange' => 'Orange',
+      'red' => 'Red',
+      _ => throw ArgumentError('Unsupported theme color.'),
+    };
+    await settings.updateGeneralSetting(
+      DashboardSettingsController.colourThemeKey,
+      value,
+    );
+    return <String, dynamic>{'color': color};
+  }
+
+  Future<Map<String, dynamic>> _setUiLightingMode(
+    Map<String, dynamic> arguments,
+  ) async {
+    final String mode = _requiredString(arguments, 'mode').toLowerCase();
+    final String value = switch (mode) {
+      'device' => 'Device',
+      'light' => 'Light',
+      'dark' => 'Dark',
+      _ => throw ArgumentError('Unsupported lighting mode.'),
+    };
+    await settings.updateGeneralSetting(
+      DashboardSettingsController.modeKey,
+      value,
+    );
+    return <String, dynamic>{'mode': mode};
+  }
+
+  Future<Map<String, dynamic>> _openUiWorkspaceFile(
+    Map<String, dynamic> arguments,
+  ) async {
+    final Object? rawRootIndex = arguments['root_index'];
+    final String path = _requiredString(arguments, 'path');
+    if (rawRootIndex is! int || rawRootIndex < 0) {
+      throw ArgumentError('root_index must be a non-negative integer.');
+    }
+    await activateSection(DashboardSection.files);
+    if (!await openWorkspaceFile(rawRootIndex, path)) {
+      throw StateError('The workspace file could not be opened.');
+    }
+    return <String, dynamic>{'rootIndex': rawRootIndex, 'path': path};
+  }
+
+  Future<Map<String, dynamic>> _navigateUi(
+    Map<String, dynamic> arguments,
+  ) async {
+    final String destination = _requiredString(
+      arguments,
+      'destination',
+    ).toLowerCase();
+    switch (destination) {
+      case 'workspaces':
+        await activateSection(DashboardSection.workspaces);
+      case 'threads':
+        await activateSection(DashboardSection.threads);
+      case 'files':
+        await activateSection(DashboardSection.files);
+      case 'settings':
+        await activateSection(DashboardSection.settings);
+      case 'account':
+        await activateSection(DashboardSection.account);
+      case 'show_chat':
+        updateLayoutState(chatPanelVisible: true);
+      case 'hide_chat':
+        updateLayoutState(chatPanelVisible: false);
+      case 'show_main':
+        updateLayoutState(mainPanelVisible: true);
+      case 'hide_main':
+        updateLayoutState(mainPanelVisible: false);
+      case 'show_context':
+        updateLayoutState(contextPanelVisible: true);
+      case 'hide_context':
+        updateLayoutState(contextPanelVisible: false);
+      default:
+        throw ArgumentError('Unsupported UI destination.');
+    }
+    return <String, dynamic>{'destination': destination};
+  }
+
+  Future<Map<String, dynamic>> _setWorkspaceBuiltinToolEnabled(
+    Map<String, dynamic> arguments,
+  ) async {
+    final Workspace workspace =
+        activeWorkspace ??
+        (throw StateError('No active workspace is selected.'));
+    final String group = _requiredString(arguments, 'group');
+    final String tool = arguments['tool'] is String
+        ? (arguments['tool']! as String).trim()
+        : '';
+    final Object? rawEnabled = arguments['enabled'];
+    if (rawEnabled is! bool) {
+      throw ArgumentError('enabled must be a boolean.');
+    }
+    final ToolCatalog catalog =
+        await (repository?.rest ??
+                (throw StateError('The Subconscious engine is not connected.')))
+            .listToolCatalog();
+    final List<BuiltinToolCatalogEntry>? groupCatalog = catalog.builtin[group];
+    if (groupCatalog == null ||
+        (tool.isNotEmpty &&
+            !groupCatalog.any(
+              (BuiltinToolCatalogEntry item) => item.name == tool,
+            ))) {
+      throw ArgumentError('The requested built-in tool is not registered.');
+    }
+    final Map<String, dynamic> config = _decodeJsonObject(
+      workspace.toolsConfig,
+    );
+    final Map<String, dynamic> builtin = _objectValue(config['builtin']);
+    final Map<String, dynamic> groupConfig = _objectValue(builtin[group]);
+    if (tool.isEmpty) {
+      groupConfig['enabled'] = rawEnabled;
+    } else {
+      final Map<String, dynamic> tools = _objectValue(groupConfig['tools']);
+      tools[tool] = rawEnabled;
+      groupConfig['tools'] = tools;
+    }
+    builtin[group] = groupConfig;
+    config['builtin'] = builtin;
+    await updateWorkspace(
+      workspace,
+      name: workspace.name,
+      description: workspace.description,
+      defaultModelId: workspace.defaultModelId,
+      toolsConfig: jsonEncode(config),
+      directories: workspace.directories ?? '[]',
+      approvalConfig: workspace.approvalConfig ?? '{}',
+      ragConfig: workspace.ragConfig ?? '{}',
+    );
+    return <String, dynamic>{
+      'group': group,
+      if (tool.isNotEmpty) 'tool': tool,
+      'enabled': rawEnabled,
+    };
+  }
+
+  static const Set<String> _uiToolNames = <String>{
+    'set_ui_theme_color',
+    'set_ui_lighting_mode',
+    'open_ui_workspace_file',
+    'navigate_ui',
+    'set_workspace_builtin_tool_enabled',
+  };
+
+  static String _requiredString(Map<String, dynamic> arguments, String key) {
+    final Object? value = arguments[key];
+    if (value is! String || value.trim().isEmpty) {
+      throw ArgumentError('$key must be a non-empty string.');
+    }
+    return value.trim();
+  }
+
+  static String _uiToolActionKey(
+    String turnId,
+    String toolName,
+    Map<String, dynamic> arguments,
+  ) =>
+      '$turnId\u0000$toolName\u0000${jsonEncode(_sortedJson(_normalizedUiArguments(toolName, arguments)))}';
+
+  static Map<String, dynamic> _normalizedUiArguments(
+    String toolName,
+    Map<String, dynamic> arguments,
+  ) => switch (toolName) {
+    'set_ui_theme_color' => <String, dynamic>{
+      'color': arguments['color'] is String
+          ? (arguments['color']! as String).trim().toLowerCase()
+          : arguments['color'],
+    },
+    'set_ui_lighting_mode' => <String, dynamic>{
+      'mode': arguments['mode'] is String
+          ? (arguments['mode']! as String).trim().toLowerCase()
+          : arguments['mode'],
+    },
+    'navigate_ui' => <String, dynamic>{
+      'destination': arguments['destination'] is String
+          ? (arguments['destination']! as String).trim().toLowerCase()
+          : arguments['destination'],
+    },
+    'open_ui_workspace_file' => <String, dynamic>{
+      'root_index': arguments['root_index'],
+      'path': arguments['path'] is String
+          ? (arguments['path']! as String).trim()
+          : arguments['path'],
+    },
+    'set_workspace_builtin_tool_enabled' => <String, dynamic>{
+      'group': arguments['group'] is String
+          ? (arguments['group']! as String).trim()
+          : arguments['group'],
+      'enabled': arguments['enabled'],
+      'tool': arguments['tool'] is String
+          ? (arguments['tool']! as String).trim()
+          : '',
+    },
+    _ => arguments,
+  };
+
+  static Object? _sortedJson(Object? value) {
+    if (value is List) return value.map(_sortedJson).toList(growable: false);
+    if (value is Map) {
+      final List<String> keys = value.keys.map((Object? key) => '$key').toList()
+        ..sort();
+      return <String, dynamic>{
+        for (final String key in keys) key: _sortedJson(value[key]),
+      };
+    }
+    return value;
+  }
+
+  static Map<String, dynamic> _decodeJsonObject(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return <String, dynamic>{};
+    try {
+      return _objectValue(jsonDecode(raw));
+    } on FormatException {
+      return <String, dynamic>{};
     }
   }
 
@@ -1090,6 +1480,21 @@ final class DashboardController extends ChangeNotifier {
     }
     _threadsWorkspaceUuid = workspace?.uuid;
     _filesWorkspaceUuid = workspace?.uuid;
+    if (changed) {
+      final _WorkspaceViewerState? viewerState = workspace == null
+          ? null
+          : _workspaceViewerStates[workspace.uuid];
+      WorkspaceFileReference? activeReference;
+      for (final WorkspaceFileReference reference
+          in viewerState?.openFiles ?? const <WorkspaceFileReference>[]) {
+        if (reference.key == viewerState?.activeFileKey) {
+          activeReference = reference;
+          break;
+        }
+      }
+      _filesRootIndex = activeReference?.rootIndex;
+      _filesPath = activeReference?.path;
+    }
     if (remember) _markNavigationChanged();
     notifyListeners();
     if (workspace == null || repository == null || !isConnected) return;
@@ -1506,6 +1911,12 @@ final class DashboardController extends ChangeNotifier {
     return opened;
   }
 
+  Future<void> refreshOpenFile() async {
+    final OpenWorkspaceFile? file = openFile;
+    if (file == null) return;
+    await openWorkspaceFile(file.rootIndex, file.path, remember: false);
+  }
+
   Future<void> saveOpenFile(String content) async {
     final Workspace? workspace = _filesWorkspace;
     final OpenWorkspaceFile? file = openFile;
@@ -1602,7 +2013,7 @@ final class DashboardController extends ChangeNotifier {
   }
 
   _WorkspaceViewerState? get _currentViewerState {
-    final String? workspaceUuid = selectedWorkspace?.uuid;
+    final String? workspaceUuid = activeWorkspace?.uuid;
     return workspaceUuid == null ? null : _workspaceViewerStates[workspaceUuid];
   }
 

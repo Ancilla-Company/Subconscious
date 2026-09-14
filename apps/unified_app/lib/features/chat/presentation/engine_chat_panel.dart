@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:core_business_logic/core_business_logic.dart';
+import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,11 +30,15 @@ final class EngineChatPanel extends StatefulWidget {
     required this.provider,
     required this.isComposerEnabled,
     this.workspace,
+    this.activeFile,
     this.thread,
     this.onCreateThread,
     this.onMaterializeThreadDraft,
     this.onUpdateThreadDraft,
     this.onUpdateThread,
+    this.onRefreshActiveFile,
+    this.toolApproval,
+    this.onToolApproval,
     this.title,
     this.draftToolsConfig,
     this.useNeutralUserBubbleForeground = false,
@@ -43,11 +48,15 @@ final class EngineChatPanel extends StatefulWidget {
   final EngineLlmProvider provider;
   final bool isComposerEnabled;
   final Workspace? workspace;
+  final ChatFileReference? activeFile;
   final ThreadInfo? thread;
   final VoidCallback? onCreateThread;
   final MaterializeThreadDraftCallback? onMaterializeThreadDraft;
   final UpdateThreadDraftCallback? onUpdateThreadDraft;
   final UpdateThreadCallback? onUpdateThread;
+  final Future<void> Function()? onRefreshActiveFile;
+  final ToolApprovalRequest? toolApproval;
+  final ValueChanged<bool>? onToolApproval;
   final String? title;
   final String? draftToolsConfig;
   final bool useNeutralUserBubbleForeground;
@@ -57,14 +66,19 @@ final class EngineChatPanel extends StatefulWidget {
 }
 
 final class _EngineChatPanelState extends State<EngineChatPanel> {
-  final TextEditingController _composer = TextEditingController();
+  late final TextEditingController _composer;
+  final FocusNode _composerFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   List<ModelInfo> _models = const <ModelInfo>[];
+  List<WorkspaceFileMatch> _fileSuggestions = const <WorkspaceFileMatch>[];
+  List<ChatAttachment> _attachments = const <ChatAttachment>[];
+  _TagQuery? _tagQuery;
+  Timer? _tagSearchDebounce;
+  int _tagSearchVersion = 0;
   String? _workspaceDefaultModelId;
   bool _isSending = false;
   bool _isUpdatingModel = false;
   bool _showThreadSettings = false;
-  Object? _error;
   int _modelLoadVersion = 0;
   int _modelUpdateVersion = 0;
   int _workspaceDefaultLoadVersion = 0;
@@ -74,6 +88,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   @override
   void initState() {
     super.initState();
+    _composer = _ComposerTextController()..addListener(_onComposerChanged);
     _workspaceDefaultModelId = _normalizedModelId(
       widget.workspace?.defaultModelId,
     );
@@ -91,6 +106,14 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   @override
   void didUpdateWidget(covariant EngineChatPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.workspace?.uuid != widget.workspace?.uuid) {
+      _tagSearchVersion++;
+      _tagSearchDebounce?.cancel();
+      _clearComposerContext();
+      _tagQuery = null;
+      _fileSuggestions = const <WorkspaceFileMatch>[];
+      _attachments = const <ChatAttachment>[];
+    }
     if (oldWidget.workspace?.uuid != widget.workspace?.uuid ||
         oldWidget.workspace?.defaultModelId !=
             widget.workspace?.defaultModelId) {
@@ -115,13 +138,11 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       }
       _models = const <ModelInfo>[];
       _isUpdatingModel = false;
-      _error = null;
       if (widget.isComposerEnabled) unawaited(_loadModels());
       _scheduleScrollToBottom();
       return;
     }
     if (!oldWidget.isComposerEnabled && widget.isComposerEnabled) {
-      _error = null;
       unawaited(_loadModels());
     }
   }
@@ -135,7 +156,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       setState(() => _models = loaded);
     } on Object catch (error) {
       if (!mounted || version != _modelLoadVersion) return;
-      setState(() => _error = error);
+      _showErrorToast(context, "Couldn't load models: $error");
     }
   }
 
@@ -174,10 +195,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     if (thread == null || update == null) return;
 
     final int version = ++_modelUpdateVersion;
-    setState(() {
-      _isUpdatingModel = true;
-      _error = null;
-    });
+    setState(() => _isUpdatingModel = true);
     try {
       await update(
         thread: thread,
@@ -192,7 +210,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
         return;
       }
       provider.selectModel(previousModelId);
-      setState(() => _error = error);
+      _showErrorToast(context, "Couldn't update the model: $error");
     } finally {
       if (mounted && version == _modelUpdateVersion) {
         setState(() => _isUpdatingModel = false);
@@ -216,13 +234,154 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     });
   }
 
-  Future<void> _send() async {
-    final String content = _composer.text.trim();
-    if (!widget.isComposerEnabled || content.isEmpty || _isSending) return;
+  List<ChatFileReference> get _activeComposerReferences {
+    final TextEditingController controller = _composer;
+    return controller is _ComposerTextController
+        ? controller.activeReferences
+        : const <ChatFileReference>[];
+  }
+
+  void _clearComposerContext() {
+    final TextEditingController controller = _composer;
+    if (controller is _ComposerTextController) {
+      controller.clearContext();
+    } else {
+      controller.clear();
+    }
+  }
+
+  void _insertComposerFileTag(WorkspaceFileMatch match, _TagQuery query) {
+    final TextEditingController controller = _composer;
+    if (controller is _ComposerTextController) {
+      controller.insertFileTag(match, query);
+      return;
+    }
+    final String token = '#${match.relativePath} ';
+    controller.value = TextEditingValue(
+      text: controller.text.replaceRange(query.start, query.end, token),
+      selection: TextSelection.collapsed(offset: query.start + token.length),
+    );
+  }
+
+  void _onComposerChanged() {
+    final _TagQuery? query = _ComposerTextController.currentTagQuery(
+      _composer.value,
+    );
+    _tagSearchDebounce?.cancel();
+    if (query == null || widget.workspace == null) {
+      if (_tagQuery != null || _fileSuggestions.isNotEmpty) {
+        setState(() {
+          _tagQuery = null;
+          _fileSuggestions = const <WorkspaceFileMatch>[];
+        });
+      }
+      return;
+    }
+    setState(() => _tagQuery = query);
+    _tagSearchDebounce = Timer(
+      const Duration(milliseconds: 160),
+      () => unawaited(_searchFiles(query)),
+    );
+  }
+
+  Future<void> _searchFiles(_TagQuery query) async {
+    final Workspace? workspace = widget.workspace;
+    if (workspace == null) return;
+    final int version = ++_tagSearchVersion;
+    try {
+      final List<WorkspaceFileMatch> matches = await widget
+          .provider
+          .repository
+          .rest
+          .searchFiles(
+            workspaceUuid: workspace.uuid,
+            query: query.query,
+            limit: 12,
+          );
+      if (!mounted || version != _tagSearchVersion || _tagQuery != query) {
+        return;
+      }
+      setState(() => _fileSuggestions = matches);
+    } on Object {
+      if (!mounted || version != _tagSearchVersion) return;
+      setState(() => _fileSuggestions = const <WorkspaceFileMatch>[]);
+    }
+  }
+
+  void _selectTaggedFile(WorkspaceFileMatch match) {
+    final _TagQuery? query = _tagQuery;
+    if (query == null) return;
+    _insertComposerFileTag(match, query);
     setState(() {
-      _isSending = true;
-      _error = null;
+      _tagQuery = null;
+      _fileSuggestions = const <WorkspaceFileMatch>[];
     });
+    _composerFocusNode.requestFocus();
+  }
+
+  Future<void> _pickAttachments() async {
+    try {
+      final List<file_selector.XFile> picked = await file_selector.openFiles();
+      if (picked.isEmpty) return;
+      final List<ChatAttachment> next = <ChatAttachment>[..._attachments];
+      int totalBytes = next.fold<int>(
+        0,
+        (int total, ChatAttachment item) => total + item.bytes.length,
+      );
+      for (final file_selector.XFile file in picked) {
+        if (next.length >= 5) {
+          throw StateError('A message can contain at most 5 attachments.');
+        }
+        final int length = await file.length();
+        if (length > 2 * 1024 * 1024) {
+          throw StateError('${file.name} exceeds the 2 MB attachment limit.');
+        }
+        final bytes = await file.readAsBytes();
+        totalBytes += bytes.length;
+        if (totalBytes > 8 * 1024 * 1024) {
+          throw StateError('Attachments exceed the 8 MB total limit.');
+        }
+        next.add(
+          ChatAttachment(
+            id: 'attachment-${DateTime.now().microsecondsSinceEpoch}-${next.length}',
+            name: file.name,
+            mediaType: _attachmentMediaType(file.name),
+            bytes: bytes,
+          ),
+        );
+      }
+      if (mounted) {
+        setState(() => _attachments = next);
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        _showErrorToast(context, "Couldn't attach the selected files: $error");
+      }
+    }
+  }
+
+  void _removeAttachment(String id) {
+    setState(() {
+      _attachments = _attachments
+          .where((ChatAttachment item) => item.id != id)
+          .toList(growable: false);
+    });
+  }
+
+  Future<void> _send() async {
+    final String typedContent = _composer.text.trim();
+    final String content = typedContent.isNotEmpty
+        ? typedContent
+        : _attachments.isNotEmpty
+        ? 'Review the attached file${_attachments.length == 1 ? '' : 's'}.'
+        : '';
+    if (!widget.isComposerEnabled || content.isEmpty || _isSending) return;
+    final ChatFileContext fileContext = ChatFileContext(
+      activeFile: widget.activeFile,
+      taggedFiles: _activeComposerReferences,
+      attachments: List<ChatAttachment>.unmodifiable(_attachments),
+    );
+    setState(() => _isSending = true);
     try {
       EngineLlmProvider provider = widget.provider;
       if (widget.thread == null) {
@@ -233,10 +392,17 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
         }
         provider = await materialize(content);
       }
-      _composer.clear();
+      _clearComposerContext();
+      if (mounted) {
+        setState(() {
+          _attachments = const <ChatAttachment>[];
+          _fileSuggestions = const <WorkspaceFileMatch>[];
+          _tagQuery = null;
+        });
+      }
       final Completer<void> completion = Completer<void>();
       final StreamSubscription<String> subscription = provider
-          .sendMessageStream(content)
+          .sendMessageStream(content, fileContext: fileContext)
           .listen(
             (_) {
               // Provider notifications redraw the streaming response.
@@ -262,8 +428,18 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
         }
         await subscription.cancel();
       }
+      if (fileContext.activeFile != null &&
+          widget.onRefreshActiveFile != null) {
+        try {
+          await widget.onRefreshActiveFile!.call();
+        } on Object {
+          // A successful turn should not fail because a preview refresh did.
+        }
+      }
     } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (mounted) {
+        _showErrorToast(context, "Couldn't send the message: $error");
+      }
     } finally {
       if (mounted) setState(() => _isSending = false);
       _scheduleScrollToBottom();
@@ -285,10 +461,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   }
 
   void _toggleThreadSettings() {
-    setState(() {
-      _showThreadSettings = !_showThreadSettings;
-      _error = null;
-    });
+    setState(() => _showThreadSettings = !_showThreadSettings);
   }
 
   Future<void> _saveThreadSettings(_ThreadSettingsDraft draft) async {
@@ -315,9 +488,14 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     _modelLoadVersion++;
     _modelUpdateVersion++;
     _workspaceDefaultLoadVersion++;
+    _tagSearchVersion++;
+    _tagSearchDebounce?.cancel();
     unawaited(_cancelActiveSend());
     widget.provider.removeListener(_onProviderChanged);
-    _composer.dispose();
+    _composer
+      ..removeListener(_onComposerChanged)
+      ..dispose();
+    _composerFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -390,27 +568,28 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                         ),
                 ),
                 if (!_showThreadSettings)
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-                      child: Text(
-                        '$_error',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
+                  if (widget.toolApproval
+                      case final ToolApprovalRequest request)
+                    _ToolApprovalCard(
+                      request: request,
+                      onDecision: widget.onToolApproval,
                     ),
                 if (!_showThreadSettings)
                   _Composer(
                     controller: _composer,
+                    focusNode: _composerFocusNode,
                     models: _models,
                     selectedModelId: widget.provider.modelId,
                     workspaceDefaultModelId: _workspaceDefaultModelId,
+                    activeFile: widget.activeFile,
+                    fileSuggestions: _fileSuggestions,
+                    attachments: _attachments,
                     isSending: _isSending,
                     isModelUpdating: _isUpdatingModel,
                     enabled: widget.isComposerEnabled,
+                    onFileSelected: _selectTaggedFile,
+                    onAddAttachment: () => unawaited(_pickAttachments()),
+                    onRemoveAttachment: _removeAttachment,
                     onModelSelected: (String modelId) =>
                         unawaited(_selectModel(modelId)),
                     onSend: _send,
@@ -621,26 +800,96 @@ final class _MessageBubble extends StatelessWidget {
   }
 }
 
+final class _ToolApprovalCard extends StatelessWidget {
+  const _ToolApprovalCard({required this.request, required this.onDecision});
+
+  final ToolApprovalRequest request;
+  final ValueChanged<bool>? onDecision;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colors.tertiaryContainer,
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            'Approval required: ${request.toolName}',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: colors.onTertiaryContainer,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${request.operation}: ${jsonEncode(request.arguments)}',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: colors.onTertiaryContainer),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: <Widget>[
+              TextButton(
+                onPressed: onDecision == null ? null : () => onDecision!(false),
+                child: const Text('Deny'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: onDecision == null ? null : () => onDecision!(true),
+                child: const Text('Approve once'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 final class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
+    required this.focusNode,
     required this.models,
     required this.selectedModelId,
     required this.workspaceDefaultModelId,
+    required this.activeFile,
+    required this.fileSuggestions,
+    required this.attachments,
     required this.isSending,
     required this.isModelUpdating,
     required this.enabled,
+    required this.onFileSelected,
+    required this.onAddAttachment,
+    required this.onRemoveAttachment,
     required this.onModelSelected,
     required this.onSend,
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final List<ModelInfo> models;
   final String? selectedModelId;
   final String? workspaceDefaultModelId;
+  final ChatFileReference? activeFile;
+  final List<WorkspaceFileMatch> fileSuggestions;
+  final List<ChatAttachment> attachments;
   final bool isSending;
   final bool isModelUpdating;
   final bool enabled;
+  final ValueChanged<WorkspaceFileMatch> onFileSelected;
+  final VoidCallback onAddAttachment;
+  final ValueChanged<String> onRemoveAttachment;
   final ValueChanged<String> onModelSelected;
   final VoidCallback onSend;
 
@@ -682,8 +931,105 @@ final class _Composer extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (fileSuggestions.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 168),
+              child: Material(
+                color: colors.surfaceContainerLow,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(6),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: fileSuggestions.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final WorkspaceFileMatch file = fileSuggestions[index];
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(
+                        FluentIcons.document_20_regular,
+                        size: 17,
+                      ),
+                      title: Text(
+                        file.relativePath,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text('Linked folder ${file.rootIndex + 1}'),
+                      onTap: () => onFileSelected(file),
+                    );
+                  },
+                ),
+              ),
+            ),
+          if (activeFile != null || attachments.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: <Widget>[
+                  if (activeFile case final ChatFileReference file)
+                    Tooltip(
+                      message: file.label,
+                      child: InputChip(
+                        avatar: const Icon(
+                          FluentIcons.edit_20_regular,
+                          size: 13,
+                        ),
+                        label: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 180),
+                          child: Text(
+                            'Active: ${file.label}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                        ),
+                        visualDensity: const VisualDensity(
+                          horizontal: -2,
+                          vertical: -4,
+                        ),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        padding: EdgeInsets.zero,
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 3),
+                        onPressed: null,
+                      ),
+                    ),
+                  for (final ChatAttachment attachment in attachments)
+                    InputChip(
+                      avatar: const Icon(
+                        FluentIcons.attach_20_regular,
+                        size: 13,
+                      ),
+                      label: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 180),
+                        child: Text(
+                          attachment.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ),
+                      tooltip: attachment.name,
+                      visualDensity: const VisualDensity(
+                        horizontal: -2,
+                        vertical: -4,
+                      ),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: EdgeInsets.zero,
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 3),
+                      onDeleted: interactive
+                          ? () => onRemoveAttachment(attachment.id)
+                          : null,
+                    ),
+                ],
+              ),
+            ),
           TextField(
             controller: controller,
+            focusNode: focusNode,
             enabled: interactive,
             minLines: 3,
             maxLines: 6,
@@ -703,6 +1049,20 @@ final class _Composer extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
             child: Row(
               children: <Widget>[
+                IconButton(
+                  tooltip: 'Attach files',
+                  constraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 32,
+                  ),
+                  padding: EdgeInsets.zero,
+                  onPressed: interactive && attachments.length < 5
+                      ? onAddAttachment
+                      : null,
+                  style: _compactControlStyle(context),
+                  icon: const Icon(FluentIcons.attach_20_regular, size: 19),
+                ),
+                const SizedBox(width: 6),
                 Expanded(
                   child: SizedBox(
                     height: 32,
@@ -792,6 +1152,164 @@ final class _Composer extends StatelessWidget {
   }
 }
 
+final class _TagQuery {
+  const _TagQuery(this.query, this.start, this.end);
+
+  final String query;
+  final int start;
+  final int end;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _TagQuery &&
+      other.query == query &&
+      other.start == start &&
+      other.end == end;
+
+  @override
+  int get hashCode => Object.hash(query, start, end);
+}
+
+final class _ComposerTextController extends TextEditingController {
+  final Map<String, ChatFileReference> _referencesByToken =
+      <String, ChatFileReference>{};
+
+  List<ChatFileReference> get activeReferences {
+    final Set<String> seen = <String>{};
+    return <ChatFileReference>[
+      for (final MapEntry<String, ChatFileReference> entry
+          in _referencesByToken.entries)
+        if (text.contains(entry.key) &&
+            seen.add('${entry.value.rootIndex}:${entry.value.path}'))
+          entry.value,
+    ];
+  }
+
+  void insertFileTag(WorkspaceFileMatch match, _TagQuery query) {
+    String token = '#${match.relativePath}';
+    final ChatFileReference? collision = _referencesByToken[token];
+    if (collision != null &&
+        (collision.rootIndex != match.rootIndex ||
+            collision.path != match.relativePath)) {
+      token = '$token [folder ${match.rootIndex + 1}]';
+    }
+    _referencesByToken[token] = ChatFileReference(
+      rootIndex: match.rootIndex,
+      path: match.relativePath,
+      label: match.relativePath,
+    );
+    final String next = text.replaceRange(query.start, query.end, '$token ');
+    value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(
+        offset: query.start + token.length + 1,
+      ),
+    );
+  }
+
+  void clearContext() {
+    _referencesByToken.clear();
+    clear();
+  }
+
+  static _TagQuery? currentTagQuery(TextEditingValue value) {
+    final TextSelection selection = value.selection;
+    if (!selection.isValid || !selection.isCollapsed) return null;
+    final int cursor = selection.extentOffset;
+    if (cursor < 0 || cursor > value.text.length) return null;
+    final String prefix = value.text.substring(0, cursor);
+    final int hash = prefix.lastIndexOf('#');
+    if (hash < 0) return null;
+    if (hash > 0 && !RegExp(r'\s').hasMatch(prefix[hash - 1])) return null;
+    final String query = prefix.substring(hash + 1);
+    if (RegExp(r'[\s#]').hasMatch(query)) return null;
+    return _TagQuery(query, hash, cursor);
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final List<String> tokens =
+        _referencesByToken.keys.where(text.contains).toList(growable: false)
+          ..sort(
+            (String left, String right) => right.length.compareTo(left.length),
+          );
+    if (tokens.isEmpty) return TextSpan(style: style, text: text);
+    final List<InlineSpan> spans = <InlineSpan>[];
+    int cursor = 0;
+    while (cursor < text.length) {
+      String? nearestToken;
+      int nearestIndex = text.length;
+      for (final String token in tokens) {
+        final int index = text.indexOf(token, cursor);
+        if (index >= 0 && index < nearestIndex) {
+          nearestIndex = index;
+          nearestToken = token;
+        }
+      }
+      if (nearestToken == null) {
+        spans.add(TextSpan(text: text.substring(cursor)));
+        break;
+      }
+      if (nearestIndex > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, nearestIndex)));
+      }
+      spans.add(
+        TextSpan(
+          text: nearestToken,
+          style: style?.copyWith(
+            color: Theme.of(context).colorScheme.onSecondaryContainer,
+            backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+      cursor = nearestIndex + nearestToken.length;
+    }
+    return TextSpan(style: style, children: spans);
+  }
+}
+
+String _attachmentMediaType(String name) {
+  final String lower = name.toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
+    return 'text/markdown';
+  }
+  if (lower.endsWith('.txt') ||
+      lower.endsWith('.dart') ||
+      lower.endsWith('.py') ||
+      lower.endsWith('.js') ||
+      lower.endsWith('.ts') ||
+      lower.endsWith('.java') ||
+      lower.endsWith('.cs') ||
+      lower.endsWith('.cpp') ||
+      lower.endsWith('.yml') ||
+      lower.endsWith('.yaml') ||
+      lower.endsWith('.toml')) {
+    return 'text/plain';
+  }
+  if (lower.endsWith('.json')) return 'application/json';
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';
+  if (lower.endsWith('.csv')) return 'text/csv';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.docx')) {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+  if (lower.endsWith('.xlsx')) {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  return 'application/octet-stream';
+}
+
 String? _normalizedModelId(String? value) {
   final String? trimmed = value?.trim();
   return trimmed == null || trimmed.isEmpty ? null : trimmed;
@@ -826,6 +1344,51 @@ String _formatTimestamp(DateTime value) {
   final String month = local.month.toString().padLeft(2, '0');
   final String period = local.hour < 12 ? 'am' : 'pm';
   return '$day/$month/${local.year} $hour:$minute $period';
+}
+
+EdgeInsets _panelToastMargin(BuildContext context) {
+  const double inset = 12;
+  final Size viewport = MediaQuery.sizeOf(context);
+  final RenderObject? renderObject = context.findRenderObject();
+  if (renderObject is! RenderBox || !renderObject.hasSize) {
+    return const EdgeInsets.all(inset);
+  }
+  final Offset origin = renderObject.localToGlobal(Offset.zero);
+  final double left = (origin.dx + inset)
+      .clamp(inset, viewport.width - inset)
+      .toDouble();
+  final double right =
+      (viewport.width - origin.dx - renderObject.size.width + inset)
+          .clamp(inset, viewport.width - inset)
+          .toDouble();
+  if (left + right >= viewport.width) {
+    return const EdgeInsets.all(inset);
+  }
+  return EdgeInsets.fromLTRB(left, inset, right, inset);
+}
+
+void _showErrorToast(BuildContext context, String message) {
+  final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: colors.onErrorContainer),
+        ),
+        behavior: SnackBarBehavior.floating,
+        margin: _panelToastMargin(context),
+        duration: const Duration(seconds: 5),
+        showCloseIcon: true,
+        backgroundColor: colors.errorContainer,
+        closeIconColor: colors.onErrorContainer,
+      ),
+    );
 }
 
 ButtonStyle _compactControlStyle(BuildContext context) => IconButton.styleFrom(
@@ -902,7 +1465,6 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
   bool _configuredExpanded = false;
   bool _loading = true;
   bool _saving = false;
-  Object? _error;
 
   @override
   void initState() {
@@ -962,10 +1524,8 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
       });
     } on Object catch (error) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error;
-      });
+      setState(() => _loading = false);
+      _showErrorToast(context, "Couldn't load thread tools: $error");
     }
   }
 
@@ -997,10 +1557,7 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
   Future<void> _submit() async {
     if (_loading || _saving) return;
     final String title = _titleController.text.trim();
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
+    setState(() => _saving = true);
     try {
       await widget.onSave(
         _ThreadSettingsDraft(
@@ -1010,7 +1567,9 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
         ),
       );
     } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (mounted) {
+        _showErrorToast(context, "Couldn't save thread settings: $error");
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1185,10 +1744,7 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
           value: _useWorkspaceDefaults,
           onChanged: _loading || _saving
               ? null
-              : (bool value) => setState(() {
-                  _useWorkspaceDefaults = value;
-                  _error = null;
-                }),
+              : (bool value) => setState(() => _useWorkspaceDefaults = value),
         ),
         const SizedBox(height: 10),
         if (_loading)
@@ -1201,14 +1757,6 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
         _buildBuiltinTools(context),
         const SizedBox(height: 10),
         _buildConfiguredTools(context),
-        if (_error case final Object error) ...<Widget>[
-          const SizedBox(height: 12),
-          Text(
-            'Thread settings could not be saved: $error',
-            style: Theme.of(context).textTheme.bodySmall
-                ?.copyWith(color: colors.error),
-          ),
-        ],
       ],
     );
   }
@@ -1456,12 +2004,7 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
 
   bool get _toolsEditable => !_useWorkspaceDefaults && !_loading && !_saving;
 
-  void _change(VoidCallback update) {
-    setState(() {
-      update();
-      _error = null;
-    });
-  }
+  void _change(VoidCallback update) => setState(update);
 
   static Map<String, dynamic> _decodeConfig(String? raw) {
     if (raw == null || raw.trim().isEmpty) return <String, dynamic>{};

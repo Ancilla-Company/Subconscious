@@ -37,17 +37,20 @@ class AgentExecutionResult:
 class AgentManager:
     MAX_TOOL_ROUNDS = 8
 
-    async def execute(self, config: ModelConfig, prompt: str,
+    async def execute(self, config: ModelConfig, prompt: str | Sequence[Any],
                       history: Sequence[tuple[str, str]], tools: Sequence[Tool[Any]],
                       approve: ApprovalCallback) -> AgentExecutionResult:
         if config.id.casefold() == "echo" or config.provider.casefold() == "subconscious":
-            return AgentExecutionResult(prompt, [])
+            text = prompt if isinstance(prompt, str) else "\n".join(
+                item for item in prompt if isinstance(item, str)
+            )
+            return AgentExecutionResult(text, [])
         model = self._model(config)
         agent = Agent(model, output_type=[str, DeferredToolRequests],
                       system_prompt=config.system_prompt or (), tools=tools)
         messages = self._history(history)
         deferred: DeferredToolResults | None = None
-        user_prompt: str | None = prompt
+        user_prompt: str | Sequence[Any] | None = prompt
         records: list[dict[str, Any]] = []
         seen_returns: set[str] = set()
         for _ in range(self.MAX_TOOL_ROUNDS):

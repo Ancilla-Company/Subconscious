@@ -37,6 +37,12 @@ class WorkspaceFileError(RuntimeError):
 
 class WorkspaceFileService:
     MAX_BYTES = 1_000_000
+    SEARCH_MAX_RESULTS = 50
+    SEARCH_MAX_FILES = 25_000
+    SEARCH_SKIPS = {
+        ".git", ".hg", ".svn", ".subconscious", ".dart_tool", "node_modules",
+        "build", "dist", "bin", "obj", "__pycache__", ".venv", "venv",
+    }
     EXTENSIONS = {".c", ".cc", ".cpp", ".cs", ".csx", ".css", ".fs", ".fsx", ".go",
                   ".h", ".hpp", ".html", ".htm", ".java", ".js", ".jsx", ".json",
                   ".md", ".markdown", ".php", ".ps1", ".py", ".rb", ".rs", ".sh",
@@ -90,6 +96,39 @@ class WorkspaceFileService:
         root = await self.root(workspace_uuid, root_index)
         return await asyncio.to_thread(self._list_sync, root, relative_path)
 
+    async def search(self, workspace_uuid: str, query: str,
+                     limit: int = 20) -> list[dict[str, object]]:
+        raw = await self.session.scalar(
+            select(Workspace.directories).where(Workspace.uuid == workspace_uuid)
+        )
+        if raw is None:
+            raise WorkspaceFileError(404, "The requested workspace does not exist.")
+        try:
+            configured = json.loads(raw) if raw else []
+        except json.JSONDecodeError as error:
+            raise WorkspaceFileError(
+                400, "Workspace directories must be a JSON array of absolute paths."
+            ) from error
+        if not isinstance(configured, list):
+            raise WorkspaceFileError(
+                400, "Workspace directories must be a JSON array of absolute paths."
+            )
+        bounded_limit = min(max(limit, 1), self.SEARCH_MAX_RESULTS)
+        matches: list[dict[str, object]] = []
+        for root_index in range(len(configured)):
+            root = await self.root(workspace_uuid, root_index)
+            matches.extend(await asyncio.to_thread(
+                self._search_sync, root, root_index, query, bounded_limit
+            ))
+        folded = query.strip().casefold()
+        matches.sort(key=lambda item: (
+            0 if str(item["name"]).casefold().startswith(folded) else 1,
+            len(str(item["relativePath"])),
+            str(item["relativePath"]).casefold(),
+            int(item["rootIndex"]),
+        ))
+        return matches[:bounded_limit]
+
     async def read(self, workspace_uuid: str, root_index: int, relative_path: str) -> WorkspaceFileContentDto:
         root = await self.root(workspace_uuid, root_index)
         return await asyncio.to_thread(self._read_sync, root, relative_path)
@@ -121,6 +160,37 @@ class WorkspaceFileService:
                    relative_path=item.relative_to(root).as_posix(), is_directory=item.is_dir())
                    for item in directory.iterdir() if not self._is_reparse(item)]
         return sorted(entries, key=lambda item: (not item.is_directory, item.name.casefold()))
+
+    def _search_sync(self, root: Path, root_index: int, query: str,
+                     limit: int) -> list[dict[str, object]]:
+        folded = query.strip().casefold()
+        matches: list[dict[str, object]] = []
+        visited = 0
+        for directory, dirnames, filenames in os.walk(root, followlinks=False):
+            base = Path(directory)
+            dirnames[:] = [
+                name for name in dirnames
+                if name.casefold() not in self.SEARCH_SKIPS
+                and not self._is_reparse(base / name)
+            ]
+            for name in filenames:
+                visited += 1
+                if visited > self.SEARCH_MAX_FILES:
+                    return matches
+                file = base / name
+                if self._is_reparse(file):
+                    continue
+                relative = file.relative_to(root).as_posix()
+                if folded and folded not in relative.casefold():
+                    continue
+                matches.append({
+                    "rootIndex": root_index,
+                    "name": name,
+                    "relativePath": relative,
+                })
+                if len(matches) >= limit:
+                    return matches
+        return matches
 
     def _read_sync(self, root: Path, relative_path: str) -> WorkspaceFileContentDto:
         file = self._existing_file(root, relative_path)

@@ -1,6 +1,8 @@
 """Camel-case-envelope WebSocket protocol for chat, tools, and approvals."""
 
 import asyncio
+import base64
+import binascii
 from collections.abc import Callable
 from contextlib import suppress
 import json
@@ -8,7 +10,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from pydantic_ai.messages import ToolCallPart
+from pydantic_ai import Tool
+from pydantic_ai.messages import BinaryContent, ToolCallPart
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -16,7 +19,145 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from subconscious_engine.approval import ApprovalConfig, classify_operation
 from subconscious_engine.configuration.models import ModelConfig
 from subconscious_engine.storage.models import ConversationThread, Message, Workspace, utc_now
-from subconscious_engine.tools import ToolContext, merge_tool_config
+from subconscious_engine.tools import (
+    ContextAttachment,
+    ContextFile,
+    ToolContext,
+    merge_tool_config,
+)
+
+
+_MAX_CONTEXT_FILES = 20
+_MAX_ATTACHMENTS = 5
+_MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+_MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024
+_BINARY_MEDIA_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/csv",
+    "text/html",
+    "text/markdown",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "audio/wav",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/flac",
+    "audio/aiff",
+    "audio/aac",
+}
+_UI_TOOL_NAMES = {
+    "set_ui_theme_color",
+    "set_ui_lighting_mode",
+    "open_ui_workspace_file",
+    "navigate_ui",
+    "set_workspace_builtin_tool_enabled",
+}
+_UI_THEME_COLORS = {"device", "neutral", "blue", "purple", "green", "orange", "red"}
+_UI_LIGHTING_MODES = {"device", "light", "dark"}
+_UI_DESTINATIONS = {
+    "workspaces", "threads", "files", "settings", "account",
+    "show_chat", "hide_chat", "show_main", "hide_main",
+    "show_context", "hide_context",
+}
+_CLIENT_TOOL_TIMEOUT_SECONDS = 60
+
+
+def _parse_context_file(value: Any, identifier: str) -> ContextFile | None:
+    if not isinstance(value, dict):
+        return None
+    root_index = value.get("root_index")
+    path = value.get("path")
+    label = value.get("label")
+    if not isinstance(root_index, int) or root_index < 0:
+        return None
+    if not isinstance(path, str) or not path or len(path) > 1_024:
+        return None
+    if not isinstance(label, str) or not label.strip():
+        label = path
+    return ContextFile(identifier, label[:1_024], root_index, path)
+
+
+def _parse_file_context(
+    value: Any,
+) -> tuple[ContextFile | None, tuple[ContextFile, ...], tuple[ContextAttachment, ...]]:
+    if value is None:
+        return None, (), ()
+    if not isinstance(value, dict):
+        raise ValueError("file_context must be an object.")
+    raw_active = value.get("active_file")
+    active = _parse_context_file(raw_active, "active")
+    if raw_active is not None and active is None:
+        raise ValueError("file_context contains an invalid active file.")
+    tagged_value = value.get("tagged_files", [])
+    if not isinstance(tagged_value, list) or len(tagged_value) > _MAX_CONTEXT_FILES:
+        raise ValueError(f"file_context supports at most {_MAX_CONTEXT_FILES} tagged files.")
+    tagged: list[ContextFile] = []
+    seen: set[tuple[int, str]] = set()
+    for index, raw in enumerate(tagged_value, start=1):
+        file = _parse_context_file(raw, f"tag-{index}")
+        if file is None:
+            raise ValueError("file_context contains an invalid tagged file.")
+        key = (file.root_index, file.path)
+        if key not in seen:
+            seen.add(key)
+            tagged.append(file)
+    attachments_value = value.get("attachments", [])
+    if not isinstance(attachments_value, list) or len(attachments_value) > _MAX_ATTACHMENTS:
+        raise ValueError(f"file_context supports at most {_MAX_ATTACHMENTS} attachments.")
+    attachments: list[ContextAttachment] = []
+    total = 0
+    for index, raw in enumerate(attachments_value, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError("file_context contains an invalid attachment.")
+        name = raw.get("name")
+        media_type = raw.get("media_type")
+        encoded = raw.get("data")
+        if (not isinstance(name, str) or not name or len(name) > 255
+                or "/" in name or "\\" in name or "\x00" in name):
+            raise ValueError("Attachment names must be plain file names.")
+        if not isinstance(media_type, str) or len(media_type) > 255:
+            raise ValueError("Attachment media_type is invalid.")
+        if not isinstance(encoded, str):
+            raise ValueError("Attachment data must be base64 encoded.")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise ValueError("Attachment data is not valid base64.") from error
+        if len(content) > _MAX_ATTACHMENT_BYTES:
+            raise ValueError("An attachment exceeds the 2 MB limit.")
+        total += len(content)
+        if total > _MAX_TOTAL_ATTACHMENT_BYTES:
+            raise ValueError("Attachments exceed the 8 MB total limit.")
+        attachments.append(ContextAttachment(
+            f"attachment-{index}", name, media_type or "application/octet-stream", content
+        ))
+    return active, tuple(tagged), tuple(attachments)
+
+
+def _prompt_with_file_context(content: str, context: ToolContext) -> str:
+    lines = ["Workspace context is available through the workspace_files tools."]
+    if context.active_file is not None:
+        lines.append(
+            f"Active file: id=active, path={context.active_file.path!r}, "
+            f"rootIndex={context.active_file.root_index}."
+        )
+    for file in context.context_files:
+        lines.append(
+            f"Tagged file: id={file.id}, path={file.path!r}, rootIndex={file.root_index}."
+        )
+    for attachment in context.attachments:
+        lines.append(
+            f"Attachment: id={attachment.id}, name={attachment.name!r}, "
+            f"mediaType={attachment.media_type!r}."
+        )
+    return f"{content}\n\n<subconscious-file-context>\n" + "\n".join(lines) + "\n</subconscious-file-context>"
 
 
 class ClientRegistry:
@@ -114,6 +255,9 @@ class WebSocketSession:
         self.active_turn: asyncio.Task[None] | None = None
         self.active_turn_id: str | None = None
         self.pending: dict[str, tuple[str, asyncio.Future[bool]]] = {}
+        self.pending_client_tools: dict[
+            str, tuple[str, asyncio.Future[dict[str, Any]]]
+        ] = {}
         self.send_lock = asyncio.Lock()
         self.client_tools: dict[str, dict[str, Any]] = {}
 
@@ -128,6 +272,8 @@ class WebSocketSession:
         finally:
             await self._stop_active_turn()
             for _, future in self.pending.values():
+                future.cancel()
+            for _, future in self.pending_client_tools.values():
                 future.cancel()
             await self.app.state.client_registry.release(self.client_id)
 
@@ -153,12 +299,16 @@ class WebSocketSession:
             await self._approval(turn_id, data)
         elif frame_type == "tool.register":
             for tool in data.get("tools", []):
-                if isinstance(tool, dict) and isinstance(tool.get("id"), str):
-                    self.client_tools[tool["id"]] = tool
+                if (isinstance(tool, dict)
+                        and isinstance(tool.get("id"), str)
+                        and tool["id"] in _UI_TOOL_NAMES):
+                    self.client_tools[tool["id"]] = {"id": tool["id"]}
         elif frame_type == "tool.unregister":
             identifier = data.get("id")
             if isinstance(identifier, str):
                 self.client_tools.pop(identifier, None)
+        elif frame_type == "client.tool.result":
+            await self._client_tool_result(turn_id, data)
         elif frame_type in {"profile.set", "tool.result"}:
             return
         else:
@@ -274,6 +424,146 @@ class WebSocketSession:
         elif not pending[1].done():
             pending[1].set_result(decision.casefold() == "approve")
 
+    async def _client_tool_result(
+        self, turn_id: str | None, data: dict[str, Any]
+    ) -> None:
+        request_id = data.get("request_id")
+        ok = data.get("ok")
+        if not isinstance(request_id, str) or not isinstance(ok, bool):
+            await self._error("client.tool.result requires request_id and boolean ok.")
+            return
+        pending = self.pending_client_tools.get(request_id)
+        if pending is None:
+            await self._error("Client tool request was not found or has already completed.")
+            return
+        if turn_id is None or turn_id != pending[0]:
+            await self._error("Client tool result does not belong to this chat turn.")
+            return
+        if not pending[1].done():
+            pending[1].set_result(data)
+
+    async def _request_client_tool(
+        self, turn_id: str, tool_name: str, arguments: dict[str, Any]
+    ) -> Any:
+        request_id = uuid4().hex
+        future: asyncio.Future[dict[str, Any]] = \
+            asyncio.get_running_loop().create_future()
+        self.pending_client_tools[request_id] = (turn_id, future)
+        try:
+            await self._send(
+                "client.tool.request",
+                {
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                },
+                turn_id,
+            )
+            response = await asyncio.wait_for(
+                future, timeout=_CLIENT_TOOL_TIMEOUT_SECONDS
+            )
+            if response.get("ok") is not True:
+                error = response.get("error")
+                raise RuntimeError(
+                    error if isinstance(error, str) else "The UI tool failed."
+                )
+            return response.get("result")
+        finally:
+            self.pending_client_tools.pop(request_id, None)
+
+    def _ui_tools(self, turn_id: str) -> list[Tool[Any]]:
+        async def set_ui_theme_color(color: str) -> Any:
+            normalized = color.strip().casefold()
+            if normalized not in _UI_THEME_COLORS:
+                raise ValueError(
+                    "color must be device, neutral, blue, purple, green, orange, or red."
+                )
+            return await self._request_client_tool(
+                turn_id, "set_ui_theme_color", {"color": normalized}
+            )
+
+        async def set_ui_lighting_mode(mode: str) -> Any:
+            normalized = mode.strip().casefold()
+            if normalized not in _UI_LIGHTING_MODES:
+                raise ValueError("mode must be device, light, or dark.")
+            return await self._request_client_tool(
+                turn_id, "set_ui_lighting_mode", {"mode": normalized}
+            )
+
+        async def open_ui_workspace_file(root_index: int, path: str) -> Any:
+            if root_index < 0 or not path or len(path) > 1_024:
+                raise ValueError("A non-negative root_index and relative path are required.")
+            return await self._request_client_tool(
+                turn_id,
+                "open_ui_workspace_file",
+                {"root_index": root_index, "path": path},
+            )
+
+        async def navigate_ui(destination: str) -> Any:
+            normalized = destination.strip().casefold()
+            if normalized not in _UI_DESTINATIONS:
+                raise ValueError(
+                    "destination must be a sidebar section or a show/hide panel action."
+                )
+            return await self._request_client_tool(
+                turn_id, "navigate_ui", {"destination": normalized}
+            )
+
+        async def set_workspace_builtin_tool_enabled(
+            group: str, enabled: bool, tool: str = ""
+        ) -> Any:
+            normalized_group = group.strip()
+            normalized_tool = tool.strip()
+            catalog = self.app.state.tool_registry.catalog()
+            if normalized_group not in catalog:
+                raise ValueError("group is not a registered built-in tool group.")
+            if normalized_tool and normalized_tool not in {
+                item["name"] for item in catalog[normalized_group]
+            }:
+                raise ValueError("tool is not registered in the selected group.")
+            return await self._request_client_tool(
+                turn_id,
+                "set_workspace_builtin_tool_enabled",
+                {
+                    "group": normalized_group,
+                    "enabled": enabled,
+                    "tool": normalized_tool,
+                },
+            )
+
+        definitions = {
+            "set_ui_theme_color": (
+                set_ui_theme_color,
+                "Change the application's accent theme color.",
+            ),
+            "set_ui_lighting_mode": (
+                set_ui_lighting_mode,
+                "Change the application lighting mode.",
+            ),
+            "open_ui_workspace_file": (
+                open_ui_workspace_file,
+                "Open a workspace-relative file in the file previewer.",
+            ),
+            "navigate_ui": (
+                navigate_ui,
+                "Navigate to a sidebar section or show/hide a dashboard panel.",
+            ),
+            "set_workspace_builtin_tool_enabled": (
+                set_workspace_builtin_tool_enabled,
+                "Enable or disable a catalog-known built-in tool group or tool for the active workspace.",
+            ),
+        }
+        return [
+            Tool(
+                definitions[name][0],
+                name=name,
+                description=definitions[name][1],
+                requires_approval=True,
+            )
+            for name in definitions
+            if name in self.client_tools
+        ]
+
     async def _run_turn(self, turn_id: str, data: dict[str, Any]) -> None:
         thread_uuid = ""
         try:
@@ -282,6 +572,9 @@ class WebSocketSession:
             requested_thread = data.get("thread_uuid")
             requested_workspace = data.get("workspace_uuid")
             model_id = data.get("model_id")
+            active_file, tagged_files, attachments = _parse_file_context(
+                data.get("file_context")
+            )
             if not isinstance(content, str) or (isinstance(requested_thread, str) == isinstance(requested_workspace, str)):
                 await self._error("chat.send requires content and exactly one of thread_uuid or workspace_uuid")
                 return
@@ -331,6 +624,15 @@ class WebSocketSession:
                 await self._publish_message(user_message, thread_uuid)
                 tools_enabled = data.get("tools_enabled", True) is not False
                 tools = []
+                tool_context = ToolContext(
+                    self.app.state.rag_service,
+                    self.app.state.database,
+                    workspace.uuid,
+                    thread.id,
+                    tagged_files,
+                    active_file,
+                    attachments,
+                )
                 if tools_enabled:
                     tools_raw = merge_tool_config(workspace.tools_config, thread.tools_config)
                     approval = ApprovalConfig.from_json(
@@ -338,15 +640,27 @@ class WebSocketSession:
                     )
                     tools = self.app.state.tool_registry.tools_for_config(
                         tools_raw,
-                        ToolContext(
-                            self.app.state.rag_service,
-                            self.app.state.database,
-                            workspace.uuid,
-                            thread.id,
-                        ),
+                        tool_context,
                         approval,
                     )
-                result = await self.app.state.agent_manager.execute(config, content, history, tools,
+                tools.extend(self._ui_tools(turn_id))
+                agent_content: str | list[Any] = content
+                if (active_file is not None or tagged_files or attachments) and \
+                        config.id.casefold() != "echo" and \
+                        config.provider.casefold() != "subconscious":
+                    context_prompt = _prompt_with_file_context(content, tool_context)
+                    binary_parts = [
+                        BinaryContent(
+                            attachment.content,
+                            media_type=attachment.media_type,
+                            identifier=attachment.name,
+                        )
+                        for attachment in attachments
+                        if attachment.media_type in _BINARY_MEDIA_TYPES
+                    ]
+                    agent_content = [context_prompt, *binary_parts] \
+                        if binary_parts else context_prompt
+                result = await self.app.state.agent_manager.execute(config, agent_content, history, tools,
                     lambda call: self._request_approval(turn_id, thread_uuid, call))
                 for record in result.tool_records:
                     message = Message(uuid=str(uuid4()), thread_id=thread.id, role="tool",
@@ -370,6 +684,13 @@ class WebSocketSession:
             for approval_id, (pending_turn, future) in tuple(self.pending.items()):
                 if pending_turn == turn_id:
                     self.pending.pop(approval_id, None)
+                    if not future.done():
+                        future.cancel()
+            for request_id, (pending_turn, future) in tuple(
+                self.pending_client_tools.items()
+            ):
+                if pending_turn == turn_id:
+                    self.pending_client_tools.pop(request_id, None)
                     if not future.done():
                         future.cancel()
             current_task = asyncio.current_task()

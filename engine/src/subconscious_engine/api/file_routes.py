@@ -32,6 +32,22 @@ def _failure(error: Exception) -> JSONResponse:
     return JSONResponse({"error": "Workspace file operation failed."}, 500)
 
 
+async def search_files(request: Request) -> Response:
+    query = request.query_params.get("q", "")
+    try:
+        limit = int(request.query_params.get("limit", "20"))
+    except ValueError:
+        return _failure(WorkspaceFileError(400, "limit must be an integer."))
+    try:
+        async with request.app.state.database.session() as session:
+            result = await WorkspaceFileService(session).search(
+                request.path_params["uuid"], query, limit
+            )
+        return json_response(result)
+    except (WorkspaceFileError, OSError) as error:
+        return _failure(error)
+
+
 async def list_files(request: Request) -> Response:
     try:
         async with request.app.state.database.session() as session:
@@ -107,6 +123,7 @@ async def create_directory(request: Request) -> Response:
 
 def file_routes() -> list[Route]:
     return [
+        Route("/api/v1/workspaces/{uuid}/files/search", search_files, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files", list_files, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/content", read_file, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/preview", preview_file, methods=["GET"]),

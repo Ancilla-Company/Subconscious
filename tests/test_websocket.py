@@ -117,15 +117,19 @@ def test_frame_dispatch_validates_types_tracks_client_tools_and_reports_unknown_
         await session._handle({
             "type": "tool.register",
             "data": {"tools": [
-                {"id": "weather", "name": "Weather"},
+                {"id": "set_ui_theme_color", "name": "Theme"},
+                {"id": "weather", "name": "Untrusted"},
                 {"name": "missing id"},
                 "not an object",
             ]},
         })
         assert session.client_tools == {
-            "weather": {"id": "weather", "name": "Weather"}
+            "set_ui_theme_color": {"id": "set_ui_theme_color"}
         }
-        await session._handle({"type": "tool.unregister", "data": {"id": "weather"}})
+        await session._handle({
+            "type": "tool.unregister",
+            "data": {"id": "set_ui_theme_color"},
+        })
         assert session.client_tools == {}
         await session._handle({"type": "profile.set", "data": "ignored"})
         await session._handle({"type": "tool.result"})

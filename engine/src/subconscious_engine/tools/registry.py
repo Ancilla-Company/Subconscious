@@ -15,9 +15,26 @@ from urllib.parse import quote
 
 from subconscious_engine.approval import ApprovalConfig, classify_operation
 from subconscious_engine.services.rag_service import WorkspaceRagService
+from subconscious_engine.services.workspace_files import WorkspaceFileService
 from subconscious_engine.tools.database_tools import database_tool_entries
 
 ToolFunction = Callable[..., Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ContextFile:
+    id: str
+    label: str
+    root_index: int
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class ContextAttachment:
+    id: str
+    name: str
+    media_type: str
+    content: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +43,9 @@ class ToolContext:
     database: Any
     workspace_uuid: str
     thread_id: int | None = None
+    context_files: tuple[ContextFile, ...] = ()
+    active_file: ContextFile | None = None
+    attachments: tuple[ContextAttachment, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +54,17 @@ class ToolSpec:
     name: str
     description: str
     factory: Callable[[ToolContext], ToolFunction]
+
+
+def _file_summary(file: ContextFile | None) -> dict[str, Any] | None:
+    if file is None:
+        return None
+    return {
+        "id": file.id,
+        "label": file.label,
+        "rootIndex": file.root_index,
+        "path": file.path,
+    }
 
 
 def _deep_merge(baseline: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -108,6 +139,78 @@ class ToolRegistry:
                         session, context.workspace_uuid, query, mode, limit)
             return search_knowledge
 
+        def list_context_files_tool(context: ToolContext) -> ToolFunction:
+            def list_context_files() -> dict[str, Any]:
+                return {
+                    "active": _file_summary(context.active_file),
+                    "tagged": [_file_summary(item) for item in context.context_files],
+                    "attachments": [
+                        {
+                            "id": item.id,
+                            "name": item.name,
+                            "mediaType": item.media_type,
+                            "size": len(item.content),
+                        }
+                        for item in context.attachments
+                    ],
+                }
+            return list_context_files
+
+        def read_context_file_tool(context: ToolContext) -> ToolFunction:
+            async def read_context_file(file_id: str) -> dict[str, Any]:
+                file = next(
+                    (item for item in context.context_files if item.id == file_id),
+                    None,
+                )
+                if file_id == "active":
+                    file = context.active_file
+                if file is None:
+                    raise ValueError("The requested file is not in this turn's context.")
+                async with context.database.session() as session:
+                    result = await WorkspaceFileService(session).read(
+                        context.workspace_uuid, file.root_index, file.path
+                    )
+                return {**_file_summary(file), "content": result.content}
+            return read_context_file
+
+        def read_attachment_tool(context: ToolContext) -> ToolFunction:
+            def read_attachment(attachment_id: str) -> dict[str, Any]:
+                attachment = next(
+                    (item for item in context.attachments if item.id == attachment_id),
+                    None,
+                )
+                if attachment is None:
+                    raise ValueError("The requested attachment is not in this turn's context.")
+                try:
+                    content = attachment.content.removeprefix(b"\xef\xbb\xbf").decode("utf-8")
+                except UnicodeDecodeError as error:
+                    raise ValueError(
+                        "This attachment is binary; only UTF-8 text attachments can be read."
+                    ) from error
+                return {
+                    "id": attachment.id,
+                    "name": attachment.name,
+                    "mediaType": attachment.media_type,
+                    "content": content,
+                }
+            return read_attachment
+
+        def replace_active_file_tool(context: ToolContext) -> ToolFunction:
+            async def replace_active_file(content: str) -> dict[str, Any]:
+                file = context.active_file
+                if file is None:
+                    raise ValueError("No active workspace file was supplied for this turn.")
+                async with context.database.session() as session:
+                    result = await WorkspaceFileService(session).write(
+                        context.workspace_uuid, file.root_index, file.path, content
+                    )
+                return {
+                    "status": "updated",
+                    **_file_summary(file),
+                    "characters": len(result.content),
+                }
+            return replace_active_file
+
         specs = [
             ToolSpec("time", "get_current_time", "Get the current time in an IANA timezone.",
                      plain(get_current_time)),
@@ -130,9 +233,33 @@ class ToolRegistry:
         specs.extend(ToolSpec(*entry) for entry in database_tool_entries())
         specs.extend([
             ToolSpec(
+                "workspace_files",
+                "list_context_files",
+                "List the active file, # tagged workspace files, and attachments for this turn.",
+                list_context_files_tool,
+            ),
+            ToolSpec(
+                "workspace_files",
+                "read_context_file",
+                "Read a UTF-8 workspace file that is active or # tagged in this turn.",
+                read_context_file_tool,
+            ),
+            ToolSpec(
+                "workspace_files",
+                "read_attachment",
+                "Read a UTF-8 text attachment supplied with this turn.",
+                read_attachment_tool,
+            ),
+            ToolSpec(
+                "workspace_files",
+                "replace_active_file",
+                "Replace the complete contents of only the active workspace file.",
+                replace_active_file_tool,
+            ),
+            ToolSpec(
                 "knowledge",
                 "search_knowledge",
-                "Semantically search enabled workspace folders; sensitive files return names only.",
+                "Search indexed workspace folders using keyword, vector, or hybrid retrieval; sensitive files return names only.",
                 search_knowledge_tool,
             ),
         ])

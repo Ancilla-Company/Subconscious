@@ -161,6 +161,16 @@ final class RestEngineClient {
   Future<List<ModelInfo>> listModels() async =>
       _getList('models', ModelInfo.fromJson);
 
+  Future<List<WorkspaceFileMatch>> searchFiles({
+    required String workspaceUuid,
+    required String query,
+    int limit = 20,
+  }) async => _getList(
+    'workspaces/${_segment(workspaceUuid)}/files/search',
+    WorkspaceFileMatch.fromJson,
+    query: <String, String>{'q': query, 'limit': '$limit'},
+  );
+
   Future<List<WorkspaceFileEntry>> listFiles({
     required String workspaceUuid,
     required int rootIndex,

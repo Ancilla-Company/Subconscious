@@ -38,7 +38,7 @@ import '../../settings/controller/settings_controller.dart';
 import 'workspace_document_preview.dart';
 import 'workspace_image_preview.dart';
 
-final class ContextPanel extends StatelessWidget {
+final class ContextPanel extends StatefulWidget {
   const ContextPanel({
     required this.screen,
     required this.controller,
@@ -51,26 +51,113 @@ final class ContextPanel extends StatelessWidget {
   final VoidCallback? onSelection;
 
   @override
+  State<ContextPanel> createState() => _ContextPanelState();
+}
+
+final class _ContextPanelState extends State<ContextPanel> {
+  DashboardSection? _observedSection;
+  Object? _observedError;
+  int _toastVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChanged);
+    _observePanelError();
+  }
+
+  @override
+  void didUpdateWidget(covariant ContextPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
+      _observedSection = null;
+      _observedError = null;
+    }
+    if (oldWidget.screen != widget.screen ||
+        oldWidget.controller != widget.controller) {
+      _observePanelError();
+    }
+  }
+
+  void _onControllerChanged() => _observePanelError();
+
+  void _observePanelError() {
+    final DashboardSection section = widget.screen;
+    if (_observedSection != section) {
+      _observedSection = section;
+      _observedError = null;
+    }
+    final (Object?, String) errorInfo = switch (section) {
+      DashboardSection.threads => (
+        widget.controller.threadsError,
+        "Couldn't load threads",
+      ),
+      DashboardSection.files => (
+        widget.controller.filesError,
+        "Couldn't complete the file operation",
+      ),
+      DashboardSection.workspaces => (
+        widget.controller.workspacesError,
+        "Couldn't load workspaces",
+      ),
+      _ => (null, ''),
+    };
+    final Object? error = errorInfo.$1;
+    if (error == null) {
+      _observedError = null;
+      _toastVersion++;
+      return;
+    }
+    if (identical(error, _observedError)) return;
+    _observedError = error;
+    final bool isUnsupportedPreview =
+        section == DashboardSection.files && _isUnsupportedPreviewError(error);
+    final int version = ++_toastVersion;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || version != _toastVersion) return;
+      _showPanelToast(
+        context,
+        isUnsupportedPreview
+            ? 'Preview is not supported for this file type.'
+            : '${errorInfo.$2}: $error',
+        isError: !isUnsupportedPreview,
+        duration: isUnsupportedPreview
+            ? const Duration(seconds: 3)
+            : const Duration(seconds: 5),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _toastVersion++;
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => ColoredBox(
     color: Theme.of(context).colorScheme.surface,
     child: AnimatedBuilder(
-      animation: controller,
-      builder: (BuildContext context, Widget? child) => switch (screen) {
+      animation: widget.controller,
+      builder: (BuildContext context, Widget? child) => switch (widget.screen) {
         DashboardSection.threads => _ThreadsSection(
-          controller: controller,
-          onSelection: onSelection,
+          controller: widget.controller,
+          onSelection: widget.onSelection,
         ),
         DashboardSection.files => _FilesSection(
-          controller: controller,
-          onSelection: onSelection,
+          controller: widget.controller,
+          onSelection: widget.onSelection,
         ),
         DashboardSection.workspaces => _WorkspacesSection(
-          controller: controller,
-          onSelection: onSelection,
+          controller: widget.controller,
+          onSelection: widget.onSelection,
         ),
         DashboardSection.settings => _SettingsSection(
-          controller: controller,
-          onSelection: onSelection,
+          controller: widget.controller,
+          onSelection: widget.onSelection,
         ),
         DashboardSection.account => const _AccountSection(),
       },
@@ -241,9 +328,9 @@ final class _ThreadsSection extends StatelessWidget {
     if (controller.isLoadingThreads) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
-    if (controller.threadsError case final Object error) {
+    if (controller.threadsError != null) {
       return _PanelMessage(
-        "Couldn't load threads\n$error",
+        "Couldn't load threads.",
         action: OutlinedButton(
           onPressed: () {
             controller.selectThreadWorkspace(
@@ -371,9 +458,9 @@ final class _WorkspacesSection extends StatelessWidget {
     if (controller.isLoadingWorkspaces) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
-    if (controller.workspacesError case final Object error) {
+    if (controller.workspacesError != null) {
       return _PanelMessage(
-        "Couldn't load workspaces\n$error",
+        "Couldn't load workspaces.",
         action: OutlinedButton(
           onPressed: () {
             controller.loadWorkspaces();
@@ -469,17 +556,6 @@ final class _FilesSection extends StatelessWidget {
             ),
           ),
         ),
-        if (controller.filesError case final Object error)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: Text(
-              '$error',
-              style: Theme.of(context).textTheme.labelSmall
-                  ?.copyWith(color: Theme.of(context).colorScheme.error),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
         Expanded(
           child: controller.activeWorkspace == null
               ? const _PanelMessage('No workspace selected.')
@@ -715,12 +791,15 @@ final class _FileTreeRow extends StatelessWidget {
                   SizedBox(width: 18, child: Center(child: leading)),
                   const SizedBox(width: 5),
                   Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: selected ? colors.onSecondaryContainer : null,
+                    child: Tooltip(
+                      message: label,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: selected ? colors.onSecondaryContainer : null,
+                        ),
                       ),
                     ),
                   ),
@@ -883,8 +962,71 @@ String? _normalizeAbsolutePath(String rawPath) {
   return segments.isEmpty ? prefix : '$prefix${segments.join('/')}';
 }
 
+EdgeInsets _panelToastMargin(BuildContext context) {
+  const double inset = 12;
+  final Size viewport = MediaQuery.sizeOf(context);
+  final RenderObject? renderObject = context.findRenderObject();
+  if (renderObject is! RenderBox || !renderObject.hasSize) {
+    return const EdgeInsets.all(inset);
+  }
+  final Offset origin = renderObject.localToGlobal(Offset.zero);
+  final double left = (origin.dx + inset)
+      .clamp(inset, viewport.width - inset)
+      .toDouble();
+  final double right =
+      (viewport.width - origin.dx - renderObject.size.width + inset)
+          .clamp(inset, viewport.width - inset)
+          .toDouble();
+  if (left + right >= viewport.width) {
+    return const EdgeInsets.all(inset);
+  }
+  return EdgeInsets.fromLTRB(left, inset, right, inset);
+}
+
+bool _isUnsupportedPreviewError(Object error) {
+  final String message = error.toString().toLowerCase();
+  return message.contains('not valid utf-8 text') ||
+      message.contains('not a supported text or source file') ||
+      message.contains('not a supported image, pdf, or docx file');
+}
+
 void _showFileActionMessage(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  _showPanelToast(context, message, isError: true);
+}
+
+void _showPanelToast(
+  BuildContext context,
+  String message, {
+  bool isError = false,
+  Duration duration = const Duration(seconds: 5),
+}) {
+  final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  final Color backgroundColor = isError
+      ? colors.errorContainer
+      : colors.secondaryContainer;
+  final Color foregroundColor = isError
+      ? colors.onErrorContainer
+      : colors.onSecondaryContainer;
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: foregroundColor),
+        ),
+        behavior: SnackBarBehavior.floating,
+        margin: _panelToastMargin(context),
+        duration: duration,
+        showCloseIcon: true,
+        backgroundColor: backgroundColor,
+        closeIconColor: foregroundColor,
+      ),
+    );
 }
 
 final class _SettingsSection extends StatelessWidget {
@@ -1530,21 +1672,23 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
 
   Widget _buildEditor(BuildContext context, _WorkspaceFileTab tab) {
     if (tab.file.isReadOnlyPreview) {
+      if (tab.file.isDocumentPreview) {
+        return WorkspaceDocumentPreview(
+          key: ValueKey<String>(tab.key),
+          bytes: tab.file.previewBytes!,
+          kind: tab.file.previewKind!.name,
+        );
+      }
       return Padding(
         padding: const EdgeInsets.all(12),
         child: ClipRRect(
           borderRadius: const BorderRadius.all(Radius.circular(6)),
           child: ColoredBox(
             color: Theme.of(context).colorScheme.surfaceContainerLowest,
-            child: tab.file.isImage
-                ? WorkspaceImagePreview(
-                    bytes: tab.file.previewBytes!,
-                    isSvg: tab.file.isSvg,
-                  )
-                : WorkspaceDocumentPreview(
-                    bytes: tab.file.previewBytes!,
-                    kind: tab.file.previewKind!.name,
-                  ),
+            child: WorkspaceImagePreview(
+              bytes: tab.file.previewBytes!,
+              isSvg: tab.file.isSvg,
+            ),
           ),
         ),
       );
@@ -1693,53 +1837,58 @@ final class _FileTabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? colors.secondaryContainer : colors.surfaceContainerLow,
-      borderRadius: const BorderRadius.all(Radius.circular(6)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          height: 34,
-          child: Padding(
-            padding: const EdgeInsets.only(left: 10, right: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 180),
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: selected ? colors.onSecondaryContainer : null,
+    return Tooltip(
+      message: label,
+      child: Material(
+        color: selected
+            ? colors.secondaryContainer
+            : colors.surfaceContainerLow,
+        borderRadius: const BorderRadius.all(Radius.circular(6)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            height: 34,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 10, right: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 180),
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: selected ? colors.onSecondaryContainer : null,
+                      ),
                     ),
                   ),
-                ),
-                if (dirty) ...<Widget>[
-                  const SizedBox(width: 7),
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      color: colors.primary,
-                      shape: BoxShape.circle,
+                  if (dirty) ...<Widget>[
+                    const SizedBox(width: 7),
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: colors.primary,
+                        shape: BoxShape.circle,
+                      ),
                     ),
+                  ],
+                  const SizedBox(width: 3),
+                  IconButton(
+                    tooltip: 'Close $label',
+                    onPressed: onClose,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 26,
+                      height: 26,
+                    ),
+                    icon: const Icon(FluentIcons.dismiss_20_regular, size: 14),
                   ),
                 ],
-                const SizedBox(width: 3),
-                IconButton(
-                  tooltip: 'Close $label',
-                  onPressed: onClose,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 26,
-                    height: 26,
-                  ),
-                  icon: const Icon(FluentIcons.dismiss_20_regular, size: 14),
-                ),
-              ],
+              ),
             ),
           ),
         ),

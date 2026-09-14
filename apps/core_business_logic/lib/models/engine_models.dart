@@ -295,6 +295,107 @@ final class WorkspaceFileEntry {
       );
 }
 
+final class WorkspaceFileMatch {
+  const WorkspaceFileMatch({
+    required this.rootIndex,
+    required this.name,
+    required this.relativePath,
+  });
+
+  final int rootIndex;
+  final String name;
+  final String relativePath;
+
+  factory WorkspaceFileMatch.fromJson(Map<String, dynamic> json) =>
+      WorkspaceFileMatch(
+        rootIndex: json['rootIndex'] as int,
+        name: json['name'] as String,
+        relativePath: json['relativePath'] as String,
+      );
+}
+
+final class ChatFileReference {
+  const ChatFileReference({
+    required this.rootIndex,
+    required this.path,
+    String? label,
+  }) : label = label ?? path;
+
+  final int rootIndex;
+  final String path;
+  final String label;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'root_index': rootIndex,
+    'path': path,
+    'label': label,
+  };
+}
+
+final class ChatAttachment {
+  const ChatAttachment({
+    required this.id,
+    required this.name,
+    required this.mediaType,
+    required this.bytes,
+  });
+
+  final String id;
+  final String name;
+  final String mediaType;
+  final Uint8List bytes;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'name': name,
+    'media_type': mediaType,
+    'data': base64Encode(bytes),
+  };
+}
+
+final class ChatFileContext {
+  const ChatFileContext({
+    this.activeFile,
+    this.taggedFiles = const <ChatFileReference>[],
+    this.attachments = const <ChatAttachment>[],
+  });
+
+  final ChatFileReference? activeFile;
+  final List<ChatFileReference> taggedFiles;
+  final List<ChatAttachment> attachments;
+
+  bool get isEmpty =>
+      activeFile == null && taggedFiles.isEmpty && attachments.isEmpty;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (activeFile != null) 'active_file': activeFile!.toJson(),
+    'tagged_files': <Map<String, dynamic>>[
+      for (final ChatFileReference file in taggedFiles) file.toJson(),
+    ],
+    'attachments': <Map<String, dynamic>>[
+      for (final ChatAttachment attachment in attachments) attachment.toJson(),
+    ],
+  };
+}
+
+final class ToolApprovalRequest {
+  const ToolApprovalRequest({
+    required this.turnId,
+    required this.approvalId,
+    required this.threadUuid,
+    required this.toolName,
+    required this.arguments,
+    required this.operation,
+  });
+
+  final String turnId;
+  final String approvalId;
+  final String threadUuid;
+  final String toolName;
+  final Map<String, dynamic> arguments;
+  final String operation;
+}
+
 final class WireFrame {
   const WireFrame({required this.type, this.id, this.data, this.version = 1});
   final String type;

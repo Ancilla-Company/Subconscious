@@ -47,7 +47,7 @@ def test_registry_catalog_configuration_and_approval_flags():
     catalog = registry.catalog()
     assert {key: len(value) for key, value in catalog.items()} == {
         "time": 4, "calculator": 3, "weather": 2, "todo": 5, "memory": 5,
-        "notes": 4, "contacts": 5, "knowledge": 1,
+        "notes": 4, "contacts": 5, "workspace_files": 4, "knowledge": 1,
     }
     assert next(item for item in catalog["todo"] if item["name"] == "add_todo")["operation"] == "create"
     assert next(item for item in catalog["todo"] if item["name"] == "list_todos")["operation"] == "read"
