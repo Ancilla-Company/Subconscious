@@ -1873,6 +1873,11 @@ final class _FileTabButton extends StatelessWidget {
                       width: 26,
                       height: 26,
                     ),
+                    style: IconButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
                     icon: const Icon(FluentIcons.dismiss_20_regular, size: 14),
                   ),
                 ],
