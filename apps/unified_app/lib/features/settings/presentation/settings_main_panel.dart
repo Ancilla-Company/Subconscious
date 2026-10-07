@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../account/account_controller.dart';
+import '../../account/presentation/account_panel.dart';
 import '../../connection/engine_connection_resolver.dart';
 import '../../dashboard/controller/dashboard_controller.dart';
 import '../controller/settings_controller.dart';
@@ -15,11 +17,13 @@ final class SettingsMainPanel extends StatelessWidget {
   const SettingsMainPanel({
     required this.controller,
     required this.dashboardController,
+    required this.accountController,
     super.key,
   });
 
   final DashboardSettingsController controller;
   final DashboardController dashboardController;
+  final AccountController accountController;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -37,6 +41,7 @@ final class SettingsMainPanel extends StatelessWidget {
             SettingsPage.models => _ModelsSettingsPage(controller: controller),
             SettingsPage.tools => _ToolsSettingsPage(controller: controller),
             SettingsPage.skills => const _SkillsSettingsPage(),
+            SettingsPage.account => AccountPanel(controller: accountController),
             SettingsPage.about => const _AboutSettingsPage(),
           },
         ),

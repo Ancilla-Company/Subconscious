@@ -6,15 +6,21 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../account/account_controller.dart';
 import '../../context/presentation/context_panel.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../../settings/presentation/settings_main_panel.dart';
 import '../controller/dashboard_controller.dart';
 
 final class DashboardMainPanel extends StatelessWidget {
-  const DashboardMainPanel({required this.controller, super.key});
+  const DashboardMainPanel({
+    required this.controller,
+    required this.accountController,
+    super.key,
+  });
 
   final DashboardController controller;
+  final AccountController accountController;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -41,6 +47,7 @@ final class DashboardMainPanel extends StatelessWidget {
         MainPanelDestination.settings => SettingsMainPanel(
           controller: controller.settings,
           dashboardController: controller,
+          accountController: accountController,
         ),
         MainPanelDestination.utility => const _UtilityPanel(),
       };

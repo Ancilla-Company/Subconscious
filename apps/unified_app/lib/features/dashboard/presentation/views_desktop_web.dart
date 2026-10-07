@@ -5,6 +5,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../account/account_controller.dart';
 import '../../chat/engine_llm_provider.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
@@ -14,9 +15,14 @@ import 'dashboard_main_panel.dart';
 import 'window_composition_bar.dart';
 
 final class DesktopWebDashboardView extends StatefulWidget {
-  const DesktopWebDashboardView({required this.controller, super.key});
+  const DesktopWebDashboardView({
+    required this.controller,
+    required this.accountController,
+    super.key,
+  });
 
   final DashboardController controller;
+  final AccountController accountController;
 
   @override
   State<DesktopWebDashboardView> createState() =>
@@ -36,6 +42,11 @@ final class _DesktopWebDashboardViewState
   void _selectPanel(DashboardSection section) {
     widget.controller.updateLayoutState(contextPanelVisible: true);
     unawaited(widget.controller.activateSection(section));
+  }
+
+  void _selectAccount() {
+    widget.controller.updateLayoutState(contextPanelVisible: true);
+    widget.controller.openAccountShortcut();
   }
 
   @override
@@ -128,7 +139,10 @@ final class _DesktopWebDashboardViewState
         .toDouble();
     final Widget sidebar = _Sidebar(
       selectedPanel: widget.controller.selectedSection,
+      accountShortcutSelected: widget.controller.accountShortcutSelected,
+      accountController: widget.accountController,
       onPanelSelected: _selectPanel,
+      onAccountSelected: _selectAccount,
     );
     final Widget sidebarDivider = SizedBox(
       width: 1,
@@ -297,7 +311,10 @@ final class _DesktopWebDashboardViewState
           },
         ),
       ),
-      DashboardPanel.main => DashboardMainPanel(controller: widget.controller),
+      DashboardPanel.main => DashboardMainPanel(
+        controller: widget.controller,
+        accountController: widget.accountController,
+      ),
       DashboardPanel.context => ContextPanel(
         screen: widget.controller.selectedSection,
         controller: widget.controller,
@@ -390,10 +407,19 @@ final class _PanelResizeDivider extends StatelessWidget {
 }
 
 final class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.selectedPanel, required this.onPanelSelected});
+  const _Sidebar({
+    required this.selectedPanel,
+    required this.accountShortcutSelected,
+    required this.accountController,
+    required this.onPanelSelected,
+    required this.onAccountSelected,
+  });
 
   final DashboardSection selectedPanel;
+  final bool accountShortcutSelected;
+  final AccountController accountController;
   final ValueChanged<DashboardSection> onPanelSelected;
+  final VoidCallback onAccountSelected;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -429,17 +455,24 @@ final class _Sidebar extends StatelessWidget {
             icon: FluentIcons.settings_24_regular,
             selectedIcon: FluentIcons.settings_24_filled,
             tooltip: 'Settings',
-            selected: selectedPanel == DashboardSection.settings,
+            selected:
+                selectedPanel == DashboardSection.settings &&
+                !accountShortcutSelected,
             onPressed: () => onPanelSelected(DashboardSection.settings),
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: _SidebarButton(
-              icon: FluentIcons.person_24_regular,
-              selectedIcon: FluentIcons.person_24_filled,
-              tooltip: 'Account',
-              selected: selectedPanel == DashboardSection.account,
-              onPressed: () => onPanelSelected(DashboardSection.account),
+            child: AnimatedBuilder(
+              animation: accountController,
+              builder: (BuildContext context, Widget? child) => _SidebarButton(
+                icon: FluentIcons.person_24_regular,
+                selectedIcon: FluentIcons.person_24_filled,
+                tooltip: accountController.sidebarTooltip,
+                selected:
+                    selectedPanel == DashboardSection.settings &&
+                    accountShortcutSelected,
+                onPressed: onAccountSelected,
+              ),
             ),
           ),
         ],

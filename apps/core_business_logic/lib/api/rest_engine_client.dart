@@ -19,6 +19,50 @@ final class RestEngineClient {
 
   Future<Map<String, dynamic>> health() =>
       _getMap('health', authenticate: false);
+
+  Future<AccountSession> accountSession() async => AccountSession.fromJson(
+    await _getMap('account/session', authenticate: true),
+  );
+
+  Future<AccountSession> login({
+    required String email,
+    required String password,
+  }) async => AccountSession.fromJson(
+    await _sendMap('POST', 'account/login', <String, dynamic>{
+      'email': email,
+      'password': password,
+    }),
+  );
+
+  Future<String> requestSignupCode({required String email}) async {
+    final Map<String, dynamic> response = await _sendMap(
+      'POST',
+      'account/signup/code',
+      <String, dynamic>{'email': email},
+    );
+    return response['notice'] as String? ??
+        'Check your email for a verification code.';
+  }
+
+  Future<AccountSession> completeSignup({
+    required String email,
+    required String code,
+    required String password,
+    String? displayName,
+  }) async => AccountSession.fromJson(
+    await _sendMap('POST', 'account/signup/complete', <String, dynamic>{
+      'email': email,
+      'code': code,
+      'password': password,
+      if (displayName?.trim().isNotEmpty ?? false)
+        'display_name': displayName!.trim(),
+    }),
+  );
+
+  Future<void> logout() async {
+    await _request('POST', 'account/logout');
+  }
+
   Future<List<Workspace>> listWorkspaces() async =>
       _getList('workspaces', Workspace.fromJson);
   Future<Workspace> getWorkspace(String workspaceUuid) async =>
@@ -262,6 +306,29 @@ final class RestEngineClient {
       query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
     ),
   );
+
+  Future<Map<String, dynamic>> indexWorkspaceRag({
+    required String workspaceUuid,
+  }) => _requestMap('POST', 'workspaces/${_segment(workspaceUuid)}/rag/index');
+
+  Future<List<Map<String, dynamic>>> searchWorkspaceRag({
+    required String workspaceUuid,
+    required String query,
+    String mode = 'hybrid',
+    int limit = 8,
+  }) async {
+    final dynamic response = await _request(
+      'POST',
+      'workspaces/${_segment(workspaceUuid)}/rag/search',
+      body: <String, dynamic>{'query': query, 'mode': mode, 'limit': limit},
+    );
+    if (response is! List) {
+      throw const FormatException('Expected a JSON array from the engine.');
+    }
+    return response
+        .map((dynamic item) => (item as Map).cast<String, dynamic>())
+        .toList(growable: false);
+  }
 
   Future<Map<String, dynamic>> indexWorkspaceRagRoot({
     required String workspaceUuid,

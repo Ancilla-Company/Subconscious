@@ -49,6 +49,7 @@ final class _WorkspaceDocumentPreviewState
   int _initializingPageGeneration = 0;
   int _transferQueueGeneration = 0;
   int _webViewRevision = 0;
+  bool _previewPointerInside = true;
   String _previewThemeJson = '{}';
 
   static String _cssColor(Color color) =>
@@ -67,8 +68,8 @@ final class _WorkspaceDocumentPreviewState
     final String nextThemeJson = jsonEncode(<String, String>{
       'background': _cssColor(background),
       'foreground': _cssColor(colors.onSurface),
-      'scrollbarThumb': _cssColor(scrollbarColor(0.48)),
-      'scrollbarThumbHover': _cssColor(scrollbarColor(0.60)),
+      'scrollbarThumb': _cssColor(scrollbarColor(0.16)),
+      'scrollbarThumbHover': _cssColor(scrollbarColor(0.40)),
       'scrollbarThumbActive': _cssColor(scrollbarColor(0.72)),
       'brightness': theme.brightness == Brightness.dark ? 'dark' : 'light',
     });
@@ -489,6 +490,35 @@ final class _WorkspaceDocumentPreviewState
     }
   }
 
+  void _setPreviewPointerInside(bool inside) {
+    _previewPointerInside = inside;
+    final InAppWebViewController? controller = _controller;
+    final int generation = _pageGeneration;
+    if (controller == null || !_pageReady) return;
+    unawaited(_updatePreviewPointerBoundary(controller, generation, inside));
+  }
+
+  Future<void> _updatePreviewPointerBoundary(
+    InAppWebViewController controller,
+    int generation,
+    bool inside,
+  ) async {
+    if (!_isCurrentPage(controller, generation)) return;
+    try {
+      await controller
+          .evaluateJavascript(
+            source:
+                'typeof window.setPreviewPointerInside === "function" && '
+                'window.setPreviewPointerInside($inside);',
+          )
+          .timeout(const Duration(seconds: 1));
+    } on Object catch (error) {
+      if (_isCurrentPage(controller, generation)) {
+        debugPrint('[DocumentPreview] pointer boundary update failed: $error');
+      }
+    }
+  }
+
   void _startViewerInitialization(
     _ViewerAssets assets, {
     required String trigger,
@@ -497,6 +527,7 @@ final class _WorkspaceDocumentPreviewState
     final InAppWebViewController? controller = _controller;
     if (!mounted || controller == null) return;
     _pageReady = true;
+    _setPreviewPointerInside(_previewPointerInside);
     final int generation = _pageGeneration;
     if (_initializingPageGeneration == generation) return;
     _initializingPageGeneration = generation;
@@ -584,92 +615,100 @@ final class _WorkspaceDocumentPreviewState
         return Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            InAppWebView(
-              key: ValueKey<int>(_webViewRevision),
-              initialData: InAppWebViewInitialData(
-                data: assets.html,
-                baseUrl: WebUri('https://preview.invalid/'),
-              ),
-              initialSettings: InAppWebViewSettings(
-                javaScriptEnabled: true,
-                supportMultipleWindows: false,
-                javaScriptCanOpenWindowsAutomatically: false,
-                allowFileAccessFromFileURLs: false,
-                allowUniversalAccessFromFileURLs: false,
-                mixedContentMode: MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
-                mediaPlaybackRequiresUserGesture: true,
-                disableContextMenu: true,
-              ),
-              onWebViewCreated: _beginWebView,
-              onProgressChanged: (InAppWebViewController _, int progress) {
-                if (progress != 100) return;
-                final int generation = _pageGeneration;
-                unawaited(
-                  Future<void>.delayed(const Duration(milliseconds: 250), () {
-                    if (generation == _pageGeneration &&
-                        _initializingPageGeneration != generation) {
-                      _startViewerInitialization(
-                        assets,
-                        trigger: 'progress fallback',
+            MouseRegion(
+              onEnter: (_) => _setPreviewPointerInside(true),
+              onExit: (_) => _setPreviewPointerInside(false),
+              child: InAppWebView(
+                key: ValueKey<int>(_webViewRevision),
+                initialData: InAppWebViewInitialData(
+                  data: assets.html,
+                  baseUrl: WebUri('https://preview.invalid/'),
+                ),
+                initialSettings: InAppWebViewSettings(
+                  javaScriptEnabled: true,
+                  supportMultipleWindows: false,
+                  javaScriptCanOpenWindowsAutomatically: false,
+                  allowFileAccessFromFileURLs: false,
+                  allowUniversalAccessFromFileURLs: false,
+                  mixedContentMode: MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
+                  mediaPlaybackRequiresUserGesture: true,
+                  disableContextMenu: true,
+                ),
+                onWebViewCreated: _beginWebView,
+                onProgressChanged: (InAppWebViewController _, int progress) {
+                  if (progress != 100) return;
+                  final int generation = _pageGeneration;
+                  unawaited(
+                    Future<void>.delayed(const Duration(milliseconds: 250), () {
+                      if (generation == _pageGeneration &&
+                          _initializingPageGeneration != generation) {
+                        _startViewerInitialization(
+                          assets,
+                          trigger: 'progress fallback',
+                        );
+                      }
+                    }),
+                  );
+                },
+                onLoadStop: (InAppWebViewController _, WebUri? url) {
+                  _startViewerInitialization(
+                    assets,
+                    trigger: 'onLoadStop',
+                    url: url,
+                  );
+                },
+                onConsoleMessage:
+                    (
+                      InAppWebViewController controller,
+                      ConsoleMessage message,
+                    ) {
+                      debugPrint(
+                        '[DocumentPreview][${message.messageLevel}] '
+                        '${message.message}',
                       );
-                    }
-                  }),
-                );
-              },
-              onLoadStop: (InAppWebViewController _, WebUri? url) {
-                _startViewerInitialization(
-                  assets,
-                  trigger: 'onLoadStop',
-                  url: url,
-                );
-              },
-              onConsoleMessage:
-                  (InAppWebViewController controller, ConsoleMessage message) {
-                    debugPrint(
-                      '[DocumentPreview][${message.messageLevel}] '
-                      '${message.message}',
-                    );
-                  },
-              onReceivedError:
-                  (
-                    InAppWebViewController _,
-                    WebResourceRequest request,
-                    WebResourceError error,
-                  ) {
-                    debugPrint(
-                      '[DocumentPreview] WebView load error '
-                      '${error.type}: ${error.description}',
-                    );
-                    if (_controller != null && request.isForMainFrame == true) {
-                      _showError(
-                        'The document preview page failed to load: '
-                        '${error.description}',
+                    },
+                onReceivedError:
+                    (
+                      InAppWebViewController _,
+                      WebResourceRequest request,
+                      WebResourceError error,
+                    ) {
+                      debugPrint(
+                        '[DocumentPreview] WebView load error '
+                        '${error.type}: ${error.description}',
                       );
-                    }
-                  },
-              onCreateWindow: (
-                InAppWebViewController controller,
-                CreateWindowAction action,
-              ) async => false,
-              onDownloadStartRequest: (
-                InAppWebViewController controller,
-                DownloadStartRequest request,
-              ) async {},
-              onPermissionRequest:
-                  (
-                    InAppWebViewController controller,
-                    PermissionRequest request,
-                  ) async => PermissionResponse(
-                    resources: request.resources,
-                    action: PermissionResponseAction.DENY,
-                  ),
-              onReceivedServerTrustAuthRequest:
-                  (
-                    InAppWebViewController controller,
-                    URLAuthenticationChallenge challenge,
-                  ) async => ServerTrustAuthResponse(
-                    action: ServerTrustAuthResponseAction.CANCEL,
-                  ),
+                      if (_controller != null &&
+                          request.isForMainFrame == true) {
+                        _showError(
+                          'The document preview page failed to load: '
+                          '${error.description}',
+                        );
+                      }
+                    },
+                onCreateWindow: (
+                  InAppWebViewController controller,
+                  CreateWindowAction action,
+                ) async => false,
+                onDownloadStartRequest: (
+                  InAppWebViewController controller,
+                  DownloadStartRequest request,
+                ) async {},
+                onPermissionRequest:
+                    (
+                      InAppWebViewController controller,
+                      PermissionRequest request,
+                    ) async => PermissionResponse(
+                      resources: request.resources,
+                      action: PermissionResponseAction.DENY,
+                    ),
+                onReceivedServerTrustAuthRequest:
+                    (
+                      InAppWebViewController controller,
+                      URLAuthenticationChallenge challenge,
+                    ) async => ServerTrustAuthResponse(
+                      action: ServerTrustAuthResponseAction.CANCEL,
+                    ),
+              ),
             ),
             if (_viewerError case final Object error)
               ColoredBox(

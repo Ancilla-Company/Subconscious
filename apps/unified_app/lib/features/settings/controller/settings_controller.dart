@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 
 enum MainPanelDestination { utility, workspace, files, settings }
 
-enum SettingsPage { general, models, tools, skills, about }
+enum SettingsPage { general, models, tools, skills, account, about }
 
 enum AppLightingMode { device, light, dark }
 
@@ -166,6 +166,7 @@ final class DashboardSettingsController extends ChangeNotifier {
       case SettingsPage.tools:
         unawaited(loadTools());
       case SettingsPage.skills:
+      case SettingsPage.account:
       case SettingsPage.about:
         break;
     }

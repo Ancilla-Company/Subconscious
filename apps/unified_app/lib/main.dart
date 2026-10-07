@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 
+import 'features/account/account_controller.dart';
 import 'features/connection/engine_connection_resolver.dart';
 import 'features/dashboard/controller/dashboard_controller.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
@@ -37,8 +38,27 @@ Future<void> main() async {
       'SUBCONSCIOUS_WORKSPACE_UUID',
     ),
   );
-  unawaited(controller.load());
-  runApp(SubconsciousApp(dashboardController: controller));
+  final AccountController accountController = AccountController(
+    clientProvider: () => controller.repository?.rest,
+  );
+  unawaited(_loadEngineAndRestoreAccount(controller, accountController));
+  runApp(
+    SubconsciousApp(
+      dashboardController: controller,
+      accountController: accountController,
+    ),
+  );
+}
+
+Future<void> _loadEngineAndRestoreAccount(
+  DashboardController controller,
+  AccountController accountController,
+) async {
+  try {
+    await controller.load();
+  } finally {
+    await accountController.restoreSession();
+  }
 }
 
 Uri? _configuredEngineEndpoint({required bool preferDev}) {
@@ -73,8 +93,14 @@ Uri? _configuredEngineEndpoint({required bool preferDev}) {
 }
 
 final class SubconsciousApp extends StatelessWidget {
-  const SubconsciousApp({required this.dashboardController, super.key});
+  const SubconsciousApp({
+    required this.dashboardController,
+    required this.accountController,
+    super.key,
+  });
+
   final DashboardController dashboardController;
+  final AccountController accountController;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -92,7 +118,10 @@ final class SubconsciousApp extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           quill.FlutterQuillLocalizations.delegate,
         ],
-        home: DashboardPage(controller: dashboardController),
+        home: DashboardPage(
+          controller: dashboardController,
+          accountController: accountController,
+        ),
         theme: AppTheme.light(seedColor: accentColor, monochrome: monochrome),
         darkTheme: AppTheme.dark(
           seedColor: accentColor,

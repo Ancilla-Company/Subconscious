@@ -5,6 +5,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../account/account_controller.dart';
 import '../../chat/engine_llm_provider.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
@@ -13,8 +14,14 @@ import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
 
 final class MobileDashboardView extends StatelessWidget {
-  const MobileDashboardView({required this.controller, super.key});
+  const MobileDashboardView({
+    required this.controller,
+    required this.accountController,
+    super.key,
+  });
+
   final DashboardController controller;
+  final AccountController accountController;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -22,7 +29,12 @@ final class MobileDashboardView extends StatelessWidget {
     builder: (BuildContext context, Widget? child) => Scaffold(
       drawer: Drawer(
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        child: SafeArea(child: _MobileFlyout(controller: controller)),
+        child: SafeArea(
+          child: _MobileFlyout(
+            controller: controller,
+            accountController: accountController,
+          ),
+        ),
       ),
       appBar: AppBar(
         leading: Builder(
@@ -46,7 +58,10 @@ final class MobileDashboardView extends StatelessWidget {
 
   Widget _body() {
     if (controller.selectedSection != DashboardSection.threads) {
-      return DashboardMainPanel(controller: controller);
+      return DashboardMainPanel(
+        controller: controller,
+        accountController: accountController,
+      );
     }
     if (controller.isLoading || controller.isLoadingChat) {
       return const Center(child: CircularProgressIndicator());
@@ -113,12 +128,20 @@ final class MobileDashboardView extends StatelessWidget {
 }
 
 final class _MobileFlyout extends StatelessWidget {
-  const _MobileFlyout({required this.controller});
+  const _MobileFlyout({
+    required this.controller,
+    required this.accountController,
+  });
 
   final DashboardController controller;
+  final AccountController accountController;
 
   void _selectSection(DashboardSection section) {
     unawaited(controller.activateSection(section));
+  }
+
+  void _selectAccount() {
+    controller.openAccountShortcut();
   }
 
   @override
@@ -176,16 +199,23 @@ final class _MobileFlyout extends StatelessWidget {
                   selectedIcon: FluentIcons.settings_24_filled,
                   tooltip: 'Settings',
                   selected:
-                      controller.selectedSection == DashboardSection.settings,
+                      controller.selectedSection == DashboardSection.settings &&
+                      !controller.accountShortcutSelected,
                   onPressed: () => _selectSection(DashboardSection.settings),
                 ),
-                _MobileSidebarButton(
-                  icon: FluentIcons.person_24_regular,
-                  selectedIcon: FluentIcons.person_24_filled,
-                  tooltip: 'Account',
-                  selected:
-                      controller.selectedSection == DashboardSection.account,
-                  onPressed: () => _selectSection(DashboardSection.account),
+                AnimatedBuilder(
+                  animation: accountController,
+                  builder: (BuildContext context, Widget? child) =>
+                      _MobileSidebarButton(
+                        icon: FluentIcons.person_24_regular,
+                        selectedIcon: FluentIcons.person_24_filled,
+                        tooltip: accountController.sidebarTooltip,
+                        selected:
+                            controller.selectedSection ==
+                                DashboardSection.settings &&
+                            controller.accountShortcutSelected,
+                        onPressed: _selectAccount,
+                      ),
                 ),
               ],
             ),

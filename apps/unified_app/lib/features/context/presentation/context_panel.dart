@@ -159,7 +159,6 @@ final class _ContextPanelState extends State<ContextPanel> {
           controller: widget.controller,
           onSelection: widget.onSelection,
         ),
-        DashboardSection.account => const _AccountSection(),
       },
     ),
   );
@@ -1045,6 +1044,7 @@ final class _SettingsSection extends StatelessWidget {
         ('Models', FluentIcons.bot_20_regular, SettingsPage.models),
         ('Tools', FluentIcons.toolbox_20_regular, SettingsPage.tools),
         ('Skills', FluentIcons.book_toolbox_20_regular, SettingsPage.skills),
+        ('Account', FluentIcons.person_20_regular, SettingsPage.account),
         ('About', FluentIcons.info_20_regular, SettingsPage.about),
       ];
 
@@ -1076,18 +1076,6 @@ final class _SettingsSection extends StatelessWidget {
         ),
       ],
     ),
-  );
-}
-
-final class _AccountSection extends StatelessWidget {
-  const _AccountSection();
-
-  @override
-  Widget build(BuildContext context) => const Column(
-    children: <Widget>[
-      _SectionHeader(title: 'Account'),
-      Expanded(child: _PanelMessage('Account details — coming soon')),
-    ],
   );
 }
 

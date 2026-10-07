@@ -9,7 +9,7 @@ import '../../settings/controller/settings_controller.dart';
 
 enum EngineConnectionStatus { disconnected, connecting, connected }
 
-enum DashboardSection { workspaces, threads, files, settings, account }
+enum DashboardSection { workspaces, threads, files, settings }
 
 final class WorkspaceDirectoryRoot {
   const WorkspaceDirectoryRoot({required this.index, required this.path});
@@ -199,6 +199,7 @@ final class DashboardController extends ChangeNotifier {
   EngineLlmProvider? chatProvider;
   EngineConnectionStatus connectionStatus = EngineConnectionStatus.connecting;
   DashboardSection selectedSection = DashboardSection.threads;
+  bool accountShortcutSelected = false;
   List<Workspace> workspaces = const <Workspace>[];
   List<ThreadInfo> threads = const <ThreadInfo>[];
   Workspace? selectedWorkspace;
@@ -448,6 +449,7 @@ final class DashboardController extends ChangeNotifier {
   }) async {
     final int activationVersion = ++_sectionActivationVersion;
     selectedSection = section;
+    accountShortcutSelected = false;
     switch (section) {
       case DashboardSection.workspaces:
         if (selectedWorkspace == null) {
@@ -461,8 +463,6 @@ final class DashboardController extends ChangeNotifier {
         settings.showFiles();
       case DashboardSection.settings:
         settings.showSettings();
-      case DashboardSection.account:
-        settings.showUtility();
     }
     notifyListeners();
 
@@ -504,7 +504,16 @@ final class DashboardController extends ChangeNotifier {
 
   void openSettingsPage(SettingsPage page) {
     selectedSection = DashboardSection.settings;
+    accountShortcutSelected = false;
     settings.openSettingsPage(page);
+    _markNavigationChanged();
+    notifyListeners();
+  }
+
+  void openAccountShortcut() {
+    selectedSection = DashboardSection.settings;
+    accountShortcutSelected = true;
+    settings.openSettingsPage(SettingsPage.account);
     _markNavigationChanged();
     notifyListeners();
   }
@@ -596,9 +605,11 @@ final class DashboardController extends ChangeNotifier {
   }
 
   void _restoreNavigation(Map<String, dynamic> root) {
-    selectedSection =
-        _enumValue(DashboardSection.values, root['activeSection']) ??
-        DashboardSection.threads;
+    final bool legacyAccountSection = root['activeSection'] == 'account';
+    selectedSection = legacyAccountSection
+        ? DashboardSection.settings
+        : _enumValue(DashboardSection.values, root['activeSection']) ??
+              DashboardSection.threads;
     final Map<String, dynamic> sections = _objectValue(root['sections']);
     final Map<String, dynamic> workspaces = _objectValue(
       sections['workspaces'],
@@ -635,9 +646,19 @@ final class DashboardController extends ChangeNotifier {
     _filesWorkspaceUuid = _stringValue(files['workspaceUuid']);
     _filesRootIndex = _nonNegativeIntValue(files['rootIndex']);
     _filesPath = _stringValue(files['path']);
-    settings.activePage =
-        _enumValue(SettingsPage.values, settingsState['page']) ??
-        SettingsPage.general;
+    settings.activePage = legacyAccountSection
+        ? SettingsPage.account
+        : _enumValue(SettingsPage.values, settingsState['page']) ??
+              SettingsPage.general;
+    final String? savedSidebarSelection = _stringValue(
+      root['sidebarSelection'],
+    );
+    accountShortcutSelected =
+        legacyAccountSection ||
+        savedSidebarSelection == 'account' ||
+        (savedSidebarSelection == null &&
+            selectedSection == DashboardSection.settings &&
+            settings.activePage == SettingsPage.account);
   }
 
   void _restoreFileViewer(Object? value) {
@@ -689,6 +710,9 @@ final class DashboardController extends ChangeNotifier {
   String _appStateSnapshot() => jsonEncode(<String, dynamic>{
     'version': 2,
     'activeSection': selectedSection.name,
+    'sidebarSelection': accountShortcutSelected
+        ? 'account'
+        : selectedSection.name,
     'sections': <String, dynamic>{
       'workspaces': <String, dynamic>{
         if (_workspacesWorkspaceUuid != null)
@@ -710,7 +734,6 @@ final class DashboardController extends ChangeNotifier {
         if (_filesPath != null) 'path': _filesPath,
       },
       'settings': <String, dynamic>{'page': settings.activePage.name},
-      'account': <String, dynamic>{},
     },
     'fileViewer': <String, dynamic>{
       for (final MapEntry<String, _WorkspaceViewerState> entry
@@ -1154,7 +1177,8 @@ final class DashboardController extends ChangeNotifier {
       case 'settings':
         await activateSection(DashboardSection.settings);
       case 'account':
-        await activateSection(DashboardSection.account);
+        updateLayoutState(contextPanelVisible: true);
+        openAccountShortcut();
       case 'show_chat':
         updateLayoutState(chatPanelVisible: true);
       case 'hide_chat':

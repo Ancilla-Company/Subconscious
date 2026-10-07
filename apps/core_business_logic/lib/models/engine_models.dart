@@ -676,3 +676,59 @@ final class ToolCatalog {
     return ToolCatalog(builtin: builtin, configured: configured);
   }
 }
+
+final class AccountUser {
+  const AccountUser({
+    required this.id,
+    required this.email,
+    required this.connectedProviders,
+    this.displayName,
+    this.avatarUrl,
+  });
+
+  final String id;
+  final String email;
+  final String? displayName;
+  final String? avatarUrl;
+  final List<String> connectedProviders;
+
+  factory AccountUser.fromJson(Map<String, dynamic> json) => AccountUser(
+    id:
+        _stringValue(json, 'id', 'id') ??
+        (throw const FormatException('Account user id is required.')),
+    email:
+        _stringValue(json, 'email', 'email') ??
+        (throw const FormatException('Account email is required.')),
+    displayName: _stringValue(json, 'displayName', 'display_name'),
+    avatarUrl: _stringValue(json, 'avatarUrl', 'avatar_url'),
+    connectedProviders:
+        (json['connected_providers'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<String>()
+            .toList(growable: false),
+  );
+}
+
+final class AccountSession {
+  const AccountSession({required this.authenticated, this.user, this.notice});
+
+  final bool authenticated;
+  final AccountUser? user;
+  final String? notice;
+
+  factory AccountSession.fromJson(Map<String, dynamic> json) {
+    final Object? rawUser = json['user'];
+    final bool authenticated =
+        json['authenticated'] as bool? ?? rawUser != null;
+    final AccountUser? user = rawUser is Map
+        ? AccountUser.fromJson(rawUser.cast<String, dynamic>())
+        : null;
+    if (authenticated && user == null) {
+      throw const FormatException('Authenticated account session has no user.');
+    }
+    return AccountSession(
+      authenticated: authenticated,
+      user: user,
+      notice: _stringValue(json, 'notice', 'notice'),
+    );
+  }
+}
