@@ -660,8 +660,34 @@ class WebSocketSession:
                     ]
                     agent_content = [context_prompt, *binary_parts] \
                         if binary_parts else context_prompt
-                result = await self.app.state.agent_manager.execute(config, agent_content, history, tools,
-                    lambda call: self._request_approval(turn_id, thread_uuid, call))
+                graph_engine = getattr(self.app.state, "graph_engine", None)
+                if graph_engine is None:
+                    result = await self.app.state.agent_manager.execute(
+                        config, agent_content, history, tools,
+                        lambda call: self._request_approval(turn_id, thread_uuid, call),
+                    )
+                else:
+                    async def graph_event(event: dict[str, Any]) -> None:
+                        await self._send(
+                            "agui.event",
+                            {"thread_uuid": thread_uuid, **event},
+                            turn_id,
+                        )
+                        await self.app.state.event_bus.publish(
+                            "graph.execution", {"thread_uuid": thread_uuid, **event}
+                        )
+
+                    result = await graph_engine.run_conscious(
+                        config,
+                        agent_content,
+                        history,
+                        tools,
+                        lambda call: self._request_approval(turn_id, thread_uuid, call),
+                        state={
+                            "active_skills": thread.skills_config or workspace.skills_config or "[]",
+                        },
+                        event_sink=graph_event,
+                    )
                 for record in result.tool_records:
                     message = Message(uuid=str(uuid4()), thread_id=thread.id, role="tool",
                                       content=json.dumps(record, default=str, separators=(",", ":")))

@@ -47,7 +47,8 @@ def test_registry_catalog_configuration_and_approval_flags():
     catalog = registry.catalog()
     assert {key: len(value) for key, value in catalog.items()} == {
         "time": 4, "calculator": 3, "weather": 2, "todo": 5, "memory": 5,
-        "notes": 4, "contacts": 5, "workspace_files": 4, "knowledge": 1,
+        "notes": 4, "contacts": 5, "filesystem": 8, "workspace_files": 4,
+        "knowledge": 1,
     }
     assert next(item for item in catalog["todo"] if item["name"] == "add_todo")["operation"] == "create"
     assert next(item for item in catalog["todo"] if item["name"] == "list_todos")["operation"] == "read"
@@ -61,6 +62,8 @@ def test_registry_catalog_configuration_and_approval_flags():
     assert "get_current_weather" not in by_name and "get_weather_forecast" not in by_name
     assert "delete_todo" not in by_name
     assert by_name["list_todos"].requires_approval is False
+    assert by_name["read_filesystem_file"].requires_approval is False
+    assert by_name["write_filesystem_file"].requires_approval is True
     assert by_name["add_todo"].requires_approval is True
     assert registry.tools_for_config('{"builtin_enabled": false}', context, approval) == []
     with pytest.raises(ValueError, match="JSON object"):

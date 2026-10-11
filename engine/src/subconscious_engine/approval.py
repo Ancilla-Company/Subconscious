@@ -22,7 +22,8 @@ _PREFIXES: tuple[tuple[str, str], ...] = (
     (("get_", "list_", "read_", "find_", "search_", "fetch_", "check_",
       "view_", "show_", "describe_", "lookup_", "recall"), READ),
     (("delete_", "remove_", "forget_", "purge_"), DELETE),
-    (("update_", "edit_", "set_", "replace_", "complete_", "run_"), UPDATE),
+    (("update_", "edit_", "set_", "replace_", "complete_", "run_", "write_",
+      "move_", "copy_", "rename_"), UPDATE),
 )
 
 

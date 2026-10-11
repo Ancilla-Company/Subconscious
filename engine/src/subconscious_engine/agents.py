@@ -10,12 +10,18 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.models.bedrock import BedrockConverseModel
-from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, Tool, UsageLimits
+from pydantic_ai import (
+    Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults,
+    Tool, UsageLimits,
+)
 from pydantic_ai.messages import (
+    PartDeltaEvent,
     TextPart,
+    TextPartDelta,
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     ToolReturnPart,
     UserPromptPart,
     SystemPromptPart
@@ -26,37 +32,66 @@ from subconscious_engine.configuration.models import ModelConfig
 
 # Variable setup
 ApprovalCallback = Callable[[Any], Awaitable[bool]]
+AgentEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
 class AgentExecutionResult:
     text: str
     tool_records: list[dict[str, Any]]
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class AgentManager:
-    MAX_TOOL_ROUNDS = 8
-
     async def execute(self, config: ModelConfig, prompt: str | Sequence[Any],
                       history: Sequence[tuple[str, str]], tools: Sequence[Tool[Any]],
-                      approve: ApprovalCallback) -> AgentExecutionResult:
+                      approve: ApprovalCallback,
+                      system_prompt: str | Sequence[str] | None = None,
+                      event_sink: AgentEventCallback | None = None) -> AgentExecutionResult:
+        """Execute one LLM node; a node prompt overrides the legacy model prompt."""
         if config.id.casefold() == "echo" or config.provider.casefold() == "subconscious":
             text = prompt if isinstance(prompt, str) else "\n".join(
                 item for item in prompt if isinstance(item, str)
             )
+            if event_sink is not None and text:
+                await event_sink({"type": "model.delta", "delta": text})
             return AgentExecutionResult(text, [])
         model = self._model(config)
+        resolved_prompt = system_prompt if system_prompt is not None else config.system_prompt
         agent = Agent(model, output_type=[str, DeferredToolRequests],
-                      system_prompt=config.system_prompt or (), tools=tools)
+                      system_prompt=resolved_prompt or (), tools=tools)
         messages = self._history(history)
         deferred: DeferredToolResults | None = None
         user_prompt: str | Sequence[Any] | None = prompt
         records: list[dict[str, Any]] = []
         seen_returns: set[str] = set()
-        for _ in range(self.MAX_TOOL_ROUNDS):
-            result = await agent.run(user_prompt, message_history=messages,
-                deferred_tool_results=deferred,
-                usage_limits=UsageLimits(request_limit=8, tool_calls_limit=64))
+        prompt_tokens = 0
+        completion_tokens = 0
+        usage_limits = UsageLimits(request_limit=None, tool_calls_limit=None)
+        while True:
+            run_arguments = {
+                "message_history": messages,
+                "deferred_tool_results": deferred,
+                "usage_limits": usage_limits,
+            }
+            if event_sink is None:
+                result = await agent.run(user_prompt, **run_arguments)
+            else:
+                result = None
+                async for event in agent.run_stream_events(user_prompt, **run_arguments):
+                    if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                        await event_sink({
+                            "type": "model.delta",
+                            "delta": event.delta.content_delta,
+                        })
+                    elif isinstance(event, AgentRunResultEvent):
+                        result = event.result
+                if result is None:
+                    raise RuntimeError("The model stream ended without a final result.")
+            usage = result.usage()
+            prompt_tokens += usage.input_tokens
+            completion_tokens += usage.output_tokens
             self._collect_returns(result.new_messages(), records, seen_returns)
             if isinstance(result.output, str):
                 text = result.output
@@ -64,7 +99,7 @@ class AgentManager:
                     text = self._latest_response_text(result.new_messages())
                 if not text.strip():
                     raise RuntimeError("The model completed without an assistant response.")
-                return AgentExecutionResult(text, records)
+                return AgentExecutionResult(text, records, prompt_tokens, completion_tokens)
             requests = result.output
             deferred = DeferredToolResults()
             for call in requests.approvals:
@@ -76,7 +111,6 @@ class AgentManager:
                 deferred.calls[call.tool_call_id] = "External tool execution is unavailable."
             messages = result.all_messages()
             user_prompt = None
-        raise RuntimeError("The model exceeded the maximum of eight tool-call rounds.")
 
     @staticmethod
     def _model(config: ModelConfig) -> Model:
@@ -150,7 +184,22 @@ class AgentManager:
                          seen: set[str]) -> None:
         for message in messages:
             for part in message.parts:
-                if isinstance(part, ToolReturnPart) and part.tool_call_id not in seen:
+                if isinstance(part, RetryPromptPart):
+                    key = f"retry:{part.tool_call_id}:{part.timestamp.isoformat()}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    previous = [
+                        int(item.get("retryCount", 0)) for item in records
+                        if item.get("toolName") == (part.tool_name or "model")
+                    ]
+                    records.append({
+                        "toolName": part.tool_name or "model",
+                        "outcome": "retry",
+                        "error": str(part.content),
+                        "retryCount": max(previous, default=0) + 1,
+                    })
+                elif isinstance(part, ToolReturnPart) and part.tool_call_id not in seen:
                     seen.add(part.tool_call_id)
                     records.append({"toolName": part.tool_name, "output": part.content,
                                     "outcome": getattr(part, "outcome", "success")})

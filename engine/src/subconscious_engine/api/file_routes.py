@@ -7,7 +7,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from subconscious_engine.api.common import json_response, parse_request
-from subconscious_engine.api.extra_schemas import WriteWorkspaceFileRequest
+from subconscious_engine.api.extra_schemas import (
+    MoveWorkspaceFileRequest,
+    WriteWorkspaceFileRequest,
+)
 from subconscious_engine.services.workspace_files import WorkspaceFileError, WorkspaceFileService
 
 
@@ -121,6 +124,24 @@ async def create_directory(request: Request) -> Response:
         return _failure(error)
 
 
+async def move_path(request: Request) -> Response:
+    body = await parse_request(request, MoveWorkspaceFileRequest)
+    if isinstance(body, Response):
+        return body
+    try:
+        async with request.app.state.database.session() as session:
+            result = await WorkspaceFileService(session).move(
+                request.path_params["uuid"],
+                body.source_root_index,
+                body.source_path,
+                body.destination_root_index,
+                body.destination_path,
+            )
+        return json_response(result)
+    except (WorkspaceFileError, OSError) as error:
+        return _failure(error)
+
+
 def file_routes() -> list[Route]:
     return [
         Route("/api/v1/workspaces/{uuid}/files/search", search_files, methods=["GET"]),
@@ -129,4 +150,5 @@ def file_routes() -> list[Route]:
         Route("/api/v1/workspaces/{uuid}/files/preview", preview_file, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/content", mutate_file, methods=["POST", "PUT"]),
         Route("/api/v1/workspaces/{uuid}/files/directory", create_directory, methods=["POST"]),
+        Route("/api/v1/workspaces/{uuid}/files/move", move_path, methods=["POST"]),
     ]

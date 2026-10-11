@@ -11,6 +11,7 @@ import socket
 import uvicorn
 
 from . import __version__
+from .account import AccountServerClient, AccountSessionService
 from .agents import AgentManager
 from .api import create_app
 from .auth import EngineAuthToken
@@ -18,6 +19,12 @@ from .background import BackgroundStatusIndicator, SystemTrayStatusIndicator
 from .config import EngineConfig
 from .configuration import EncryptedModelConfigurationStore
 from .events import EventBus
+from .graph_engine import GraphEngine
+from .graphs import GraphKind, load_graph_schema
+from .subconscious_loop import SubconsciousWorker
+from .telemetry import TelemetryStore
+from .tool_registry import PortableToolRegistry, ToolRegistryConfig
+from .tools.subconscious_tools import SubconsciousToolset
 from .runtime import RuntimeInfo, RuntimeInfoWriter
 from .services.rag_service import WorkspaceRagService
 from .storage import Database
@@ -53,6 +60,57 @@ class EngineHost:
             model_cache_directory=config.resolved_data_directory / "models"
         )
         self.agent_manager = AgentManager()
+        self.telemetry = TelemetryStore(config.resolved_data_directory / "telemetry.db")
+        registry_config, self.tool_registry_config_path = ToolRegistryConfig.load(
+            config.resolved_data_directory
+        )
+        self.portable_tool_registry = PortableToolRegistry(registry_config)
+        foreground_schema = load_graph_schema(
+            GraphKind.FOREGROUND, config.resolved_conscious_graph
+        )
+        subconscious_schema = load_graph_schema(
+            GraphKind.SUBCONSCIOUS, config.resolved_subconscious_graph
+        )
+        subconscious_toolset = SubconsciousToolset(
+            config.resolved_data_directory, self.telemetry
+        )
+
+        async def subconscious_model():
+            identifier = config.subconscious_model_id or os.getenv(
+                "SUBCONSCIOUS_REFLECTION_MODEL"
+            )
+            if identifier:
+                return await self.model_configuration_store.resolve(identifier)
+            configured = await self.model_configuration_store.list()
+            return (
+                await self.model_configuration_store.resolve(configured[0].id)
+                if configured
+                else None
+            )
+
+        self.graph_engine = GraphEngine(
+            self.telemetry,
+            self.portable_tool_registry,
+            foreground_schema,
+            subconscious_schema,
+            self.agent_manager,
+            subconscious_model,
+            subconscious_toolset.tools(),
+            config.resolved_data_directory / "context",
+        )
+        self.subconscious_worker = (
+            SubconsciousWorker(
+                self.graph_engine,
+                config.subconscious_interval_seconds,
+                config.subconscious_jitter_ratio,
+            )
+            if config.subconscious_enabled
+            else None
+        )
+        self.account_session_service = AccountSessionService(
+            AccountServerClient(config.resolved_account_server_url),
+            credential_store=self.model_configuration_store,
+        )
         self.app = create_app(
             self.database,
             self.token,
@@ -61,6 +119,9 @@ class EngineHost:
             self.tool_registry,
             self.rag_service,
             self.agent_manager,
+            self.graph_engine,
+            self.subconscious_worker,
+            self.account_session_service,
         )
         self._status_indicator_factory = status_indicator_factory
         self._status_indicator: BackgroundStatusIndicator | None = None
@@ -209,6 +270,8 @@ class EngineHost:
             )
         for candidate in sorted(candidates):
             address = ipaddress.ip_address(candidate)
-            if not (address.is_loopback or address.is_link_local or address.is_unspecified):
+            if not (
+                address.is_loopback or address.is_link_local or address.is_unspecified
+            ):
                 return candidate
         return "127.0.0.1"

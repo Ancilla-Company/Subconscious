@@ -29,6 +29,13 @@ class WriteWorkspaceFileRequest(WireModel):
     content: str | None = None
 
 
+class MoveWorkspaceFileRequest(WireModel):
+    source_root_index: int
+    source_path: str
+    destination_root_index: int
+    destination_path: str
+
+
 class ToolRegistryDto(WireModel):
     id: int
     uuid: str

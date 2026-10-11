@@ -17,6 +17,7 @@ from subconscious_engine.approval import ApprovalConfig, classify_operation
 from subconscious_engine.services.rag_service import WorkspaceRagService
 from subconscious_engine.services.workspace_files import WorkspaceFileService
 from subconscious_engine.tools.database_tools import database_tool_entries
+from subconscious_engine.tools.filesystem_tools import filesystem_tool_entries
 
 ToolFunction = Callable[..., Any]
 
@@ -231,6 +232,7 @@ class ToolRegistry:
                      plain(get_weather_forecast)),
         ]
         specs.extend(ToolSpec(*entry) for entry in database_tool_entries())
+        specs.extend(ToolSpec(*entry) for entry in filesystem_tool_entries())
         specs.extend([
             ToolSpec(
                 "workspace_files",

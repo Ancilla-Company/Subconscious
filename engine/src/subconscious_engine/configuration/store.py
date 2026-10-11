@@ -18,7 +18,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from pydantic import ValidationError
 
 from .errors import ModelConfigurationStoreError
-from .key_provider import FernetKeyProvider, KeyringFernetKeyProvider
+from .key_provider import FernetKeyProvider, PlatformFernetKeyProvider
 from .models import ModelConfig, ModelConfigurationDto, UpsertModelConfigurationRequest
 
 T = TypeVar("T")
@@ -73,7 +73,9 @@ class EncryptedModelConfigurationStore:
     ) -> None:
         self.data_file_path = Path(data_directory) / "data.enc"
         self.lock_file_path = Path(data_directory) / "data.enc.lock"
-        self._key_provider = key_provider or KeyringFernetKeyProvider()
+        self._key_provider = key_provider or PlatformFernetKeyProvider(
+            encrypted_data_path=self.data_file_path
+        )
         self._thread_lock = RLock()
 
     async def list(self) -> list[ModelConfigurationDto]:
@@ -159,6 +161,35 @@ class EncryptedModelConfigurationStore:
 
     async def remove_tool_auth_config(self, identifier: str) -> None:
         await self.update_tool_auth_config(identifier, None, clear=True)
+
+    def get_account_refresh_token(self) -> str | None:
+        """Return the engine-owned cloud refresh token without exposing it via the API."""
+        def operation() -> str | None:
+            account = self._read_unlocked().get("account_session")
+            if not isinstance(account, dict):
+                return None
+            token = account.get("refresh_token")
+            return token if isinstance(token, str) and token else None
+        return self._locked(operation)
+
+    def set_account_refresh_token(self, token: str) -> None:
+        def operation() -> None:
+            secrets = self._read_unlocked()
+            account = secrets.setdefault("account_session", {})
+            if not isinstance(account, dict):
+                account = {}
+                secrets["account_session"] = account
+            account["refresh_token"] = token
+            self._write_unlocked(secrets)
+        self._locked(operation)
+
+    def remove_account_refresh_token(self) -> None:
+        def operation() -> None:
+            secrets = self._read_unlocked()
+            if "account_session" in secrets:
+                secrets.pop("account_session")
+                self._write_unlocked(secrets)
+        self._locked(operation)
 
     def _locked(self, operation: Callable[[], T]) -> T:
         try:
