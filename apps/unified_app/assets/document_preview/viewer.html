@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Document preview</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; img-src data: blob:; font-src data:; style-src 'unsafe-inline'; script-src 'nonce-subconscious' blob:; worker-src blob:">
+  <style>
+    :root {
+      color-scheme: light;
+      --preview-background: #f8f7fc;
+      --preview-foreground: #211f2b;
+      --scrollbar-thumb: #aaa7b0;
+      --scrollbar-thumb-hover: #8f8c95;
+      --scrollbar-thumb-active: #74717a;
+    }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--preview-background);
+      color: var(--preview-foreground);
+    }
+    body { font-family: system-ui, sans-serif; }
+    #viewport-shell {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: var(--preview-background);
+    }
+    #scroll-viewport {
+      position: absolute;
+      inset: 0 -32px 0 0;
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: scroll;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+      padding-right: 32px;
+      scrollbar-width: none;
+    }
+    #scroll-viewport::-webkit-scrollbar {
+      display: none;
+      width: 0;
+      height: 0;
+    }
+    #preview-scrollbar {
+      position: absolute;
+      z-index: 10;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 14px;
+      opacity: 0;
+      pointer-events: auto;
+      transition: opacity 120ms ease-out;
+    }
+    #preview-scrollbar:hover,
+    #preview-scrollbar.visible,
+    #preview-scrollbar.dragging {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    #viewport-shell.host-pointer-outside #preview-scrollbar {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #preview-scrollbar[hidden] { display: none; }
+    #preview-scrollbar-thumb {
+      position: absolute;
+      top: 0;
+      right: 3px;
+      width: 8px;
+      min-height: 32px;
+      border-radius: 4px;
+      background: var(--scrollbar-thumb);
+      cursor: default;
+      touch-action: none;
+    }
+    #preview-scrollbar:hover #preview-scrollbar-thumb {
+      background: var(--scrollbar-thumb-hover);
+    }
+    #preview-scrollbar.dragging #preview-scrollbar-thumb {
+      background: var(--scrollbar-thumb-active);
+    }
+    #status { padding: 24px; text-align: center; }
+    #viewer { box-sizing: border-box; min-height: 100%; padding: 16px; }
+    .pdf-page { display: block; margin: 0 auto 16px; max-width: 100%; background: white; box-shadow: 0 1px 5px #0003; }
+    .docx-wrapper {
+      box-sizing: border-box !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      background: transparent !important;
+      padding: 0 !important;
+    }
+    .docx-wrapper > section.docx {
+      box-sizing: border-box !important;
+      max-width: 100% !important;
+      margin: 0 auto 16px !important;
+      box-shadow: 0 1px 5px #0003 !important;
+    }
+    a { pointer-events: none; color: inherit; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div id="viewport-shell">
+    <div id="scroll-viewport">
+      <div id="status">Preparing document preview…</div>
+      <main id="viewer"></main>
+    </div>
+    <div id="preview-scrollbar" hidden aria-hidden="true">
+      <div id="preview-scrollbar-thumb"></div>
+    </div>
+  </div>
+  <script nonce="subconscious">
+    'use strict';
+    const sourceNames = ['pdf', 'worker', 'jszip', 'docx'];
+    const sourceNameSet = new Set(sourceNames);
+    const sourceTransfers = new Map();
+    const encodedSources = new Map();
+    const previewTransfers = new Map();
+    const pendingHostEvents = [];
+    let initializationRequestId = 0;
+    let renderRequestId = 0;
+    let librariesReady = false;
+    let workerUrl = null;
+    let bridgeFlushInProgress = false;
+    let bridgePollTimer = null;
+    let bridgePollAttempts = 0;
+
+    window.previewBridgeReady = false;
+    window.previewLibrariesReady = false;
+    window.previewInitializationRequestId = 0;
+    window.previewInitializationError = null;
+    window.previewRenderRequestId = 0;
+    window.previewRenderComplete = false;
+    window.previewRenderError = null;
+
+    const viewportShell = document.getElementById('viewport-shell');
+    const scrollViewport = document.getElementById('scroll-viewport');
+    const previewScrollbar = document.getElementById('preview-scrollbar');
+    const previewScrollbarThumb = document.getElementById('preview-scrollbar-thumb');
+    const statusElement = document.getElementById('status');
+    const viewerElement = document.getElementById('viewer');
+    let scrollbarFrame = 0;
+    let scrollbarHideTimer = 0;
+    let maxScrollOffset = 0;
+    let maxThumbOffset = 0;
+    let draggingPointerId = null;
+    let dragStartY = 0;
+    let dragStartScrollTop = 0;
+    let hostPointerInside = true;
+
+    function scheduleScrollbarUpdate() {
+      if (scrollbarFrame) return;
+      scrollbarFrame = requestAnimationFrame(() => {
+        scrollbarFrame = 0;
+        const viewportHeight = scrollViewport.clientHeight;
+        const scrollHeight = scrollViewport.scrollHeight;
+        maxScrollOffset = Math.max(0, scrollHeight - viewportHeight);
+        const hasOverflow = maxScrollOffset > 1;
+        previewScrollbar.hidden = !hasOverflow;
+        if (!hasOverflow) {
+          previewScrollbar.classList.remove('visible', 'dragging');
+          previewScrollbarThumb.style.transform = 'translateY(0)';
+          return;
+        }
+        const trackHeight = previewScrollbar.clientHeight;
+        const thumbHeight = Math.max(
+          32,
+          Math.min(trackHeight, trackHeight * viewportHeight / scrollHeight)
+        );
+        maxThumbOffset = Math.max(0, trackHeight - thumbHeight);
+        const thumbOffset = maxScrollOffset === 0
+          ? 0
+          : maxThumbOffset * scrollViewport.scrollTop / maxScrollOffset;
+        previewScrollbarThumb.style.height = `${thumbHeight}px`;
+        previewScrollbarThumb.style.transform = `translateY(${thumbOffset}px)`;
+      });
+    }
+
+    function hideScrollbarImmediately() {
+      if (scrollbarHideTimer) {
+        clearTimeout(scrollbarHideTimer);
+        scrollbarHideTimer = 0;
+      }
+      previewScrollbar.classList.remove('visible');
+    }
+
+    function hideScrollbarSoon() {
+      if (scrollbarHideTimer) clearTimeout(scrollbarHideTimer);
+      if (draggingPointerId !== null) return;
+      scrollbarHideTimer = window.setTimeout(() => {
+        scrollbarHideTimer = 0;
+        previewScrollbar.classList.remove('visible');
+      }, 800);
+    }
+
+    function showScrollbar() {
+      if (previewScrollbar.hidden) return;
+      if (scrollbarHideTimer) {
+        clearTimeout(scrollbarHideTimer);
+        scrollbarHideTimer = 0;
+      }
+      previewScrollbar.classList.add('visible');
+      hideScrollbarSoon();
+    }
+
+    window.setPreviewPointerInside = (inside) => {
+      hostPointerInside = inside === true;
+      const forceOutside =
+        !hostPointerInside && draggingPointerId === null;
+      viewportShell.classList.toggle('host-pointer-outside', forceOutside);
+      if (forceOutside) hideScrollbarImmediately();
+      return true;
+    };
+
+    function finishScrollbarDrag(event) {
+      if (draggingPointerId === null ||
+          (event.pointerId !== undefined && event.pointerId !== draggingPointerId)) {
+        return;
+      }
+      draggingPointerId = null;
+      previewScrollbar.classList.remove('dragging');
+      if (!hostPointerInside) {
+        viewportShell.classList.add('host-pointer-outside');
+        hideScrollbarImmediately();
+        return;
+      }
+      hideScrollbarSoon();
+    }
+
+    scrollViewport.addEventListener('scroll', () => {
+      scheduleScrollbarUpdate();
+      showScrollbar();
+    }, {passive: true});
+    previewScrollbar.addEventListener('pointerenter', showScrollbar);
+    previewScrollbar.addEventListener('pointerleave', hideScrollbarSoon);
+    previewScrollbarThumb.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      scheduleScrollbarUpdate();
+      draggingPointerId = event.pointerId;
+      dragStartY = event.clientY;
+      dragStartScrollTop = scrollViewport.scrollTop;
+      viewportShell.classList.remove('host-pointer-outside');
+      previewScrollbar.classList.add('dragging', 'visible');
+      previewScrollbarThumb.setPointerCapture(event.pointerId);
+    });
+    previewScrollbarThumb.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== draggingPointerId || maxThumbOffset <= 0) return;
+      event.preventDefault();
+      const scrollDelta =
+        (event.clientY - dragStartY) * maxScrollOffset / maxThumbOffset;
+      scrollViewport.scrollTop = Math.max(
+        0,
+        Math.min(maxScrollOffset, dragStartScrollTop + scrollDelta)
+      );
+    });
+    previewScrollbarThumb.addEventListener('pointerup', finishScrollbarDrag);
+    previewScrollbarThumb.addEventListener('pointercancel', finishScrollbarDrag);
+    previewScrollbarThumb.addEventListener(
+      'lostpointercapture',
+      finishScrollbarDrag
+    );
+    window.addEventListener('resize', scheduleScrollbarUpdate);
+    const previewResizeObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(scheduleScrollbarUpdate)
+      : null;
+    if (previewResizeObserver) {
+      previewResizeObserver.observe(scrollViewport);
+      previewResizeObserver.observe(statusElement);
+      previewResizeObserver.observe(viewerElement);
+    }
+    scheduleScrollbarUpdate();
+
+    window.setPreviewTheme = (theme) => {
+      if (!theme || typeof theme !== 'object') return false;
+      const requiredColors = [
+        'background',
+        'foreground',
+        'scrollbarThumb',
+        'scrollbarThumbHover',
+        'scrollbarThumbActive'
+      ];
+      if (requiredColors.some((name) => typeof theme[name] !== 'string')) {
+        return false;
+      }
+      const root = document.documentElement;
+      root.style.setProperty('--preview-background', theme.background);
+      root.style.setProperty('--preview-foreground', theme.foreground);
+      root.style.setProperty('--scrollbar-thumb', theme.scrollbarThumb);
+      root.style.setProperty('--scrollbar-thumb-hover', theme.scrollbarThumbHover);
+      root.style.setProperty('--scrollbar-thumb-active', theme.scrollbarThumbActive);
+      root.style.colorScheme = theme.brightness === 'dark' ? 'dark' : 'light';
+      return true;
+    };
+
+    function setStatus(message) {
+      const status = document.getElementById('status');
+      status.hidden = false;
+      status.textContent = message;
+      scheduleScrollbarUpdate();
+    }
+
+    function bridgeAvailable() {
+      const bridge = window.flutter_inappwebview;
+      return bridge && typeof bridge.callHandler === 'function';
+    }
+
+    function scheduleBridgePoll() {
+      if (bridgePollTimer !== null || bridgePollAttempts >= 100) return;
+      bridgePollTimer = window.setTimeout(() => {
+        bridgePollTimer = null;
+        bridgePollAttempts++;
+        void flushHostEvents();
+        if (!window.previewBridgeReady && pendingHostEvents.length > 0) {
+          scheduleBridgePoll();
+        }
+      }, 100);
+    }
+
+    async function flushHostEvents() {
+      if (bridgeFlushInProgress || !bridgeAvailable()) {
+        scheduleBridgePoll();
+        return false;
+      }
+      bridgeFlushInProgress = true;
+      window.previewBridgeReady = true;
+      try {
+        while (pendingHostEvents.length > 0) {
+          const event = pendingHostEvents[0];
+          try {
+            await window.flutter_inappwebview.callHandler(
+              'documentPreviewEvent',
+              event
+            );
+            pendingHostEvents.shift();
+          } catch (_) {
+            window.previewBridgeReady = false;
+            scheduleBridgePoll();
+            return false;
+          }
+        }
+        return true;
+      } finally {
+        bridgeFlushInProgress = false;
+      }
+    }
+
+    function notifyHost(type, requestId, message) {
+      pendingHostEvents.push({
+        type,
+        requestId,
+        ...(message ? {message} : {})
+      });
+      bridgePollAttempts = 0;
+      void flushHostEvents();
+    }
+
+    window.addEventListener('flutterInAppWebViewPlatformReady', () => {
+      bridgePollAttempts = 0;
+      void flushHostEvents();
+    });
+    scheduleBridgePoll();
+
+    function errorMessage(error) {
+      return error && error.message ? error.message : String(error);
+    }
+
+    function decodeBase64(value) {
+      const binary = atob(value);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes;
+    }
+
+    function sourceKey(requestId, name) {
+      return `${requestId}:${name}`;
+    }
+
+    function clearInitializationSources(requestId) {
+      for (const name of sourceNames) {
+        sourceTransfers.delete(sourceKey(requestId, name));
+        encodedSources.delete(sourceKey(requestId, name));
+      }
+    }
+
+    function beginInitialization(requestId) {
+      if (requestId === initializationRequestId) return;
+      clearInitializationSources(initializationRequestId);
+      initializationRequestId = requestId;
+      librariesReady = false;
+      window.previewLibrariesReady = false;
+      window.previewInitializationRequestId = requestId;
+      window.previewInitializationError = null;
+      setStatus('Receiving document viewer libraries…');
+    }
+
+    function staleInitialization(requestId) {
+      return requestId !== initializationRequestId;
+    }
+
+    function staleRender(requestId) {
+      return requestId !== renderRequestId;
+    }
+
+    function loadScript(encoded, requestId, displayName) {
+      return new Promise((resolve, reject) => {
+        if (staleInitialization(requestId)) {
+          reject(new Error('Stale viewer initialization.'));
+          return;
+        }
+        setStatus(`Loading ${displayName}…`);
+        const url = URL.createObjectURL(new Blob(
+          [decodeBase64(encoded)],
+          {type: 'text/javascript'}
+        ));
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = () => {
+          script.remove();
+          URL.revokeObjectURL(url);
+          staleInitialization(requestId)
+            ? reject(new Error('Stale viewer initialization.'))
+            : resolve();
+        };
+        script.onerror = () => {
+          script.remove();
+          URL.revokeObjectURL(url);
+          reject(new Error(`${displayName} failed to load.`));
+        };
+        document.head.appendChild(script);
+      });
+    }
+
+    window.acceptViewerSourceChunk = (name, requestId, chunk) => {
+      if (!sourceNameSet.has(name) ||
+          !Number.isInteger(requestId) ||
+          typeof chunk !== 'string') {
+        return false;
+      }
+      beginInitialization(requestId);
+      const key = sourceKey(requestId, name);
+      if (!sourceTransfers.has(key)) sourceTransfers.set(key, []);
+      sourceTransfers.get(key).push(chunk);
+      return true;
+    };
+
+    window.finishViewerSource = (name, requestId) => {
+      const key = sourceKey(requestId, name);
+      const chunks = sourceTransfers.get(key);
+      if (!sourceNameSet.has(name) || !chunks || staleInitialization(requestId)) {
+        return false;
+      }
+      encodedSources.set(key, chunks.join(''));
+      sourceTransfers.delete(key);
+      return true;
+    };
+
+    window.initializeViewer = async (requestId) => {
+      beginInitialization(requestId);
+      window.previewInitializationRequestId = requestId;
+      window.previewInitializationError = null;
+      window.previewLibrariesReady = false;
+      librariesReady = false;
+      setStatus('Initializing document viewer…');
+      try {
+        for (const name of sourceNames) {
+          if (!encodedSources.has(sourceKey(requestId, name))) {
+            throw new Error(`Missing viewer source: ${name}.`);
+          }
+        }
+        await loadScript(
+          encodedSources.get(sourceKey(requestId, 'pdf')),
+          requestId,
+          'PDF.js'
+        );
+        if (!globalThis.pdfjsLib) throw new Error('PDF.js did not initialize.');
+        if (staleInitialization(requestId)) {
+          return {ok: false, stale: true, requestId};
+        }
+        if (workerUrl) URL.revokeObjectURL(workerUrl);
+        workerUrl = URL.createObjectURL(new Blob(
+          [decodeBase64(encodedSources.get(sourceKey(requestId, 'worker')))],
+          {type: 'text/javascript'}
+        ));
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+        await loadScript(
+          encodedSources.get(sourceKey(requestId, 'jszip')),
+          requestId,
+          'JSZip'
+        );
+        if (!globalThis.JSZip) throw new Error('JSZip did not initialize.');
+        await loadScript(
+          encodedSources.get(sourceKey(requestId, 'docx')),
+          requestId,
+          'DOCX preview support'
+        );
+        if (!globalThis.docx || typeof globalThis.docx.renderAsync !== 'function') {
+          throw new Error('DOCX preview support did not initialize.');
+        }
+        if (staleInitialization(requestId)) {
+          return {ok: false, stale: true, requestId};
+        }
+        clearInitializationSources(requestId);
+        librariesReady = true;
+        window.previewLibrariesReady = true;
+        window.previewInitializationError = null;
+        setStatus('Preparing document…');
+        notifyHost('librariesReady', requestId);
+        return {ok: true, requestId};
+      } catch (error) {
+        const message = `Viewer initialization failed: ${errorMessage(error)}`;
+        clearInitializationSources(requestId);
+        if (!staleInitialization(requestId)) {
+          librariesReady = false;
+          window.previewLibrariesReady = false;
+          window.previewInitializationError = message;
+          setStatus(message);
+          notifyHost('initializationError', requestId, message);
+        }
+        return {ok: false, requestId, error: message};
+      }
+    };
+
+    async function renderPdf(bytes, staging, requestId) {
+      const documentHandle = await pdfjsLib.getDocument({
+        data: bytes,
+        isEvalSupported: false,
+        useSystemFonts: true
+      }).promise;
+      try {
+        for (let pageNumber = 1; pageNumber <= documentHandle.numPages; pageNumber++) {
+          if (staleRender(requestId)) return false;
+          setStatus(`Rendering PDF page ${pageNumber} of ${documentHandle.numPages}…`);
+          const page = await documentHandle.getPage(pageNumber);
+          if (staleRender(requestId)) return false;
+          const initial = page.getViewport({scale: 1});
+          const available = Math.max(320, viewportShell.clientWidth - 32);
+          const scale = Math.min(2, available / initial.width);
+          const viewport = page.getViewport({scale});
+          const ratio = Math.min(window.devicePixelRatio || 1, 2);
+          const canvas = document.createElement('canvas');
+          canvas.className = 'pdf-page';
+          canvas.width = Math.floor(viewport.width * ratio);
+          canvas.height = Math.floor(viewport.height * ratio);
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+          staging.appendChild(canvas);
+          const context = canvas.getContext('2d', {alpha: false});
+          await page.render({
+            canvasContext: context,
+            viewport,
+            transform: ratio === 1 ? null : [ratio, 0, 0, ratio, 0, 0]
+          }).promise;
+          page.cleanup();
+        }
+        return !staleRender(requestId);
+      } finally {
+        if (typeof documentHandle.destroy === 'function') {
+          await documentHandle.destroy();
+        }
+      }
+    }
+
+    window.acceptPreviewChunk = (requestId, chunk) => {
+      if (!Number.isInteger(requestId) || typeof chunk !== 'string') return false;
+      if (renderRequestId !== requestId) {
+        renderRequestId = requestId;
+        previewTransfers.clear();
+        window.previewRenderRequestId = requestId;
+        window.previewRenderComplete = false;
+        window.previewRenderError = null;
+      }
+      if (!previewTransfers.has(requestId)) previewTransfers.set(requestId, []);
+      previewTransfers.get(requestId).push(chunk);
+      return true;
+    };
+
+    window.finishPreview = async (requestId, kind) => {
+      const chunks = previewTransfers.get(requestId);
+      if (!chunks || staleRender(requestId)) {
+        return {ok: false, stale: true, requestId};
+      }
+      previewTransfers.delete(requestId);
+      const status = document.getElementById('status');
+      const viewer = document.getElementById('viewer');
+      const staging = document.createElement('div');
+      window.previewRenderRequestId = requestId;
+      window.previewRenderComplete = false;
+      window.previewRenderError = null;
+      setStatus('Rendering document…');
+      try {
+        if (!librariesReady) throw new Error('Viewer libraries are not ready.');
+        const bytes = decodeBase64(chunks.join(''));
+        let complete = true;
+        if (kind === 'pdf') {
+          complete = await renderPdf(bytes, staging, requestId);
+        } else if (kind === 'docx') {
+          await docx.renderAsync(bytes.buffer, staging, null, {
+            breakPages: true,
+            ignoreFonts: false,
+            ignoreHeight: false,
+            ignoreWidth: false,
+            inWrapper: true,
+            renderChanges: false,
+            renderFootnotes: true,
+            renderHeaders: true,
+            renderFooters: true,
+            useBase64URL: true
+          });
+          complete = !staleRender(requestId);
+        } else {
+          throw new Error('Unsupported preview kind.');
+        }
+        if (!complete || staleRender(requestId)) {
+          return {ok: false, stale: true, requestId};
+        }
+        viewer.replaceChildren(...staging.childNodes);
+        status.hidden = true;
+        scrollViewport.scrollTop = 0;
+        scheduleScrollbarUpdate();
+        window.previewRenderComplete = true;
+        window.previewRenderError = null;
+        notifyHost('renderComplete', requestId);
+        return {ok: true, requestId};
+      } catch (error) {
+        const message = errorMessage(error);
+        if (!staleRender(requestId)) {
+          window.previewRenderComplete = false;
+          window.previewRenderError = message;
+          setStatus(`Unable to render document: ${message}`);
+          notifyHost('renderError', requestId, message);
+        }
+        return {ok: false, requestId, error: message};
+      }
+    };
+
+    window.addEventListener('beforeunload', () => {
+      initializationRequestId++;
+      renderRequestId++;
+      sourceTransfers.clear();
+      encodedSources.clear();
+      previewTransfers.clear();
+      pendingHostEvents.length = 0;
+      if (bridgePollTimer !== null) window.clearTimeout(bridgePollTimer);
+      if (scrollbarHideTimer) window.clearTimeout(scrollbarHideTimer);
+      if (scrollbarFrame) cancelAnimationFrame(scrollbarFrame);
+      if (previewResizeObserver) previewResizeObserver.disconnect();
+      if (workerUrl) URL.revokeObjectURL(workerUrl);
+    });
+  </script>
+</body>
+</html>

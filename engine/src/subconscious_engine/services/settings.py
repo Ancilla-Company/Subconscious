@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import builtins
 
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from subconscious_engine.api.extra_schemas import AppStateSettingDto
@@ -37,3 +37,16 @@ class SettingsService:
             else:
                 row.value = setting.value
         await self.session.commit()
+
+    async def delete(self, key: str | None, tag: str | None, client: str | None) -> int:
+        """Delete the rows ``list`` would return for the same filters."""
+        statement = sql_delete(AppState)
+        if key is not None:
+            statement = statement.where(AppState.key == key)
+        if tag is not None:
+            statement = statement.where(AppState.tag == tag)
+        if client is not None:
+            statement = statement.where(AppState.client == client)
+        result = await self.session.execute(statement)
+        await self.session.commit()
+        return result.rowcount or 0

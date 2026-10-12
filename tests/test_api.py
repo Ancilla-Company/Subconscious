@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+import hashlib
 from io import BytesIO
 import json
 from types import SimpleNamespace
@@ -295,18 +296,20 @@ def test_settings_and_workspace_file_routes_through_asgi(tmp_path):
                 json={"content": "first"},
             )
             assert created.status_code == 200
-            assert created.json() == {"content": "first"}
+            first = {"content": "first", "version": hashlib.sha256(b"first").hexdigest()}
+            assert created.json() == first
             listing = (await client.get(f"{base}?rootIndex=0", headers=auth())).json()
             assert listing == [{
                 "name": "note.txt", "relativePath": "note.txt", "isDirectory": False,
             }]
             assert (await client.get(
                 f"{base}/content?rootIndex=0&path=note.txt", headers=auth()
-            )).json() == {"content": "first"}
+            )).json() == first
             assert (await client.put(
                 f"{base}/content?rootIndex=0&path=note.txt", headers=auth(),
                 json={"content": "second"},
-            )).json() == {"content": "second"}
+            )).json() == {"content": "second",
+                          "version": hashlib.sha256(b"second").hexdigest()}
             assert root.joinpath("note.txt").read_text(encoding="utf-8") == "second"
             directory = await client.post(
                 f"{base}/directory?rootIndex=0&path=src", headers=auth()

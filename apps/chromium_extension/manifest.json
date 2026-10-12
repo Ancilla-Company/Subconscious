@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Subconscious",
+  "description": "Compact Subconscious engine client.",
+  "version": "0.1.0",
+  "action": { "default_title": "Subconscious", "default_popup": "popup.html" },
+  "permissions": ["storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"]
+}

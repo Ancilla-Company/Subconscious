@@ -5,6 +5,11 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../chat/engine_llm_provider.dart';
+import '../../editor/controller/editor_document_store.dart';
+import '../../editor/controller/editor_tab.dart';
+import '../../editor/controller/file_gateway.dart';
+import '../../editor/controller/workspace_paths.dart';
+import '../../editor/data/engine_draft_store.dart';
 import '../../settings/controller/settings_controller.dart';
 
 enum EngineConnectionStatus { disconnected, connecting, connected }
@@ -26,78 +31,16 @@ final class WorkspaceDirectoryRoot {
   }
 }
 
-final class OpenWorkspaceFile {
-  const OpenWorkspaceFile({
+final class WorkspaceFileTreeNode {
+  const WorkspaceFileTreeNode({
     required this.rootIndex,
     required this.path,
-    required this.content,
-    this.previewBytes,
-    this.previewKind,
-    this.mediaType,
+    required this.isDirectory,
   });
 
   final int rootIndex;
   final String path;
-  final String content;
-  final Uint8List? previewBytes;
-  final WorkspacePreviewKind? previewKind;
-  final String? mediaType;
-
-  String get name => path.replaceAll('\\', '/').split('/').last;
-  bool get isReadOnlyPreview => previewKind != null && previewBytes != null;
-  bool get isImage => previewKind == WorkspacePreviewKind.image;
-  bool get isDocumentPreview =>
-      previewKind == WorkspacePreviewKind.pdf ||
-      previewKind == WorkspacePreviewKind.docx;
-  bool get isSvg => mediaType == 'image/svg+xml';
-
-  static WorkspacePreviewKind? previewKindForPath(String path) {
-    final String lower = path.toLowerCase();
-    if (const <String>[
-      '.bmp',
-      '.gif',
-      '.jpeg',
-      '.jpg',
-      '.png',
-      '.svg',
-      '.webp',
-    ].any(lower.endsWith)) {
-      return WorkspacePreviewKind.image;
-    }
-    if (lower.endsWith('.pdf')) return WorkspacePreviewKind.pdf;
-    if (lower.endsWith('.docx')) return WorkspacePreviewKind.docx;
-    return null;
-  }
-
-  static bool supportsPreview(String path) => previewKindForPath(path) != null;
-}
-
-/// A stable reference to a file within one of a workspace's directory roots.
-final class WorkspaceFileReference {
-  WorkspaceFileReference({required this.rootIndex, required this.path})
-    : key = _createKey(rootIndex, path);
-
-  final int rootIndex;
-  final String path;
-  final String key;
-
-  factory WorkspaceFileReference.fromJson(Map<String, dynamic> json) {
-    final Object? rootIndex = json['rootIndex'];
-    final Object? path = json['path'];
-    if (rootIndex is! int || rootIndex < 0 || path is! String || path.isEmpty) {
-      throw const FormatException('Invalid workspace file reference.');
-    }
-    return WorkspaceFileReference(rootIndex: rootIndex, path: path);
-  }
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'rootIndex': rootIndex,
-    'path': path,
-    'key': key,
-  };
-
-  static String _createKey(int rootIndex, String path) =>
-      '$rootIndex:${path.replaceAll('\\', '/')}';
+  final bool isDirectory;
 }
 
 final class _WorkspaceViewerState {
@@ -130,6 +73,16 @@ final class DashboardController extends ChangeNotifier {
     settings = DashboardSettingsController(
       repositoryProvider: () => repository,
     );
+    documents =
+        EditorDocumentStore(
+            gateway: _EngineFileGateway(this),
+            drafts: EngineDraftStore(
+              clientProvider: () => repository?.rest,
+              clientName: DashboardSettingsController.settingsClient,
+            ),
+          )
+          ..onTabsChanged = _onEditorTabsChanged
+          ..onActiveChanged = _onEditorActiveChanged;
   }
 
   static const Duration reconnectInterval = Duration(seconds: 3);
@@ -142,6 +95,11 @@ final class DashboardController extends ChangeNotifier {
   final EngineRepositoryResolver _repositoryResolver;
   final String? initialWorkspaceUuid;
   late final DashboardSettingsController settings;
+
+  /// Every open editor tab, the unsaved text in them, and the rules that keep
+  /// that text safe. It outlives the editor widget, so edits survive leaving
+  /// the Files view, switching workspaces and restarting the app.
+  late final EditorDocumentStore documents;
   EngineRepository? _repository;
   Uri? _explicitEndpoint;
   String? _explicitToken;
@@ -221,12 +179,11 @@ final class DashboardController extends ChangeNotifier {
   bool isLoadingWorkspaces = false;
   bool isLoadingThreads = false;
   bool isLoadingChat = false;
-  bool isLoadingFile = false;
-  bool isSavingFile = false;
   bool isCreatingWorkspace = false;
   bool hasLoadedNavigationState = false;
-  OpenWorkspaceFile? openFile;
   String? selectedFileTreeNodeKey;
+  WorkspaceFileTreeNode? selectedFileTreeNode;
+  bool isMovingWorkspaceNode = false;
 
   bool chatPanelVisible = true;
   bool mainPanelVisible = true;
@@ -262,7 +219,6 @@ final class DashboardController extends ChangeNotifier {
   bool _disposed = false;
   int _threadRequestVersion = 0;
   int _chatRequestVersion = 0;
-  int _fileRequestVersion = 0;
   int _sectionActivationVersion = 0;
   int _engineEventVersion = 0;
   int _appStateVersion = 0;
@@ -482,7 +438,7 @@ final class DashboardController extends ChangeNotifier {
           _filesWorkspaceUuid == activeWorkspace?.uuid;
       final int? rootIndex = matchesActiveWorkspace ? _filesRootIndex : null;
       final String? path = matchesActiveWorkspace ? _filesPath : null;
-      if (rootIndex != null && path != null && openFile == null) {
+      if (rootIndex != null && path != null && documents.active == null) {
         final bool opened = await openWorkspaceFile(
           rootIndex,
           path,
@@ -837,6 +793,7 @@ final class DashboardController extends ChangeNotifier {
   }
 
   Future<void> load() async {
+    documents.observeAppLifecycle();
     _reconnectTimer ??= Timer.periodic(
       reconnectInterval,
       (_) => unawaited(_checkConnection()),
@@ -904,6 +861,10 @@ final class DashboardController extends ChangeNotifier {
       error = null;
       notifyListeners();
       await loadWorkspaces();
+      // Tabs that could not be read while the engine was away come back now,
+      // and files edited in the meantime are compared with the disk.
+      unawaited(documents.retryRestore());
+      unawaited(documents.checkExternalChanges());
       _schedulePendingNavigationSave();
     } on Object catch (caughtError) {
       final EngineRepository? failedRepository = _repository;
@@ -1000,10 +961,11 @@ final class DashboardController extends ChangeNotifier {
     } else {
       _toolApprovalQueue.add(request);
     }
-    // Surface consent even when the chat panel or mobile thread view is hidden.
+    // Surface consent even when the chat panel is hidden. The selected section
+    // is left alone so a background thread never pulls the user away from the
+    // panel they are using; the mobile view reveals the chat by itself while an
+    // approval is pending.
     chatPanelVisible = true;
-    selectedSection = DashboardSection.threads;
-    settings.showUtility();
     notifyListeners();
   }
 
@@ -1518,6 +1480,16 @@ final class DashboardController extends ChangeNotifier {
       }
       _filesRootIndex = activeReference?.rootIndex;
       _filesPath = activeReference?.path;
+      // The editor shows the tabs of the workspace that became active. Its
+      // saved tabs and any stored drafts are read in the background.
+      unawaited(
+        documents.switchWorkspace(
+          workspace?.uuid,
+          remembered:
+              viewerState?.openFiles ?? const <WorkspaceFileReference>[],
+          activeKey: viewerState?.activeFileKey,
+        ),
+      );
     }
     if (remember) _markNavigationChanged();
     notifyListeners();
@@ -1815,9 +1787,32 @@ final class DashboardController extends ChangeNotifier {
   String fileTreeNodeKey(int rootIndex, String path) =>
       _directoryKey(rootIndex, path);
 
-  void selectFileTreeNode(int rootIndex, String path) {
+  void selectFileTreeNode(
+    int rootIndex,
+    String path, {
+    required bool isDirectory,
+  }) {
     selectedFileTreeNodeKey = _directoryKey(rootIndex, path);
+    selectedFileTreeNode = WorkspaceFileTreeNode(
+      rootIndex: rootIndex,
+      path: path,
+      isDirectory: isDirectory,
+    );
     notifyListeners();
+  }
+
+  ({int rootIndex, String path})? get selectedCreationDirectory {
+    final WorkspaceFileTreeNode? node = selectedFileTreeNode;
+    if (node == null ||
+        !fileRoots.any(
+          (WorkspaceDirectoryRoot root) => root.index == node.rootIndex,
+        )) {
+      return null;
+    }
+    return (
+      rootIndex: node.rootIndex,
+      path: node.isDirectory ? node.path : _parentDirectory(node.path),
+    );
   }
 
   Future<void> loadDirectory(int rootIndex, String path) async {
@@ -1858,44 +1853,11 @@ final class DashboardController extends ChangeNotifier {
     ]);
   }
 
-  Future<OpenWorkspaceFile?> readWorkspaceFile(
-    int rootIndex,
-    String path,
-  ) async {
-    final Workspace? workspace = _filesWorkspace;
-    final RestEngineClient? client = repository?.rest;
-    if (workspace == null || client == null) return null;
-    if (OpenWorkspaceFile.supportsPreview(path)) {
-      final WorkspaceFilePreview preview = await client
-          .previewFile(
-            workspaceUuid: workspace.uuid,
-            rootIndex: rootIndex,
-            path: path,
-          )
-          .timeout(requestTimeout);
-      return OpenWorkspaceFile(
-        rootIndex: rootIndex,
-        path: path,
-        content: '',
-        previewBytes: preview.bytes,
-        previewKind: preview.kind,
-        mediaType: preview.mediaType,
-      );
-    }
-    final WorkspaceFileContent result = await client
-        .readFile(
-          workspaceUuid: workspace.uuid,
-          rootIndex: rootIndex,
-          path: path,
-        )
-        .timeout(requestTimeout);
-    return OpenWorkspaceFile(
-      rootIndex: rootIndex,
-      path: path,
-      content: result.content,
-    );
-  }
+  /// The file shown in the main panel, for features that need to know what the
+  /// user is looking at, such as the chat's active-file context.
+  WorkspaceFileReference? get activeFileReference => documents.activeReference;
 
+  /// Opens a file in the editor, or switches to it when it is already open.
   Future<bool> openWorkspaceFile(
     int rootIndex,
     String path, {
@@ -1903,89 +1865,62 @@ final class DashboardController extends ChangeNotifier {
   }) async {
     final Workspace? workspace = _filesWorkspace;
     if (workspace == null || repository?.rest == null) return false;
-    final int requestVersion = ++_fileRequestVersion;
     selectedFileTreeNodeKey = _directoryKey(rootIndex, path);
-    isLoadingFile = true;
-    filesError = null;
-    notifyListeners();
-    bool opened = false;
-    try {
-      final OpenWorkspaceFile? openedFile = await readWorkspaceFile(
-        rootIndex,
-        path,
-      );
-      if (openedFile != null && requestVersion == _fileRequestVersion) {
-        openFile = openedFile;
-        opened = true;
-        if (remember) {
-          _filesWorkspaceUuid = workspace.uuid;
-          _filesRootIndex = rootIndex;
-          _filesPath = path;
-          _markNavigationChanged();
-        }
-      }
-    } on Object catch (caughtError) {
-      if (requestVersion == _fileRequestVersion) filesError = caughtError;
-    } finally {
-      if (requestVersion == _fileRequestVersion) {
-        isLoadingFile = false;
-        notifyListeners();
-      }
-    }
-    return opened;
-  }
-
-  Future<void> refreshOpenFile() async {
-    final OpenWorkspaceFile? file = openFile;
-    if (file == null) return;
-    await openWorkspaceFile(file.rootIndex, file.path, remember: false);
-  }
-
-  Future<void> saveOpenFile(String content) async {
-    final Workspace? workspace = _filesWorkspace;
-    final OpenWorkspaceFile? file = openFile;
-    final RestEngineClient? client = repository?.rest;
-    if (workspace == null || file == null || client == null) return;
-    isSavingFile = true;
+    selectedFileTreeNode = WorkspaceFileTreeNode(
+      rootIndex: rootIndex,
+      path: path,
+      isDirectory: false,
+    );
     filesError = null;
     notifyListeners();
     try {
-      await client
-          .writeFile(
-            workspaceUuid: workspace.uuid,
-            rootIndex: file.rootIndex,
-            path: file.path,
-            content: content,
-          )
-          .timeout(requestTimeout);
-      openFile = OpenWorkspaceFile(
-        rootIndex: file.rootIndex,
-        path: file.path,
-        content: content,
-      );
+      final EditorTab? tab = await documents.open(rootIndex, path);
+      if (tab == null) return false;
+      if (remember) {
+        _filesWorkspaceUuid = workspace.uuid;
+        _filesRootIndex = rootIndex;
+        _filesPath = path;
+        _markNavigationChanged();
+      }
+      return true;
     } on Object catch (caughtError) {
       filesError = caughtError;
+      return false;
     } finally {
-      isSavingFile = false;
       notifyListeners();
     }
   }
 
-  void activateOpenFile(OpenWorkspaceFile file) {
-    openFile = file;
-    selectedFileTreeNodeKey = _directoryKey(file.rootIndex, file.path);
-    _filesWorkspaceUuid = _filesWorkspace?.uuid;
-    _filesRootIndex = file.rootIndex;
-    _filesPath = file.path;
-    _markNavigationChanged();
-    notifyListeners();
+  /// Checks the open files against the disk, for example after the assistant
+  /// finished a turn that may have edited one.
+  Future<void> refreshOpenFile() => documents.checkExternalChanges();
+
+  void _onEditorTabsChanged(
+    String workspaceUuid,
+    List<WorkspaceFileReference> files,
+    String? activeKey,
+  ) {
+    if (activeWorkspace?.uuid != workspaceUuid) return;
+    rememberOpenFiles(files, activeKey: activeKey);
   }
 
-  void closeOpenFile() {
-    openFile = null;
-    selectedFileTreeNodeKey = null;
-    _filesRootIndex = null;
-    _filesPath = null;
+  void _onEditorActiveChanged(EditorTab? tab) {
+    if (tab == null) {
+      selectedFileTreeNodeKey = null;
+      selectedFileTreeNode = null;
+      _filesRootIndex = null;
+      _filesPath = null;
+    } else {
+      selectedFileTreeNodeKey = _directoryKey(tab.rootIndex, tab.path);
+      selectedFileTreeNode = WorkspaceFileTreeNode(
+        rootIndex: tab.rootIndex,
+        path: tab.path,
+        isDirectory: false,
+      );
+      _filesWorkspaceUuid = tab.workspaceUuid;
+      _filesRootIndex = tab.rootIndex;
+      _filesPath = tab.path;
+    }
     _markNavigationChanged();
     notifyListeners();
   }
@@ -2026,12 +1961,190 @@ final class DashboardController extends ChangeNotifier {
     await _reloadParent(rootIndex, path);
   }
 
+  bool canMoveWorkspaceNode({
+    required int sourceRootIndex,
+    required String sourcePath,
+    required bool sourceIsDirectory,
+    required int destinationRootIndex,
+    required String destinationPath,
+  }) {
+    if (isMovingWorkspaceNode || sourceRootIndex != destinationRootIndex) {
+      return false;
+    }
+    final String source = sourcePath.replaceAll('\\', '/');
+    final String destination = destinationPath.replaceAll('\\', '/');
+    if (source.isEmpty || destination == _parentDirectory(source)) return false;
+    return !sourceIsDirectory ||
+        (destination != source && !destination.startsWith('$source/'));
+  }
+
+  Future<void> moveWorkspaceNode({
+    required int sourceRootIndex,
+    required String sourcePath,
+    required bool sourceIsDirectory,
+    required int destinationRootIndex,
+    required String destinationPath,
+  }) async {
+    if (isMovingWorkspaceNode || sourceRootIndex != destinationRootIndex) {
+      return;
+    }
+    final Workspace? workspace = _filesWorkspace;
+    final RestEngineClient? client = repository?.rest;
+    if (workspace == null || client == null) return;
+
+    isMovingWorkspaceNode = true;
+    filesError = null;
+    notifyListeners();
+    try {
+      final WorkspaceFileEntry moved = await client
+          .moveWorkspacePath(
+            workspaceUuid: workspace.uuid,
+            sourceRootIndex: sourceRootIndex,
+            sourcePath: sourcePath,
+            destinationRootIndex: destinationRootIndex,
+            destinationPath: destinationPath,
+          )
+          .timeout(requestTimeout);
+      final WorkspaceFileMove move = WorkspaceFileMove(
+        sourceRootIndex: sourceRootIndex,
+        sourcePath: sourcePath,
+        destinationRootIndex: destinationRootIndex,
+        destinationPath: moved.relativePath,
+        isDirectory: sourceIsDirectory,
+      );
+      _applyWorkspaceFileMove(move);
+      await _reloadMoveParents(move);
+      _markNavigationChanged();
+    } on Object catch (caughtError) {
+      filesError = caughtError;
+    } finally {
+      isMovingWorkspaceNode = false;
+      notifyListeners();
+    }
+  }
+
+  void _applyWorkspaceFileMove(WorkspaceFileMove move) {
+    final WorkspaceFileTreeNode? selectedNode = selectedFileTreeNode;
+    if (selectedNode != null) {
+      final String? rebased = _rebaseWorkspacePath(
+        rootIndex: selectedNode.rootIndex,
+        path: selectedNode.path,
+        move: move,
+      );
+      if (rebased != null) {
+        selectedFileTreeNode = WorkspaceFileTreeNode(
+          rootIndex: move.destinationRootIndex,
+          path: rebased,
+          isDirectory: selectedNode.isDirectory,
+        );
+        selectedFileTreeNodeKey = _directoryKey(
+          move.destinationRootIndex,
+          rebased,
+        );
+      }
+    }
+
+    documents.applyMove(move);
+
+    if (_filesRootIndex != null && _filesPath != null) {
+      final String? rebased = _rebaseWorkspacePath(
+        rootIndex: _filesRootIndex!,
+        path: _filesPath!,
+        move: move,
+      );
+      if (rebased != null) {
+        _filesRootIndex = move.destinationRootIndex;
+        _filesPath = rebased;
+      }
+    }
+
+    for (final _WorkspaceViewerState state in _workspaceViewerStates.values) {
+      final String? activeKey = state.activeFileKey;
+      String? rebasedActivePath;
+      if (activeKey != null) {
+        for (final WorkspaceFileReference reference in state.openFiles) {
+          if (reference.key == activeKey) {
+            rebasedActivePath = _rebaseWorkspacePath(
+              rootIndex: reference.rootIndex,
+              path: reference.path,
+              move: move,
+            );
+            break;
+          }
+        }
+      }
+      state.openFiles = <WorkspaceFileReference>[
+        for (final WorkspaceFileReference reference in state.openFiles)
+          if (_rebaseWorkspacePath(
+                rootIndex: reference.rootIndex,
+                path: reference.path,
+                move: move,
+              )
+              case final String rebased)
+            WorkspaceFileReference(
+              rootIndex: move.destinationRootIndex,
+              path: rebased,
+            )
+          else
+            reference,
+      ];
+      if (rebasedActivePath != null) {
+        state.activeFileKey = WorkspaceFileReference(
+          rootIndex: move.destinationRootIndex,
+          path: rebasedActivePath,
+        ).key;
+      }
+      final Set<String> rebasedExpanded = <String>{
+        for (final String key in state.expandedDirectoryKeys)
+          _rebaseDirectoryKey(key, move) ?? key,
+      };
+      state.expandedDirectoryKeys
+        ..clear()
+        ..addAll(rebasedExpanded);
+    }
+  }
+
+  Future<void> _reloadMoveParents(WorkspaceFileMove move) async {
+    final Set<String> parents = <String>{
+      _directoryKey(move.sourceRootIndex, _parentDirectory(move.sourcePath)),
+      _directoryKey(
+        move.destinationRootIndex,
+        _parentDirectory(move.destinationPath),
+      ),
+    };
+    for (final String key in parents) {
+      _directoryEntries.remove(key);
+    }
+    await Future.wait(<Future<void>>[
+      for (final String key in parents)
+        loadDirectory(
+          int.parse(key.substring(0, key.indexOf(':'))),
+          key.substring(key.indexOf(':') + 1),
+        ),
+    ]);
+  }
+
+  static String? _rebaseWorkspacePath({
+    required int rootIndex,
+    required String path,
+    required WorkspaceFileMove move,
+  }) => rebaseWorkspacePath(rootIndex: rootIndex, path: path, move: move);
+
+  String? _rebaseDirectoryKey(String key, WorkspaceFileMove move) {
+    final int separator = key.indexOf(':');
+    if (separator < 1) return null;
+    final int? rootIndex = int.tryParse(key.substring(0, separator));
+    if (rootIndex == null) return null;
+    final String? path = _rebaseWorkspacePath(
+      rootIndex: rootIndex,
+      path: key.substring(separator + 1),
+      move: move,
+    );
+    return path == null ? null : _directoryKey(move.destinationRootIndex, path);
+  }
+
   Future<void> _reloadParent(int rootIndex, String path) async {
-    final String normalized = path.replaceAll('\\', '/');
-    final int separator = normalized.lastIndexOf('/');
-    final String parent = separator < 0
-        ? ''
-        : normalized.substring(0, separator);
+    final String parent = _parentDirectory(path);
     _directoryEntries.remove(_directoryKey(rootIndex, parent));
     await loadDirectory(rootIndex, parent);
   }
@@ -2069,6 +2182,7 @@ final class DashboardController extends ChangeNotifier {
   }
 
   void _forgetWorkspace(String workspaceUuid) {
+    unawaited(documents.forgetWorkspace(workspaceUuid));
     bool changed = _workspaceViewerStates.remove(workspaceUuid) != null;
     if (_threadUuidsByWorkspace.remove(workspaceUuid) != null) changed = true;
     if (_workspacesWorkspaceUuid == workspaceUuid) {
@@ -2155,10 +2269,15 @@ final class DashboardController extends ChangeNotifier {
   void _clearFiles() {
     _directoryEntries.clear();
     _loadingDirectories.clear();
-    openFile = null;
     selectedFileTreeNodeKey = null;
+    selectedFileTreeNode = null;
     filesError = null;
-    _fileRequestVersion++;
+  }
+
+  static String _parentDirectory(String path) {
+    final String normalized = path.replaceAll('\\', '/');
+    final int separator = normalized.lastIndexOf('/');
+    return separator < 0 ? '' : normalized.substring(0, separator);
   }
 
   String _directoryKey(int rootIndex, String path) =>
@@ -2175,9 +2294,141 @@ final class DashboardController extends ChangeNotifier {
     _engineEventSubscription = null;
     unawaited(subscription?.cancel() ?? Future<void>.value());
     chatProvider?.dispose();
+    documents.dispose();
     settings.dispose();
     unawaited(repository?.socket.dispose());
     unawaited(repository?.rest.close());
     super.dispose();
+  }
+}
+
+/// Reads and writes workspace files for the editor through the engine's REST
+/// API, translating its failures into the editor's own exceptions.
+final class _EngineFileGateway implements FileGateway {
+  _EngineFileGateway(this._controller);
+
+  /// Writes can carry a megabyte, so they get more time than a status call.
+  static const Duration _timeout = Duration(seconds: 15);
+
+  final DashboardController _controller;
+
+  RestEngineClient get _client =>
+      _controller.repository?.rest ?? (throw const FileUnavailableException());
+
+  @override
+  bool get isAvailable =>
+      _controller.isConnected && _controller.repository != null;
+
+  @override
+  Future<FileSnapshot> readText(
+    String workspaceUuid,
+    int rootIndex,
+    String path,
+  ) => _translate(() async {
+    final WorkspaceFileContent result = await _client
+        .readFile(
+          workspaceUuid: workspaceUuid,
+          rootIndex: rootIndex,
+          path: path,
+        )
+        .timeout(_timeout);
+    return FileSnapshot(text: result.content, version: result.version);
+  });
+
+  @override
+  Future<PreviewSnapshot> readPreview(
+    String workspaceUuid,
+    int rootIndex,
+    String path,
+  ) => _translate(() async {
+    final WorkspaceFilePreview preview = await _client
+        .previewFile(
+          workspaceUuid: workspaceUuid,
+          rootIndex: rootIndex,
+          path: path,
+        )
+        .timeout(_timeout);
+    return PreviewSnapshot(
+      bytes: preview.bytes,
+      kind: switch (preview.kind) {
+        WorkspacePreviewKind.image => PreviewKind.image,
+        WorkspacePreviewKind.pdf => PreviewKind.pdf,
+        WorkspacePreviewKind.docx => PreviewKind.docx,
+      },
+      mediaType: preview.mediaType,
+    );
+  });
+
+  @override
+  Future<String?> write(
+    String workspaceUuid,
+    int rootIndex,
+    String path,
+    String content, {
+    String? expectedVersion,
+  }) => _translate(() async {
+    final WorkspaceFileContent result = await _client
+        .writeFile(
+          workspaceUuid: workspaceUuid,
+          rootIndex: rootIndex,
+          path: path,
+          content: content,
+          expectedVersion: expectedVersion,
+        )
+        .timeout(_timeout);
+    return result.version;
+  });
+
+  @override
+  Future<String?> create(
+    String workspaceUuid,
+    int rootIndex,
+    String path,
+    String content,
+  ) => _translate(() async {
+    try {
+      final WorkspaceFileContent result = await _client
+          .createFile(
+            workspaceUuid: workspaceUuid,
+            rootIndex: rootIndex,
+            path: path,
+            content: content,
+          )
+          .timeout(_timeout);
+      return result.version;
+    } on EngineApiException catch (error) {
+      // Something already exists at the path again: treat it as a conflict so
+      // the user chooses between the two versions.
+      if (error.statusCode == 409) throw const FileConflictException();
+      rethrow;
+    }
+  });
+
+  @override
+  Future<String> currentVersion(
+    String workspaceUuid,
+    int rootIndex,
+    String path,
+  ) => _translate(() async {
+    final WorkspaceFileVersion result = await _client
+        .fileVersion(
+          workspaceUuid: workspaceUuid,
+          rootIndex: rootIndex,
+          path: path,
+        )
+        .timeout(_timeout);
+    return result.version;
+  });
+
+  Future<T> _translate<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } on EngineApiException catch (error) {
+      if (error.isVersionConflict) {
+        throw FileConflictException(currentVersion: error.currentVersion);
+      }
+      if (error.statusCode == 404) throw const FileMissingException();
+      rethrow;
+    }
   }
 }

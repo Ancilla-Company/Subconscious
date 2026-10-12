@@ -5,38 +5,11 @@ import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_code_editor/flutter_code_editor.dart';
-import 'package:flutter_highlight/themes/github.dart';
-import 'package:flutter_highlight/themes/monokai-sublime.dart';
-import 'package:flutter_quill/flutter_quill.dart' as quill;
-import 'package:highlight/highlight.dart' show Mode;
-import 'package:highlight/languages/bash.dart' as highlight_bash;
-import 'package:highlight/languages/cpp.dart' as highlight_cpp;
-import 'package:highlight/languages/cs.dart' as highlight_csharp;
-import 'package:highlight/languages/css.dart' as highlight_css;
-import 'package:highlight/languages/dart.dart' as highlight_dart;
-import 'package:highlight/languages/go.dart' as highlight_go;
-import 'package:highlight/languages/java.dart' as highlight_java;
-import 'package:highlight/languages/javascript.dart' as highlight_javascript;
-import 'package:highlight/languages/json.dart' as highlight_json;
-import 'package:highlight/languages/kotlin.dart' as highlight_kotlin;
-import 'package:highlight/languages/php.dart' as highlight_php;
-import 'package:highlight/languages/plaintext.dart' as highlight_plaintext;
-import 'package:highlight/languages/python.dart' as highlight_python;
-import 'package:highlight/languages/ruby.dart' as highlight_ruby;
-import 'package:highlight/languages/rust.dart' as highlight_rust;
-import 'package:highlight/languages/sql.dart' as highlight_sql;
-import 'package:highlight/languages/swift.dart' as highlight_swift;
-import 'package:highlight/languages/typescript.dart' as highlight_typescript;
-import 'package:highlight/languages/xml.dart' as highlight_xml;
-import 'package:highlight/languages/yaml.dart' as highlight_yaml;
-import 'package:markdown/markdown.dart' as md;
-import 'package:markdown_quill/markdown_quill.dart';
 
 import '../../dashboard/controller/dashboard_controller.dart';
+import '../../editor/controller/file_gateway.dart' show PreviewKind;
 import '../../settings/controller/settings_controller.dart';
-import 'workspace_document_preview.dart';
-import 'workspace_image_preview.dart';
+import '../../settings/presentation/settings_main_panel.dart';
 
 final class ContextPanel extends StatefulWidget {
   const ContextPanel({
@@ -537,7 +510,7 @@ final class _FilesSection extends StatelessWidget {
               icon: FluentIcons.folder_add_20_regular,
               onPressed: roots.isEmpty
                   ? null
-                  : () => _chooseWorkspaceFolder(context, controller),
+                  : () => _createWorkspaceFolder(context, controller),
               onSelection: onSelection,
             ),
           ],
@@ -585,6 +558,20 @@ final class _FilesSection extends StatelessWidget {
   }
 }
 
+final class _WorkspaceFileTreeDragData {
+  const _WorkspaceFileTreeDragData({
+    required this.rootIndex,
+    required this.path,
+    required this.isDirectory,
+    required this.label,
+  });
+
+  final int rootIndex;
+  final String path;
+  final bool isDirectory;
+  final String label;
+}
+
 final class _DirectoryNode extends StatefulWidget {
   const _DirectoryNode({
     required this.controller,
@@ -630,7 +617,11 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
   }
 
   void _toggle(List<WorkspaceFileEntry>? entries) {
-    widget.controller.selectFileTreeNode(widget.rootIndex, widget.path);
+    widget.controller.selectFileTreeNode(
+      widget.rootIndex,
+      widget.path,
+      isDirectory: true,
+    );
     final bool expanded = !_expanded;
     setState(() => _expanded = expanded);
     widget.controller.setDirectoryExpanded(
@@ -641,6 +632,27 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
     if (expanded && entries == null) {
       widget.controller.loadDirectory(widget.rootIndex, widget.path);
     }
+  }
+
+  bool _canAcceptDrop(_WorkspaceFileTreeDragData source) =>
+      widget.controller.canMoveWorkspaceNode(
+        sourceRootIndex: source.rootIndex,
+        sourcePath: source.path,
+        sourceIsDirectory: source.isDirectory,
+        destinationRootIndex: widget.rootIndex,
+        destinationPath: widget.path,
+      );
+
+  void _acceptDrop(_WorkspaceFileTreeDragData source) {
+    unawaited(
+      widget.controller.moveWorkspaceNode(
+        sourceRootIndex: source.rootIndex,
+        sourcePath: source.path,
+        sourceIsDirectory: source.isDirectory,
+        destinationRootIndex: widget.rootIndex,
+        destinationPath: widget.path,
+      ),
+    );
   }
 
   @override
@@ -668,6 +680,16 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
             size: 16,
           ),
           label: widget.label,
+          dragData: widget.isRoot || widget.controller.isMovingWorkspaceNode
+              ? null
+              : _WorkspaceFileTreeDragData(
+                  rootIndex: widget.rootIndex,
+                  path: widget.path,
+                  isDirectory: true,
+                  label: widget.label,
+                ),
+          canAcceptDrop: _canAcceptDrop,
+          onAcceptDrop: _acceptDrop,
           trailing: AnimatedRotation(
             turns: _expanded ? 0.25 : 0,
             duration: const Duration(milliseconds: 120),
@@ -735,14 +757,20 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
                               widget.onSelection?.call();
                             },
                             leading: Icon(
-                              OpenWorkspaceFile.supportsPreview(
-                                    entry.relativePath,
-                                  )
+                              PreviewKind.forPath(entry.relativePath) != null
                                   ? FluentIcons.image_20_regular
                                   : FluentIcons.document_20_regular,
                               size: 16,
                             ),
                             label: entry.name,
+                            dragData: widget.controller.isMovingWorkspaceNode
+                                ? null
+                                : _WorkspaceFileTreeDragData(
+                                    rootIndex: widget.rootIndex,
+                                    path: entry.relativePath,
+                                    isDirectory: false,
+                                    label: entry.name,
+                                  ),
                           ),
                   ],
                 ),
@@ -760,6 +788,9 @@ final class _FileTreeRow extends StatelessWidget {
     required this.leading,
     required this.label,
     this.trailing,
+    this.dragData,
+    this.canAcceptDrop,
+    this.onAcceptDrop,
     super.key,
   });
 
@@ -769,50 +800,101 @@ final class _FileTreeRow extends StatelessWidget {
   final Widget leading;
   final String label;
   final Widget? trailing;
+  final _WorkspaceFileTreeDragData? dragData;
+  final bool Function(_WorkspaceFileTreeDragData source)? canAcceptDrop;
+  final ValueChanged<_WorkspaceFileTreeDragData>? onAcceptDrop;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        color: selected ? colors.secondaryContainer : Colors.transparent,
-        borderRadius: const BorderRadius.all(Radius.circular(4)),
-        child: InkWell(
+
+    Widget buildRow(bool dropHighlighted) {
+      final bool emphasized = selected || dropHighlighted;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Material(
+          color: emphasized ? colors.secondaryContainer : Colors.transparent,
           borderRadius: const BorderRadius.all(Radius.circular(4)),
-          onTap: onTap,
-          child: SizedBox(
-            height: 30,
-            child: Padding(
-              padding: EdgeInsets.only(left: 6 + depth * 14, right: 6),
-              child: Row(
-                children: <Widget>[
-                  SizedBox(width: 18, child: Center(child: leading)),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Tooltip(
-                      message: label,
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: selected ? colors.onSecondaryContainer : null,
+          child: InkWell(
+            borderRadius: const BorderRadius.all(Radius.circular(4)),
+            onTap: onTap,
+            child: SizedBox(
+              height: 30,
+              child: Padding(
+                padding: EdgeInsets.only(left: 6 + depth * 14, right: 6),
+                child: Row(
+                  children: <Widget>[
+                    SizedBox(width: 18, child: Center(child: leading)),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Tooltip(
+                        message: label,
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: emphasized
+                                    ? colors.onSecondaryContainer
+                                    : null,
+                              ),
                         ),
                       ),
                     ),
-                  ),
-                  if (trailing != null) ...<Widget>[
-                    const SizedBox(width: 4),
-                    trailing!,
+                    if (trailing != null) ...<Widget>[
+                      const SizedBox(width: 4),
+                      trailing!,
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    }
+
+    final ValueChanged<_WorkspaceFileTreeDragData>? acceptDrop = onAcceptDrop;
+    Widget result = acceptDrop == null
+        ? buildRow(false)
+        : DragTarget<_WorkspaceFileTreeDragData>(
+            onWillAcceptWithDetails: (
+              DragTargetDetails<_WorkspaceFileTreeDragData> details,
+            ) => canAcceptDrop?.call(details.data) ?? false,
+            onAcceptWithDetails: (
+              DragTargetDetails<_WorkspaceFileTreeDragData> details,
+            ) => acceptDrop(details.data),
+            builder: (
+              BuildContext context,
+              List<_WorkspaceFileTreeDragData?> candidateData,
+              List<dynamic> rejectedData,
+            ) => buildRow(candidateData.isNotEmpty),
+          );
+    final _WorkspaceFileTreeDragData? source = dragData;
+    if (source != null) {
+      result = LongPressDraggable<_WorkspaceFileTreeDragData>(
+        data: source,
+        feedback: Material(
+          elevation: 6,
+          borderRadius: const BorderRadius.all(Radius.circular(4)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                source.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ),
+        childWhenDragging: Opacity(opacity: 0.45, child: result),
+        child: result,
+      );
+    }
+    return result;
   }
 }
 
@@ -822,11 +904,21 @@ Future<void> _createWorkspaceFile(
 ) async {
   final List<WorkspaceDirectoryRoot> roots = controller.fileRoots;
   if (roots.isEmpty) return;
+  final ({int rootIndex, String path})? selectedLocation =
+      controller.selectedCreationDirectory;
+  final WorkspaceDirectoryRoot root = roots.firstWhere(
+    (WorkspaceDirectoryRoot candidate) =>
+        candidate.index == selectedLocation?.rootIndex,
+    orElse: () => roots.first,
+  );
+  final String parentPath = root.index == selectedLocation?.rootIndex
+      ? selectedLocation!.path
+      : '';
   try {
     final file_selector.FileSaveLocation? location = await file_selector
         .getSaveLocation(
           suggestedName: 'new-file.md',
-          initialDirectory: roots.first.path,
+          initialDirectory: _workspaceAbsolutePath(root.path, parentPath),
         );
     if (location == null || !context.mounted) return;
     final ({int rootIndex, String relativePath})? mapped = _mapWorkspacePath(
@@ -852,30 +944,188 @@ Future<void> _createWorkspaceFile(
   }
 }
 
-Future<void> _chooseWorkspaceFolder(
+Future<void> _createWorkspaceFolder(
   BuildContext context,
   DashboardController controller,
 ) async {
   final List<WorkspaceDirectoryRoot> roots = controller.fileRoots;
   if (roots.isEmpty) return;
+  final ({int rootIndex, String path})? selectedLocation =
+      controller.selectedCreationDirectory;
+  final ({int rootIndex, String path})? request = await _showCreateFolderDialog(
+    context,
+    roots,
+    initialLocation: selectedLocation,
+  );
+  if (request == null || !context.mounted) return;
   try {
-    final String? path = await file_selector.getDirectoryPath(
-      initialDirectory: roots.first.path,
+    await controller.createDirectory(
+      rootIndex: request.rootIndex,
+      path: request.path,
     );
-    if (path == null || !context.mounted) return;
-    if (_mapWorkspacePath(path, roots, requireRelativePath: false) == null) {
-      _showFileActionMessage(
-        context,
-        'Choose a folder inside one of this workspace’s allowed folders.',
-      );
-      return;
-    }
-    await controller.refreshFiles();
   } on Object catch (error) {
     if (context.mounted) {
-      _showFileActionMessage(context, "Couldn't refresh files: $error");
+      _showFileActionMessage(context, "Couldn't create folder: $error");
     }
   }
+}
+
+Future<({int rootIndex, String path})?> _showCreateFolderDialog(
+  BuildContext context,
+  List<WorkspaceDirectoryRoot> roots, {
+  ({int rootIndex, String path})? initialLocation,
+}) async {
+  final TextEditingController pathController = TextEditingController(
+    text: initialLocation?.path.isNotEmpty == true
+        ? '${initialLocation!.path}/'
+        : '',
+  );
+  WorkspaceDirectoryRoot selectedRoot = roots.first;
+  for (final WorkspaceDirectoryRoot root in roots) {
+    if (root.index == initialLocation?.rootIndex) {
+      selectedRoot = root;
+      break;
+    }
+  }
+  String? validationError;
+  try {
+    return await showDialog<({int rootIndex, String path})>(
+      context: context,
+      builder: (BuildContext context) => Theme(
+        data: settingsFormTheme(context),
+        child: StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) => AlertDialog(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(6)),
+            ),
+            title: const Text('New folder'),
+            content: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  DropdownButtonFormField<int>(
+                    initialValue: selectedRoot.index,
+                    decoration: const InputDecoration(labelText: 'Location'),
+                    items: <DropdownMenuItem<int>>[
+                      for (final WorkspaceDirectoryRoot root in roots)
+                        DropdownMenuItem<int>(
+                          value: root.index,
+                          child: Text(
+                            root.name,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (int? rootIndex) {
+                      if (rootIndex == null) return;
+                      setState(() {
+                        selectedRoot = roots.firstWhere(
+                          (WorkspaceDirectoryRoot root) =>
+                              root.index == rootIndex,
+                        );
+                        pathController.clear();
+                        validationError = null;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: pathController,
+                    autofocus: true,
+                    textInputAction: TextInputAction.done,
+                    decoration: InputDecoration(
+                      labelText: 'Folder name',
+                      hintText: 'e.g. notes or src/components',
+                      errorText: validationError,
+                    ),
+                    onChanged: (_) {
+                      if (validationError != null) {
+                        setState(() => validationError = null);
+                      }
+                    },
+                    onSubmitted: (_) {
+                      final String? path = _workspaceRelativeFolderPath(
+                        pathController.text,
+                      );
+                      if (path == null) {
+                        setState(
+                          () => validationError = 'Enter a relative folder name without . or .. segments.',
+                        );
+                        return;
+                      }
+                      Navigator.of(context)
+                          .pop((rootIndex: selectedRoot.index, path: path));
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final String? path = _workspaceRelativeFolderPath(
+                    pathController.text,
+                  );
+                  if (path == null) {
+                    setState(
+                      () => validationError = 'Enter a relative folder name without . or .. segments.',
+                    );
+                    return;
+                  }
+                  Navigator.of(context)
+                      .pop((rootIndex: selectedRoot.index, path: path));
+                },
+                child: const Text('Create'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  } finally {
+    pathController.dispose();
+  }
+}
+
+String? _workspaceRelativeFolderPath(String value) {
+  final String normalized = value.trim().replaceAll('\\', '/');
+  if (normalized.isEmpty ||
+      normalized.startsWith('/') ||
+      normalized.contains(':')) {
+    return null;
+  }
+  final List<String> parts = normalized.split('/');
+  if (parts.any((String part) => part.isEmpty || part == '.' || part == '..')) {
+    return null;
+  }
+  return normalized;
+}
+
+/// Returns the absolute directory path to hand to a native file dialog.
+///
+/// Relative paths from the engine always use `/`, while a root path is kept
+/// exactly as the user entered it. Windows' shell rejects any path containing
+/// `/`, and the file dialog plugin then silently ignores the initial directory,
+/// so on Windows the whole path is rewritten with `\`. Other platforms keep the
+/// root untouched because `\` is a valid file name character there.
+String _workspaceAbsolutePath(String rootPath, String relativePath) {
+  final bool windows = defaultTargetPlatform == TargetPlatform.windows;
+  final String separator = windows ? r'\' : '/';
+  final String root = windows ? rootPath.replaceAll('/', r'\') : rootPath;
+  if (relativePath.isEmpty) return root;
+  final String relative = windows
+      ? relativePath.replaceAll('/', r'\')
+      : relativePath;
+  return root.endsWith(separator)
+      ? '$root$relative'
+      : '$root$separator$relative';
 }
 
 ({int rootIndex, String relativePath})? _mapWorkspacePath(
@@ -1077,815 +1327,4 @@ final class _SettingsSection extends StatelessWidget {
       ],
     ),
   );
-}
-
-final class WorkspaceFileEditor extends StatefulWidget {
-  const WorkspaceFileEditor({required this.controller, super.key});
-
-  final DashboardController controller;
-
-  @override
-  State<WorkspaceFileEditor> createState() => _WorkspaceFileEditorState();
-}
-
-final class _WorkspaceFileTab {
-  _WorkspaceFileTab(this.file)
-    : savedContent = file.content,
-      draftContent = file.content,
-      cleanContent = file.content,
-      lineEnding = file.content.contains('\r\n') ? '\r\n' : '\n',
-      hadTrailingLineEnding = file.content.endsWith('\n');
-
-  OpenWorkspaceFile file;
-  String savedContent;
-  String draftContent;
-  String cleanContent;
-  String lineEnding;
-  bool hadTrailingLineEnding;
-  bool quillBaselineInitialized = false;
-  TextSelection selection = const TextSelection.collapsed(offset: 0);
-
-  String get key => '${file.rootIndex}:${file.path}';
-  bool get isDirty => !file.isReadOnlyPreview && draftContent != cleanContent;
-
-  void resetFromRemote(OpenWorkspaceFile nextFile) {
-    file = nextFile;
-    savedContent = nextFile.content;
-    draftContent = nextFile.content;
-    cleanContent = nextFile.content;
-    lineEnding = nextFile.content.contains('\r\n') ? '\r\n' : '\n';
-    hadTrailingLineEnding = nextFile.content.endsWith('\n');
-    quillBaselineInitialized = false;
-    selection = const TextSelection.collapsed(offset: 0);
-  }
-}
-
-final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
-  final List<_WorkspaceFileTab> _tabs = <_WorkspaceFileTab>[];
-  final FocusNode _quillFocusNode = FocusNode();
-  final ScrollController _quillScrollController = ScrollController();
-  CodeController? _codeController;
-  quill.QuillController? _quillController;
-  StreamSubscription<dynamic>? _quillChangesSubscription;
-  late final MarkdownToDelta _markdownToDelta;
-  final DeltaToMarkdown _deltaToMarkdown = DeltaToMarkdown();
-  String? _activeKey;
-  String? _workspaceUuid;
-  String? _restorationWorkspaceUuid;
-  bool _syncingEditor = false;
-  bool _restoringTabs = false;
-  int _restorationGeneration = 0;
-
-  _WorkspaceFileTab? get _activeTab {
-    for (final _WorkspaceFileTab tab in _tabs) {
-      if (tab.key == _activeKey) return tab;
-    }
-    return null;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _markdownToDelta = MarkdownToDelta(
-      markdownDocument: md.Document(
-        encodeHtml: false,
-        extensionSet: md.ExtensionSet.gitHubFlavored,
-      ),
-    );
-    _workspaceUuid = widget.controller.activeWorkspace?.uuid;
-    widget.controller.addListener(_onControllerChanged);
-    _startTabRestoration(_workspaceUuid);
-  }
-
-  @override
-  void didUpdateWidget(covariant WorkspaceFileEditor oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_onControllerChanged);
-      widget.controller.addListener(_onControllerChanged);
-      _restorationGeneration++;
-      _restoringTabs = false;
-      _restorationWorkspaceUuid = null;
-      _clearTabs();
-      _workspaceUuid = widget.controller.activeWorkspace?.uuid;
-      _startTabRestoration(_workspaceUuid);
-    }
-  }
-
-  void _onControllerChanged() {
-    final String? workspaceUuid = widget.controller.activeWorkspace?.uuid;
-    if (workspaceUuid != _workspaceUuid) {
-      _restorationGeneration++;
-      _restoringTabs = false;
-      _restorationWorkspaceUuid = null;
-      _clearTabs();
-      _workspaceUuid = workspaceUuid;
-      _startTabRestoration(workspaceUuid);
-    } else if (!_restoringTabs) {
-      _syncFile();
-    }
-    if (mounted) setState(() {});
-  }
-
-  void _startTabRestoration(String? workspaceUuid) {
-    final DashboardController controller = widget.controller;
-    final int generation = ++_restorationGeneration;
-    _restoringTabs = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_isCurrentRestoration(controller, workspaceUuid, generation)) {
-        return;
-      }
-      if (workspaceUuid == null) {
-        _restoringTabs = false;
-        _syncFile();
-        if (mounted) setState(() {});
-        return;
-      }
-      if (_restorationWorkspaceUuid == workspaceUuid) {
-        _restoringTabs = false;
-        _syncFile();
-        if (mounted) setState(() {});
-        return;
-      }
-      _restorationWorkspaceUuid = workspaceUuid;
-      unawaited(_restoreTabs(controller, workspaceUuid, generation));
-    });
-  }
-
-  bool _isCurrentRestoration(
-    DashboardController controller,
-    String? workspaceUuid,
-    int generation,
-  ) =>
-      mounted &&
-      generation == _restorationGeneration &&
-      identical(widget.controller, controller) &&
-      controller.activeWorkspace?.uuid == workspaceUuid;
-
-  Future<void> _restoreTabs(
-    DashboardController controller,
-    String workspaceUuid,
-    int generation,
-  ) async {
-    final List<WorkspaceFileReference> references =
-        controller.rememberedOpenFiles;
-    final String? rememberedActiveKey = controller.rememberedActiveFileKey;
-    final List<_WorkspaceFileTab> restoredTabs = <_WorkspaceFileTab>[];
-    for (final WorkspaceFileReference reference in references) {
-      try {
-        final OpenWorkspaceFile? file = await controller.readWorkspaceFile(
-          reference.rootIndex,
-          reference.path,
-        );
-        if (!_isCurrentRestoration(controller, workspaceUuid, generation)) {
-          return;
-        }
-        if (file != null) restoredTabs.add(_WorkspaceFileTab(file));
-      } on Object {
-        if (!_isCurrentRestoration(controller, workspaceUuid, generation)) {
-          return;
-        }
-      }
-    }
-    if (!_isCurrentRestoration(controller, workspaceUuid, generation)) return;
-
-    _tabs.addAll(restoredTabs);
-
-    // A file opened while restoration was reading tabs must win over the
-    // remembered active tab rather than being replaced when restoration ends.
-    final OpenWorkspaceFile? currentFile = controller.openFile;
-    _WorkspaceFileTab? selectedTab;
-    if (currentFile != null) {
-      final String currentKey = _fileKey(
-        currentFile.rootIndex,
-        currentFile.path,
-      );
-      for (final _WorkspaceFileTab tab in _tabs) {
-        if (tab.key == currentKey) {
-          selectedTab = tab;
-          break;
-        }
-      }
-      if (selectedTab == null) {
-        selectedTab = _WorkspaceFileTab(currentFile);
-        _tabs.add(selectedTab);
-      }
-    }
-    if (selectedTab == null) {
-      for (final _WorkspaceFileTab tab in _tabs) {
-        if (tab.key == rememberedActiveKey) {
-          selectedTab = tab;
-          break;
-        }
-      }
-    }
-    selectedTab ??= _tabs.isEmpty ? null : _tabs.last;
-    if (selectedTab == null) {
-      _restoringTabs = false;
-      _persistTabs();
-      if (mounted) setState(() {});
-      return;
-    }
-
-    _activateEditor(selectedTab);
-    controller.activateOpenFile(selectedTab.file);
-    if (!_isCurrentRestoration(controller, workspaceUuid, generation)) return;
-    _restoringTabs = false;
-    // Persist the successfully restored set so stale or unreadable references
-    // do not reappear on the next launch.
-    _persistTabs();
-    if (mounted) setState(() {});
-  }
-
-  void _syncFile() {
-    if (_restoringTabs || widget.controller.isLoadingFile) return;
-    final OpenWorkspaceFile? file = widget.controller.openFile;
-    if (file == null) return;
-    final String key = _fileKey(file.rootIndex, file.path);
-    _WorkspaceFileTab? tab;
-    for (final _WorkspaceFileTab candidate in _tabs) {
-      if (candidate.key == key) {
-        tab = candidate;
-        break;
-      }
-    }
-    if (tab != null && _activeKey == key) {
-      if (_refreshCleanTab(tab, file)) _activateEditor(tab);
-      return;
-    }
-
-    _captureActiveContent();
-    if (tab == null) {
-      tab = _WorkspaceFileTab(file);
-      _tabs.add(tab);
-    } else {
-      _refreshCleanTab(tab, file);
-    }
-    _activateEditor(tab);
-    _persistTabs();
-  }
-
-  bool _refreshCleanTab(_WorkspaceFileTab tab, OpenWorkspaceFile file) {
-    final bool contentChanged = file.content != tab.savedContent;
-    tab.file = file;
-    if (file.isReadOnlyPreview || tab.isDirty || !contentChanged) return false;
-    tab.resetFromRemote(file);
-    return true;
-  }
-
-  void _persistTabs() {
-    if (_restoringTabs ||
-        widget.controller.activeWorkspace?.uuid != _workspaceUuid) {
-      return;
-    }
-    widget.controller.rememberOpenFiles(<WorkspaceFileReference>[
-      for (final _WorkspaceFileTab tab in _tabs)
-        WorkspaceFileReference(
-          rootIndex: tab.file.rootIndex,
-          path: tab.file.path,
-        ),
-    ], activeKey: _activeKey);
-  }
-
-  void _activateEditor(_WorkspaceFileTab tab) {
-    _disposeEditorControllers();
-    _activeKey = tab.key;
-    if (tab.file.isReadOnlyPreview) return;
-    _syncingEditor = true;
-    if (_usesQuill(tab.file.path)) {
-      _createQuillController(tab);
-      _quillChangesSubscription = _quillController!.document.changes.listen(
-        (_) => _onEditorChanged(),
-      );
-    } else {
-      _codeController = CodeController(
-        text: tab.draftContent,
-        language: _languageForPath(tab.file.path),
-      )..addListener(_onEditorChanged);
-    }
-    _syncingEditor = false;
-    if (_usesQuill(tab.file.path)) _requestQuillFocus();
-  }
-
-  void _createQuillController(_WorkspaceFileTab tab) {
-    final String normalized = _normalizeLineEndings(tab.draftContent);
-    final quill.Document document;
-    if (_isMarkdown(tab.file.path)) {
-      document = quill.Document.fromDelta(_markdownToDelta.convert(normalized));
-    } else {
-      String text = normalized;
-      if (text.endsWith('\n')) text = text.substring(0, text.length - 1);
-      document = quill.Document()..insert(0, text);
-    }
-    final TextSelection selection = _clampSelection(
-      tab.selection,
-      document.length,
-    );
-    _quillController = quill.QuillController(
-      document: document,
-      selection: selection,
-    );
-    tab.selection = selection;
-    if (!tab.quillBaselineInitialized) {
-      final String canonical = _serializeQuillContent(tab, _quillController!);
-      tab
-        ..draftContent = canonical
-        ..cleanContent = canonical
-        ..quillBaselineInitialized = true;
-    }
-  }
-
-  void _requestQuillFocus() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final _WorkspaceFileTab? tab = _activeTab;
-      if (mounted &&
-          tab != null &&
-          _usesQuill(tab.file.path) &&
-          _quillController != null) {
-        _quillFocusNode.requestFocus();
-      }
-    });
-  }
-
-  void _onEditorChanged() {
-    if (_syncingEditor) return;
-    final _WorkspaceFileTab? tab = _activeTab;
-    if (tab == null || tab.file.isReadOnlyPreview) return;
-    final quill.QuillController? quillController = _quillController;
-    if (quillController != null) tab.selection = quillController.selection;
-    final String content = _currentContent(tab);
-    if (content == tab.draftContent) return;
-    tab.draftContent = content;
-    if (mounted) setState(() {});
-  }
-
-  void _captureActiveContent() {
-    final _WorkspaceFileTab? tab = _activeTab;
-    if (tab == null || tab.file.isReadOnlyPreview) return;
-    final quill.QuillController? quillController = _quillController;
-    if (quillController != null) tab.selection = quillController.selection;
-    tab.draftContent = _currentContent(tab);
-  }
-
-  String _currentContent(_WorkspaceFileTab tab) {
-    final CodeController? codeController = _codeController;
-    if (codeController != null) return codeController.fullText;
-    final quill.QuillController? quillController = _quillController;
-    if (quillController == null) return tab.draftContent;
-    return _serializeQuillContent(tab, quillController);
-  }
-
-  String _serializeQuillContent(
-    _WorkspaceFileTab tab,
-    quill.QuillController controller,
-  ) {
-    final String value = _isMarkdown(tab.file.path)
-        ? _deltaToMarkdown.convert(controller.document.toDelta())
-        : controller.document.toPlainText();
-    return _restoreLineEndings(tab, value);
-  }
-
-  TextSelection _clampSelection(TextSelection selection, int documentLength) {
-    final int maxOffset = documentLength < 0 ? 0 : documentLength;
-    return TextSelection(
-      baseOffset: selection.baseOffset.clamp(0, maxOffset),
-      extentOffset: selection.extentOffset.clamp(0, maxOffset),
-      affinity: selection.affinity,
-      isDirectional: selection.isDirectional,
-    );
-  }
-
-  String _restoreLineEndings(_WorkspaceFileTab tab, String value) {
-    String normalized = _normalizeLineEndings(value);
-    while (normalized.endsWith('\n')) {
-      normalized = normalized.substring(0, normalized.length - 1);
-    }
-    if (tab.hadTrailingLineEnding) normalized = '$normalized\n';
-    return tab.lineEnding == '\r\n'
-        ? normalized.replaceAll('\n', '\r\n')
-        : normalized;
-  }
-
-  Future<void> _saveActive() async {
-    final _WorkspaceFileTab? tab = _activeTab;
-    if (tab == null || tab.file.isReadOnlyPreview || !tab.isDirty) return;
-    _captureActiveContent();
-    await widget.controller.saveOpenFile(tab.draftContent);
-    if (!mounted || widget.controller.filesError != null) return;
-    tab
-      ..savedContent = tab.draftContent
-      ..cleanContent = tab.draftContent
-      ..file = OpenWorkspaceFile(
-        rootIndex: tab.file.rootIndex,
-        path: tab.file.path,
-        content: tab.draftContent,
-      );
-    setState(() {});
-  }
-
-  void _selectTab(_WorkspaceFileTab tab) {
-    if (tab.key == _activeKey) return;
-    _captureActiveContent();
-    widget.controller.activateOpenFile(tab.file);
-  }
-
-  Future<void> _closeTab(_WorkspaceFileTab tab) async {
-    if (tab.isDirty) {
-      final bool discard =
-          await showDialog<bool>(
-            context: context,
-            builder: (BuildContext context) => AlertDialog(
-              title: const Text('Discard unsaved changes?'),
-              content: Text('Close “${tab.file.name}” without saving?'),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Discard'),
-                ),
-              ],
-            ),
-          ) ??
-          false;
-      if (!discard || !mounted) return;
-    }
-    final int index = _tabs.indexOf(tab);
-    final bool wasActive = tab.key == _activeKey;
-    setState(() => _tabs.remove(tab));
-    if (!wasActive) {
-      _persistTabs();
-      return;
-    }
-    _disposeEditorControllers();
-    _activeKey = null;
-    if (_tabs.isEmpty) {
-      widget.controller.closeOpenFile();
-      _persistTabs();
-      return;
-    }
-    final _WorkspaceFileTab next = _tabs[index.clamp(0, _tabs.length - 1)];
-    widget.controller.activateOpenFile(next.file);
-    _persistTabs();
-  }
-
-  void _disposeEditorControllers() {
-    _codeController?.removeListener(_onEditorChanged);
-    _codeController?.dispose();
-    _codeController = null;
-    final StreamSubscription<dynamic>? quillChangesSubscription =
-        _quillChangesSubscription;
-    _quillChangesSubscription = null;
-    if (quillChangesSubscription != null) {
-      unawaited(quillChangesSubscription.cancel());
-    }
-    _quillController?.dispose();
-    _quillController = null;
-  }
-
-  void _clearTabs() {
-    _disposeEditorControllers();
-    _tabs.clear();
-    _activeKey = null;
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_onControllerChanged);
-    _clearTabs();
-    _quillFocusNode.dispose();
-    _quillScrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final _WorkspaceFileTab? activeTab = _activeTab;
-    if (widget.controller.isLoadingFile && _tabs.isEmpty) {
-      return ColoredBox(
-        color: Theme.of(context).colorScheme.surface,
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      );
-    }
-    if (activeTab == null) {
-      return ColoredBox(
-        color: Theme.of(context).colorScheme.surface,
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  'Main panel',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Select a file from the context panel to open it here.',
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
-      child: Column(
-        children: <Widget>[
-          _buildTabBar(context, activeTab),
-          Expanded(child: _buildEditor(context, activeTab)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabBar(BuildContext context, _WorkspaceFileTab activeTab) =>
-      SizedBox(
-        height: 48,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: <Widget>[
-                      for (final _WorkspaceFileTab tab in _tabs)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: _FileTabButton(
-                            label: tab.file.name,
-                            selected: tab.key == _activeKey,
-                            dirty: tab.isDirty,
-                            onTap: () => _selectTab(tab),
-                            onClose: () => _closeTab(tab),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (!activeTab.file.isReadOnlyPreview)
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(3)),
-                    ),
-                  ),
-                  onPressed:
-                      widget.controller.isSavingFile ||
-                          widget.controller.isLoadingFile ||
-                          !activeTab.isDirty
-                      ? null
-                      : _saveActive,
-                  icon: widget.controller.isSavingFile
-                      ? const SizedBox.square(
-                          dimension: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(FluentIcons.save_20_regular, size: 16),
-                  label: const Text('Save'),
-                ),
-            ],
-          ),
-        ),
-      );
-
-  Widget _buildEditor(BuildContext context, _WorkspaceFileTab tab) {
-    if (tab.file.isReadOnlyPreview) {
-      if (tab.file.isDocumentPreview) {
-        return WorkspaceDocumentPreview(
-          key: ValueKey<String>(tab.key),
-          bytes: tab.file.previewBytes!,
-          kind: tab.file.previewKind!.name,
-        );
-      }
-      return Padding(
-        padding: const EdgeInsets.all(12),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.all(Radius.circular(6)),
-          child: ColoredBox(
-            color: Theme.of(context).colorScheme.surfaceContainerLowest,
-            child: WorkspaceImagePreview(
-              bytes: tab.file.previewBytes!,
-              isSvg: tab.file.isSvg,
-            ),
-          ),
-        ),
-      );
-    }
-    final quill.QuillController? quillController = _quillController;
-    if (_usesQuill(tab.file.path) && quillController != null) {
-      return Column(
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-            child: SizedBox(
-              width: double.infinity,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.all(Radius.circular(6)),
-                child: ColoredBox(
-                  color: Theme.of(context).colorScheme.surfaceContainerLow,
-                  child: quill.QuillSimpleToolbar(
-                    controller: quillController,
-                    config: const quill.QuillSimpleToolbarConfig(
-                      iconTheme: quill.QuillIconTheme(
-                        iconButtonSelectedData: quill.IconButtonData(
-                          constraints: BoxConstraints.tightFor(
-                            width: 32,
-                            height: 32,
-                          ),
-                          padding: EdgeInsets.zero,
-                        ),
-                        iconButtonUnselectedData: quill.IconButtonData(
-                          constraints: BoxConstraints.tightFor(
-                            width: 32,
-                            height: 32,
-                          ),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: quill.QuillEditor.basic(
-              controller: quillController,
-              focusNode: _quillFocusNode,
-              scrollController: _quillScrollController,
-              config: const quill.QuillEditorConfig(
-                padding: EdgeInsets.all(16),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-    final CodeController? codeController = _codeController;
-    if (codeController == null) return const SizedBox.shrink();
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
-    return CodeTheme(
-      data: CodeThemeData(styles: dark ? monokaiSublimeTheme : githubTheme),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Theme(
-          data: Theme.of(context).copyWith(
-            inputDecorationTheme: const InputDecorationTheme(
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              disabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              errorBorder: InputBorder.none,
-              focusedErrorBorder: InputBorder.none,
-              filled: false,
-            ),
-          ),
-          child: CodeField(
-            controller: codeController,
-            decoration: const BoxDecoration(color: Colors.transparent),
-            textStyle: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              height: 1.45,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  static bool _usesQuill(String path) =>
-      _isMarkdown(path) || path.toLowerCase().endsWith('.txt');
-
-  static bool _isMarkdown(String path) {
-    final String lower = path.toLowerCase();
-    return lower.endsWith('.md') || lower.endsWith('.markdown');
-  }
-
-  static String _normalizeLineEndings(String value) =>
-      value.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-
-  static String _fileKey(int rootIndex, String path) =>
-      '$rootIndex:${path.replaceAll('\\', '/')}';
-
-  static Mode _languageForPath(String path) {
-    final String lower = path.toLowerCase();
-    final int dot = lower.lastIndexOf('.');
-    final String extension = dot < 0 ? '' : lower.substring(dot + 1);
-    return switch (extension) {
-      'dart' => highlight_dart.dart,
-      'js' || 'jsx' || 'mjs' || 'cjs' => highlight_javascript.javascript,
-      'ts' || 'tsx' => highlight_typescript.typescript,
-      'py' => highlight_python.python,
-      'java' => highlight_java.java,
-      'kt' || 'kts' => highlight_kotlin.kotlin,
-      'swift' => highlight_swift.swift,
-      'go' => highlight_go.go,
-      'rs' => highlight_rust.rust,
-      'rb' => highlight_ruby.ruby,
-      'php' => highlight_php.php,
-      'c' || 'h' || 'cc' || 'cpp' || 'cxx' || 'hpp' => highlight_cpp.cpp,
-      'cs' => highlight_csharp.cs,
-      'sh' || 'bash' || 'zsh' || 'ps1' || 'bat' || 'cmd' => highlight_bash.bash,
-      'json' || 'jsonc' => highlight_json.json,
-      'yaml' || 'yml' => highlight_yaml.yaml,
-      'xml' || 'html' || 'htm' || 'svg' => highlight_xml.xml,
-      'css' || 'scss' || 'sass' || 'less' => highlight_css.css,
-      'sql' => highlight_sql.sql,
-      _ => highlight_plaintext.plaintext,
-    };
-  }
-}
-
-final class _FileTabButton extends StatelessWidget {
-  const _FileTabButton({
-    required this.label,
-    required this.selected,
-    required this.dirty,
-    required this.onTap,
-    required this.onClose,
-  });
-
-  final String label;
-  final bool selected;
-  final bool dirty;
-  final VoidCallback onTap;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: label,
-      child: Material(
-        color: selected
-            ? colors.secondaryContainer
-            : colors.surfaceContainerLow,
-        borderRadius: const BorderRadius.all(Radius.circular(6)),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            height: 34,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 10, right: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 180),
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: selected ? colors.onSecondaryContainer : null,
-                      ),
-                    ),
-                  ),
-                  if (dirty) ...<Widget>[
-                    const SizedBox(width: 7),
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: colors.primary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 3),
-                  IconButton(
-                    tooltip: 'Close $label',
-                    onPressed: onClose,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 26,
-                      height: 26,
-                    ),
-                    style: IconButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                    icon: const Icon(FluentIcons.dismiss_20_regular, size: 14),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

@@ -1,0 +1,2465 @@
+{
+  "version": "2.20",
+  "children": [
+    {
+      "type": "frame",
+      "id": "FiiCR",
+      "x": 0,
+      "y": 0,
+      "name": "00 · Windows desktop capture inventory",
+      "clip": true,
+      "width": 1640,
+      "height": 900,
+      "fill": "$canvas",
+      "layout": "vertical",
+      "gap": 22,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "BQ6hZ",
+          "name": "Inventory title",
+          "fill": "$ink",
+          "content": "Subconscious · Windows desktop reference",
+          "fontFamily": "$font",
+          "fontSize": 26,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "XNhKe",
+          "name": "Inventory note",
+          "fill": "$muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Source of truth: direct 1024 × 768 Windows captures. Every listed screen includes the native caption bar, icon rail, panel dividers, and connection state from the running application.",
+          "lineHeight": 1.4,
+          "fontFamily": "$font",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "E6L1G",
+          "name": "Verified state captures",
+          "width": "fill_container",
+          "height": "fill_container",
+          "gap": 20,
+          "children": [
+            {
+              "type": "frame",
+              "id": "M1YoT",
+              "name": "Workspace capture card",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "X76CKP",
+                  "name": "Workspaces · River screenshot",
+                  "width": "fill_container",
+                  "height": 320,
+                  "fill": {
+                    "type": "image",
+                    "enabled": true,
+                    "url": "screenshots/00-current-workspace.png",
+                    "mode": "contain"
+                  },
+                  "stroke": "$line",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "text",
+                  "id": "PmzSO",
+                  "name": "Workspaces · River title",
+                  "fill": "$ink",
+                  "content": "Workspaces · River",
+                  "fontFamily": "$font",
+                  "fontSize": 15,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "yaszw",
+                  "name": "Workspaces · River description",
+                  "fill": "$muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Connected render: populated workspace navigator, edit form, 3-column shell, conversation, composer, and black approval switches.",
+                  "lineHeight": 1.35,
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pAMy5",
+              "name": "Threads capture card",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "s44III",
+                  "name": "Threads · Utility screenshot",
+                  "width": "fill_container",
+                  "height": 320,
+                  "fill": {
+                    "type": "image",
+                    "enabled": true,
+                    "url": "screenshots/06-files.png",
+                    "mode": "contain"
+                  },
+                  "stroke": "$line",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "text",
+                  "id": "IhQOl",
+                  "name": "Threads · Utility title",
+                  "fill": "$ink",
+                  "content": "Threads · Utility",
+                  "fontFamily": "$font",
+                  "fontSize": 15,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "u8sPu5",
+                  "name": "Threads · Utility description",
+                  "fill": "$muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Disconnected render: Threads empty state, Utility main panel, preserved chat transcript, disabled composer, and selected rail state.",
+                  "lineHeight": 1.35,
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "nWj0b",
+              "name": "Account capture card",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Z4Bsh",
+                  "name": "Account · Sign in screenshot",
+                  "width": "fill_container",
+                  "height": 320,
+                  "fill": {
+                    "type": "image",
+                    "enabled": true,
+                    "url": "screenshots/07-settings.png",
+                    "mode": "contain"
+                  },
+                  "stroke": "$line",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "text",
+                  "id": "aqxEQ",
+                  "name": "Account · Sign in title",
+                  "fill": "$ink",
+                  "content": "Account · Sign in",
+                  "fontFamily": "$font",
+                  "fontSize": 15,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "u9whK",
+                  "name": "Account · Sign in description",
+                  "fill": "$muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Disconnected render: account sign-in form, segmented sign-in/create-account control, full shell, transcript, and disabled composer.",
+                  "lineHeight": 1.35,
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "IHiS8",
+              "name": "Files capture card",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 10,
+              "padding": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "pxVGP",
+                  "name": "Files screenshot",
+                  "width": "fill_container",
+                  "height": 320,
+                  "fill": {
+                    "type": "image",
+                    "enabled": true,
+                    "url": "screenshots/09-files.png",
+                    "mode": "contain"
+                  },
+                  "stroke": "$line",
+                  "strokeWidth": 1
+                },
+                {
+                  "type": "text",
+                  "id": "XmslU",
+                  "name": "Files title",
+                  "fill": "$ink",
+                  "content": "Files · Empty workspace folders",
+                  "fontFamily": "$font",
+                  "fontSize": 15,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "xiorU",
+                  "name": "Files description",
+                  "fill": "$muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Observed empty state: no allowed folders, context actions disabled, and the native main-panel selection message.",
+                  "lineHeight": 1.35,
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "HGkUI",
+          "name": "Capture requirement",
+          "fill": "$muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Capture-required before inclusion: Settings pages, Workspace create/delete, Thread settings, tool approval, model/tool/skill editors, image/document previews, and transient loading/error states. These are intentionally not recreated from code or placeholders.",
+          "lineHeight": 1.4,
+          "fontFamily": "$font",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "i4rcbe",
+      "x": 0,
+      "y": 980,
+      "name": "01 · Windows · Workspaces · River · component composition",
+      "clip": true,
+      "width": 1024,
+      "height": 768,
+      "fill": "$surface",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "ref",
+          "id": "workspaceScreenCaption1",
+          "name": "Windows caption bar instance",
+          "ref": "captionBarV2",
+          "width": "fill_container",
+          "height": 40
+        },
+        {
+          "type": "frame",
+          "id": "workspaceScreenBody1",
+          "name": "Windows workspace body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$surface",
+          "layout": "horizontal",
+          "children": [
+            {
+              "type": "ref",
+              "id": "workspaceScreenSidebar1",
+              "name": "Desktop sidebar instance",
+              "ref": "z5PT6r",
+              "width": 40,
+              "height": "fill_container"
+            },
+            {
+              "type": "rectangle",
+              "id": "workspaceScreenSidebarDivider1",
+              "name": "Sidebar separator",
+              "width": 1,
+              "height": "fill_container",
+              "fill": "$line"
+            },
+            {
+              "type": "ref",
+              "id": "workspaceScreenContext1",
+              "name": "Workspaces context instance",
+              "ref": "U3A4GF",
+              "width": 245,
+              "height": "fill_container"
+            },
+            {
+              "type": "rectangle",
+              "id": "workspaceScreenLeftDivider1",
+              "name": "Context-main resize divider",
+              "width": 5,
+              "height": "fill_container",
+              "fill": "$line"
+            },
+            {
+              "type": "ref",
+              "id": "workspaceScreenMain1",
+              "name": "Edit workspace main instance",
+              "ref": "bRhjo",
+              "width": 460,
+              "height": "fill_container"
+            },
+            {
+              "type": "rectangle",
+              "id": "workspaceScreenRightDivider1",
+              "name": "Main-chat resize divider",
+              "width": 5,
+              "height": "fill_container",
+              "fill": "$line"
+            },
+            {
+              "type": "ref",
+              "id": "workspaceScreenChat1",
+              "name": "Chat panel instance",
+              "ref": "F6IFUW",
+              "width": 268,
+              "height": "fill_container"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "EoHxp",
+      "x": 1064,
+      "y": 980,
+      "name": "02 · Windows · Threads · Utility",
+      "clip": true,
+      "width": 1024,
+      "height": 768,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "screenshots/06-files.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "bSlP4",
+      "x": 2128,
+      "y": 980,
+      "name": "03 · Windows · Account · Sign in",
+      "clip": true,
+      "width": 1024,
+      "height": 768,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "screenshots/07-settings.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "IxkSW",
+      "x": 3192,
+      "y": 980,
+      "name": "04 · Windows · Files · Empty folders",
+      "clip": true,
+      "width": 1024,
+      "height": 768,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "screenshots/09-files.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "RimAm",
+      "x": 0,
+      "y": 1828,
+      "name": "Component · Windows caption bar",
+      "reusable": true,
+      "clip": true,
+      "width": 1024,
+      "height": 21,
+      "fill": "$caption-bg",
+      "stroke": "$line",
+      "strokeWidth": {
+        "bottom": 1
+      },
+      "layout": "none",
+      "children": [
+        {
+          "type": "path",
+          "id": "dNU7y",
+          "reusable": true,
+          "layoutPosition": "absolute",
+          "x": 8.5,
+          "y": 5,
+          "name": "Subconscious title-bar logo vector",
+          "metadata": {
+            "type": "application-logo-vector",
+            "source": "apps/unified_app/windows/runner/resources/icon_title.svg"
+          },
+          "geometry": "M72.601 348.721c-3.309 3.4-7.935 5.512-13.054 5.512-10.059 0-18.214-8.154-18.214-18.214 0-10.06 8.155-18.214 18.214-18.214 3.105 0 6.029 0.777 8.587 2.147l25.814-24.801c-1.058-2.308-1.647-4.875-1.647-7.579 0-10.06 8.155-18.214 18.215-18.214 0.45 0 0.896 0.016 1.338 0.048l6.236-14.342c-3.871-3.256-6.367-8.094-6.492-13.517-10.853-3.565-21.134-7.026-29.583-11.403-9.407-4.873-16.684-10.861-20.709-18.913-9.018-1.091-16.005-8.77-16.005-18.082 0-9.33 7.014-17.02 16.057-18.087 3.297-8.947 8.803-16.845 16.181-23.235-0.386-1.476-0.592-3.025-0.592-4.622 0-10.06 8.155-18.214 18.215-18.214 6.044 0 11.401 2.944 14.714 7.477 6.031-1.245 12.491-1.903 19.325-1.903 11.636 0 21.575 1.454 29.781 3.626 3.329-3.631 8.113-5.908 13.428-5.908 10.059 0 18.214 8.154 18.214 18.214 0 10.059-8.155 18.214-18.214 18.214-2.876 0-5.596-0.666-8.014-1.853l-16.774 16.364c1.035 2.287 1.611 4.826 1.611 7.499 0 7.903-5.034 14.631-12.071 17.152l-0.322 16.438c6.568 2.751 11.182 9.24 11.182 16.808 0 0.315-0.008 0.629-0.024 0.94 26.978 11.248 40.003 21.142 40.003 48.807 0 2.921-0.182 5.813-0.546 8.66 4.671 3.297 7.722 8.737 7.722 14.89 0 10.06-8.155 18.214-18.214 18.214-1.466 0-2.891-0.173-4.257-0.5-9.736 10.757-24.194 18.645-43.584 21.628-1.947 7.963-9.13 13.872-17.693 13.872-8.576 0-15.767-5.925-17.702-13.906-7.467-1.11-14.709-2.852-21.126-5.003z m81.63-199.366c-6.984-1.694-15.341-2.79-25.03-2.79-5.582 0-10.879 0.509-15.844 1.479-0.14 3.088-1.048 5.975-2.539 8.475l14.225 16.991c1.872-0.65 3.883-1.003 5.976-1.003 3.004 0 5.838 0.727 8.336 2.015l16.604-16.198c-1.13-2.371-1.763-5.025-1.763-7.827 0-0.383 0.012-0.764 0.035-1.142z m-26.278 192.387c14.953-2.505 26.401-8.422 34.365-16.494-2.243-3.027-3.57-6.774-3.57-10.832 0-0.208 0.004-0.416 0.011-0.622l-34.6-14.155c-1.984 2.242-4.512 3.991-7.378 5.04l0.451 27.467c4.751 1.596 8.627 5.097 10.721 9.596z m-43.515-179.812c-4.896 4.493-8.687 9.832-11.184 15.824 3.341 2.118 5.945 5.293 7.342 9.055l33.012-1.457c0.481-1.562 1.167-3.035 2.026-4.387l-14.004-16.727c-2.01 0.763-4.19 1.181-6.468 1.181-4.009 0-7.716-1.295-10.724-3.489z m-10.834 46.387c3.15 4.614 8.054 8.128 13.931 11.172 7.935 4.111 17.555 7.349 27.726 10.666 2.363-3.131 5.715-5.475 9.59-6.568l0.307-15.616c-5.089-1.728-9.166-5.644-11.112-10.626l-33.213 1.465c-1.282 3.924-3.86 7.262-7.229 9.507z m28.652 95.493l-25.99 24.971c0.962 2.218 1.495 4.666 1.495 7.238 0 0.615-0.031 1.224-0.09 1.824 5.262 1.686 11.139 3.05 17.205 3.962 2.028-4.404 5.763-7.86 10.356-9.522l-0.449-27.418c-0.874-0.289-1.718-0.643-2.527-1.055z m27.066-44.484l-6.459 14.855c3.608 3.328 5.867 8.095 5.867 13.391 0 0.322-0.008 0.643-0.025 0.962l34.393 14.069c3.093-3.626 7.584-6.024 12.639-6.36 0.176-1.771 0.264-3.565 0.264-5.377 0-8.871-1.639-15.35-5.242-20.451-3.699-5.237-9.334-8.98-16.703-12.607-3.207-1.579-6.724-3.116-10.549-4.686-3.338 3.807-8.238 6.21-13.699 6.21-0.163 0-0.325-0.002-0.486-0.006z",
+          "viewBox": [
+            40,
+            128,
+            156,
+            240
+          ],
+          "fill": "$ink",
+          "width": 7,
+          "height": 10
+        },
+        {
+          "type": "text",
+          "id": "cCwPv",
+          "layoutPosition": "absolute",
+          "x": 25,
+          "y": 5,
+          "name": "App title",
+          "fill": "$ink",
+          "content": "Subconscious",
+          "fontFamily": "$font",
+          "fontSize": 9,
+          "fontWeight": "600"
+        },
+        {
+          "type": "ellipse",
+          "id": "Hzplx",
+          "layoutPosition": "absolute",
+          "x": 706,
+          "y": 8,
+          "name": "Connection indicator",
+          "fill": "$online",
+          "width": 5,
+          "height": 5
+        },
+        {
+          "type": "text",
+          "id": "hgPAM",
+          "layoutPosition": "absolute",
+          "x": 715,
+          "y": 5,
+          "name": "Connection label",
+          "fill": "$muted",
+          "content": "connected",
+          "fontFamily": "$font",
+          "fontSize": 8,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "icon",
+          "id": "F6EdL",
+          "layoutPosition": "absolute",
+          "x": 768,
+          "y": 5,
+          "name": "Context panel toggle",
+          "width": 10,
+          "height": 10,
+          "icon": "panel-left",
+          "library": "lucide",
+          "fill": "$ink"
+        },
+        {
+          "type": "icon",
+          "id": "Vl8Su",
+          "layoutPosition": "absolute",
+          "x": 792,
+          "y": 5,
+          "name": "Chat panel toggle",
+          "width": 10,
+          "height": 10,
+          "icon": "panel-right",
+          "library": "lucide",
+          "fill": "$ink"
+        },
+        {
+          "type": "icon",
+          "id": "x5iI6X",
+          "layoutPosition": "absolute",
+          "x": 817,
+          "y": 5,
+          "name": "Main panel toggle",
+          "width": 10,
+          "height": 10,
+          "icon": "columns-3",
+          "library": "lucide",
+          "fill": "$ink"
+        },
+        {
+          "type": "icon",
+          "id": "pbvzG",
+          "layoutPosition": "absolute",
+          "x": 842,
+          "y": 5,
+          "name": "Workspace icon",
+          "width": 10,
+          "height": 10,
+          "icon": "folder-open",
+          "library": "lucide",
+          "fill": "$rail-icon"
+        },
+        {
+          "type": "text",
+          "id": "Q3sPC",
+          "layoutPosition": "absolute",
+          "x": 856,
+          "y": 5,
+          "name": "Workspace label",
+          "fill": "$ink",
+          "content": "General",
+          "fontFamily": "$font",
+          "fontSize": 8,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "icon",
+          "id": "UJFqN",
+          "layoutPosition": "absolute",
+          "x": 956,
+          "y": 6,
+          "name": "Minimize window",
+          "width": 9,
+          "height": 9,
+          "icon": "minus",
+          "library": "lucide",
+          "fill": "$rail-icon"
+        },
+        {
+          "type": "icon",
+          "id": "Sg5b6",
+          "layoutPosition": "absolute",
+          "x": 979,
+          "y": 6,
+          "name": "Maximize window",
+          "width": 8,
+          "height": 8,
+          "icon": "square",
+          "library": "lucide",
+          "fill": "$rail-icon"
+        },
+        {
+          "type": "icon",
+          "id": "l8SIT",
+          "layoutPosition": "absolute",
+          "x": 1002,
+          "y": 5,
+          "name": "Close window",
+          "width": 10,
+          "height": 10,
+          "icon": "x",
+          "library": "lucide",
+          "fill": "$rail-icon"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "z5PT6r",
+      "x": 1080,
+      "y": 1828,
+      "name": "Component · Desktop sidebar",
+      "reusable": true,
+      "clip": true,
+      "width": 40,
+      "height": 728,
+      "fill": "$surface",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "Kg519",
+          "name": "Primary navigation",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 4,
+          "padding": [
+            4,
+            4,
+            0,
+            4
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "XWJbu",
+              "name": "Workspaces",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "$panel-selected",
+              "cornerRadius": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "path",
+                  "id": "f5rxci",
+                  "name": "Fluent Apps 24 filled",
+                  "metadata": {
+                    "type": "fluentui-system-icons",
+                    "commit": "a563cf9166f4f91aa617557ed272612b7f0a2f72",
+                    "asset": "assets/fluent/ic_fluent_apps_24_filled.svg"
+                  },
+                  "geometry": "M18.4923 2.33034l3.1787 3.17877c0.8787 0.87868 0.8787 2.3033 0 3.18198l-2.5844 2.58391c1.083 0.1625 1.9134 1.0968 1.9134 2.225v5.25c0 1.2426-1.0074 2.25-2.25 2.25h-13.5c-1.24264 0-2.25-1.0074-2.25-2.25v-13.49999c0-1.24265 1.00736-2.25 2.25-2.25h5.25c1.1289 0 2.0637 0.83145 2.2253 1.9154l2.585-2.58507c0.8787-0.87868 2.3033-0.87868 3.182 0z m-13.9923 16.41966c0 0.4142 0.33579 0.75 0.75 0.75l5.999-0.0007 0.001-6.7493-6.75-0.0007v6.0007z m8.249 0.7493l6.001 0.0007c0.4142 0 0.75-0.3358 0.75-0.75v-5.25c0-0.4142-0.3358-0.75-0.75-0.75l-6.001-0.0007v6.75z m-2.249-14.99929h-5.25c-0.41421 0-0.75 0.33578-0.75 0.75v5.99929h6.75v-5.99929c0-0.41422-0.3358-0.75-0.75-0.75z m2.25 4.80932v1.94067l1.94-0.0007-1.94-1.93997z",
+                  "viewBox": [
+                    0,
+                    0,
+                    24,
+                    24
+                  ],
+                  "fill": "$panel-text",
+                  "width": 12,
+                  "height": 12
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "uY1Al",
+              "name": "Threads",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "#FFFFFF",
+              "cornerRadius": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "path",
+                  "id": "yM85s",
+                  "name": "Fluent Chat 24 regular",
+                  "metadata": {
+                    "type": "fluentui-system-icons",
+                    "commit": "a563cf9166f4f91aa617557ed272612b7f0a2f72",
+                    "asset": "assets/fluent/ic_fluent_chat_24_regular.svg"
+                  },
+                  "geometry": "M12 2c5.5228 0 10 4.47715 10 10 0 5.5228-4.4772 10-10 10-1.6183 0-3.18218-0.3854-4.58714-1.112l-3.82582 1.0673c-0.66492 0.1857-1.35446-0.2028-1.54013-0.8677-0.06145-0.22-0.06142-0.4527 0.00004-0.6725l1.06766-3.8229c-0.72824-1.4062-1.11461-2.9719-1.11461-4.5922 0-5.52285 4.47715-10 10-10z m0 1.5c-4.69442 0-8.5 3.80558-8.5 8.5 0 1.4696 0.37277 2.8834 1.07303 4.1375l0.15065 0.2697-1.11272 3.9842 3.98659-1.1122 0.26954 0.1503c1.25297 0.6986 2.66511 1.0705 4.13291 1.0705 4.6944 0 8.5-3.8056 8.5-8.5 0-4.69442-3.8056-8.5-8.5-8.5z m-3.25 9.5h4.4983c0.4142 0 0.75 0.3358 0.75 0.75 0 0.3797-0.2822 0.6935-0.6483 0.7432l-0.1017 0.0068h-4.4983c-0.41421 0-0.75-0.3358-0.75-0.75 0-0.3797 0.28215-0.6935 0.64823-0.7432l0.10177-0.0068h4.4983-4.4983z m0-3.5h6.5045c0.4142 0 0.75 0.33579 0.75 0.75 0 0.3797-0.2822 0.6935-0.6482 0.7432l-0.1018 0.0068h-6.5045c-0.41421 0-0.75-0.3358-0.75-0.75 0-0.3797 0.28215-0.69349 0.64823-0.74315l0.10177-0.00685h6.5045-6.5045z",
+                  "viewBox": [
+                    0,
+                    0,
+                    24,
+                    24
+                  ],
+                  "fill": "$rail-icon",
+                  "width": 12,
+                  "height": 12
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "TPdiP",
+              "name": "Files",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "#FFFFFF",
+              "cornerRadius": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "path",
+                  "id": "bqHDB",
+                  "name": "Fluent Document Copy 24 regular",
+                  "metadata": {
+                    "type": "fluentui-system-icons",
+                    "commit": "a563cf9166f4f91aa617557ed272612b7f0a2f72",
+                    "asset": "assets/fluent/ic_fluent_document_copy_24_regular.svg"
+                  },
+                  "geometry": "M5.5028 4.62704l-0.0028 2.12296v10.5042c0 1.7949 1.45507 3.25 3.25 3.25l8.6163 0.0003c-0.309 0.8737-1.1423 1.4997-2.1219 1.4997h-6.4944c-2.62335 0-4.75-2.1266-4.75-4.75v-10.5042c0-0.98071 0.62745-1.81488 1.5028-2.12296z m7.6256-2.62704c0.597 0 1.1695 0.23723 1.5915 0.65947l4.6184 4.62107c0.4216 0.42192 0.6585 0.99401 0.6585 1.59053v8.38313c0 1.2427-1.0073 2.25-2.25 2.25h-8.99439c-1.24264 0-2.25-1.0073-2.25-2.25v-13.0042c0-1.24264 1.00736-2.25 2.25-2.25h4.37599z m-0.129 1.5h-4.24699c-0.41422 0-0.75 0.33579-0.75 0.75v13.0042c0 0.4142 0.33578 0.75 0.75 0.75h8.99439c0.4142 0 0.75-0.3358 0.75-0.75l-0.0004-8.2512-3.2464 0.00089c-1.1909 0-2.1656-0.92516-2.2448-2.09595l-0.0052-0.15405-0.0006-3.25389z m1.5 1.061l0.0006 2.19289c0 0.3797 0.2822 0.69349 0.6482 0.74315l0.1018 0.00685 2.1904-0.00089-2.941-2.942z",
+                  "viewBox": [
+                    0,
+                    0,
+                    24,
+                    24
+                  ],
+                  "fill": "$rail-icon",
+                  "width": 12,
+                  "height": 12
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "UzFFn",
+          "name": "Navigation spacer",
+          "width": "fill_container",
+          "height": "fill_container"
+        },
+        {
+          "type": "frame",
+          "id": "railSettingsDividerWrap1",
+          "name": "Settings divider inset",
+          "width": "fill_container",
+          "height": 1,
+          "layout": "horizontal",
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "railSettingsDivider1",
+              "name": "Settings divider",
+              "width": 32,
+              "height": 1,
+              "fill": "$line"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "y3m16",
+          "name": "Secondary navigation",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 4,
+          "padding": [
+            4,
+            4,
+            4,
+            4
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "r8Q6x",
+              "name": "Settings",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "#FFFFFF",
+              "cornerRadius": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "path",
+                  "id": "A4XtU",
+                  "name": "Fluent Settings 24 regular",
+                  "metadata": {
+                    "type": "fluentui-system-icons",
+                    "commit": "a563cf9166f4f91aa617557ed272612b7f0a2f72",
+                    "asset": "assets/fluent/ic_fluent_settings_24_regular.svg"
+                  },
+                  "geometry": "M12.0122 2.25c0.734 0.00846 1.4651 0.09326 2.1815 0.25304 0.3127 0.06975 0.5466 0.33047 0.5821 0.64892l0.1702 1.52685c0.0771 0.70105 0.669 1.23203 1.3746 1.23277 0.1897 0.0003 0.3773-0.0392 0.5526-0.11675l1.4006-0.61527c0.2913-0.12797 0.6317-0.0582 0.8491 0.17406 1.0122 1.08102 1.766 2.37753 2.2048 3.79196 0.0946 0.305-0.0143 0.63645-0.2713 0.82592l-1.2415 0.9151c-0.3542 0.2602-0.5633 0.6734-0.5633 1.1129 0 0.4394 0.2091 0.8526 0.5641 1.1134l1.2425 0.9154c0.2571 0.1894 0.3661 0.5209 0.2715 0.826-0.4386 1.4142-1.192 2.7106-2.2036 3.7918-0.2172 0.2322-0.5573 0.3022-0.8486 0.1745l-1.4063-0.6161c-0.4024-0.1761-0.8644-0.1503-1.2447 0.0695-0.3802 0.2197-0.6332 0.6072-0.6815 1.0437l-0.1691 1.5267c-0.0349 0.3148-0.2637 0.5738-0.5719 0.6471-1.4484 0.3446-2.9575 0.3446-4.40597 0-0.30812-0.0733-0.53698-0.3323-0.57185-0.6471l-0.16882-1.5244c-0.04959-0.4357-0.30302-0.822-0.68294-1.041-0.37991-0.219-0.84122-0.2447-1.24222-0.0696l-1.40663 0.6162c-0.29135 0.1277-0.63154 0.0577-0.84879-0.1747-1.01216-1.0824-1.76559-2.3804-2.20358-3.7961-0.09434-0.3049 0.01466-0.6362 0.27165-0.8255l1.24333-0.916c0.35414-0.2602 0.56329-0.6734 0.56329-1.1128 0-0.4395-0.20915-0.8527-0.56376-1.1132l-1.24255-0.91445c-0.25736-0.1894-0.36646-0.52107-0.27179-0.82627 0.43875-1.41443 1.19257-2.71094 2.20476-3.79196 0.21746-0.23226 0.55781-0.30203 0.84911-0.17406l1.40038 0.61516c0.40294 0.17684 0.86618 0.15013 1.24815-0.07303 0.38032-0.2206 0.63352-0.60847 0.6824-1.04505l0.17007-1.52568c0.03552-0.31861 0.26962-0.57942 0.58256-0.64902 0.7173-0.15952 1.4492-0.24429 2.2014-0.25294z m0.0002 1.4999c-0.4541 0.00534-0.9068 0.04453-1.3546 0.11712l-0.1089 0.97716c-0.1018 0.9095-0.62887 1.71684-1.41848 2.17485-0.79445 0.46414-1.76306 0.52-2.60584 0.15014l-0.89829-0.39461c-0.57193 0.69417-1.02715 1.47679-1.34777 2.31712l0.7978 0.58711c0.73881 0.54281 1.17515 1.40491 1.17515 2.32171 0 0.9167-0.43634 1.7788-1.17437 2.321l-0.79905 0.5887c0.32034 0.8418 0.77563 1.6259 1.34795 2.3214l0.90513-0.3965c0.8381-0.3659 1.80011-0.3124 2.5924 0.1443 0.79228 0.4567 1.32077 1.2623 1.42447 2.1732l0.109 0.9839c0.8896 0.1513 1.7985 0.1513 2.6881 0l0.109-0.9838c0.1008-0.9106 0.6287-1.719 1.4219-2.1774 0.7932-0.4585 1.7572-0.5123 2.5968-0.1448l0.9044 0.3962c0.5718-0.6944 1.0269-1.4772 1.3475-2.3177l-0.798-0.5879c-0.7388-0.5428-1.1751-1.4049-1.1751-2.3216 0-0.9168 0.4363-1.7789 1.1742-2.32103l0.7969-0.58738c-0.3206-0.84048-0.7759-1.62325-1.3479-2.31753l-0.8965 0.39381c-0.3653 0.16164-0.7605 0.24483-1.1596 0.24421-1.4697-0.00154-2.7032-1.10803-2.8636-2.56775l-0.1089-0.97713c-0.4455-0.0725-0.8936-0.11158-1.3338-0.1168z m-0.0127 4.50005c2.0711 0 3.75 1.67893 3.75 3.75005 0 2.071-1.6789 3.75-3.75 3.75-2.07107 0-3.75-1.679-3.75-3.75 0-2.07112 1.67893-3.75005 3.75-3.75005z m0 1.5c-1.2426 0-2.25 1.00735-2.25 2.25005 0 1.2426 1.0074 2.25 2.25 2.25 1.2426 0 2.25-1.0074 2.25-2.25 0-1.2427-1.0074-2.25005-2.25-2.25005z",
+                  "viewBox": [
+                    0,
+                    0,
+                    24,
+                    24
+                  ],
+                  "fill": "$rail-icon",
+                  "width": 12,
+                  "height": 12
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ZBjkc",
+              "name": "Account",
+              "width": "fill_container",
+              "height": 32,
+              "fill": "#FFFFFF",
+              "cornerRadius": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "path",
+                  "id": "qIi9I",
+                  "name": "Fluent Person 24 regular",
+                  "metadata": {
+                    "type": "fluentui-system-icons",
+                    "commit": "a563cf9166f4f91aa617557ed272612b7f0a2f72",
+                    "asset": "assets/fluent/ic_fluent_person_24_regular.svg"
+                  },
+                  "geometry": "M17.7545 14.0002c1.2421 0 2.2489 1.0068 2.2489 2.2489v0.5754c0 0.8943-0.3196 1.7591-0.9011 2.4385-1.5694 1.8335-3.9566 2.7383-7.1019 2.7383-3.1459 0-5.53191-0.9051-7.09821-2.7394-0.57977-0.6789-0.89828-1.5424-0.89828-2.4352v-0.5776c0-1.2421 1.00685-2.2489 2.24887-2.2489h11.50172z m0 1.5h-11.50172c-0.41359 0-0.74887 0.3353-0.74887 0.7489v0.5776c0 0.5357 0.19111 1.0538 0.53896 1.4611 1.25331 1.4677 3.21919 2.2135 5.95753 2.2135 2.7383 0 4.7059-0.7458 5.9623-2.2137 0.349-0.4077 0.5407-0.9266 0.5407-1.4631v-0.5754c0-0.4136-0.3353-0.7489-0.7489-0.7489z m-5.7541-13.49532c2.7614 0 5 2.23858 5 5 0 2.76143-2.2386 5.00002-5 5.00002-2.76146 0-5.00004-2.23859-5.00004-5.00002 0-2.76142 2.23858-5 5.00004-5z m0 1.5c-1.933 0-3.50004 1.56701-3.50004 3.5 0 1.933 1.56704 3.50002 3.50004 3.50002 1.933 0 3.5-1.56702 3.5-3.50002 0-1.93299-1.567-3.5-3.5-3.5z",
+                  "viewBox": [
+                    0,
+                    0,
+                    24,
+                    24
+                  ],
+                  "fill": "$rail-icon",
+                  "width": 12,
+                  "height": 12
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "UJljR",
+      "x": 1140,
+      "y": 1828,
+      "name": "Component · Workspace list row",
+      "reusable": true,
+      "width": 245,
+      "fill": "#FFFFFF",
+      "cornerRadius": 6,
+      "layout": "vertical",
+      "padding": [
+        8,
+        12
+      ],
+      "children": [
+        {
+          "type": "text",
+          "id": "U4G9Wl",
+          "name": "Workspace name",
+          "fill": "$panel-text",
+          "content": "Workspace name",
+          "fontFamily": "$font",
+          "fontSize": 11,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "aFyLl",
+          "name": "Workspace description",
+          "fill": "$panel-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Optional workspace description",
+          "fontFamily": "$font",
+          "fontSize": 9,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "U3A4GF",
+      "x": 1440,
+      "y": 1828,
+      "name": "Component · Workspaces panel",
+      "reusable": true,
+      "clip": true,
+      "width": 245,
+      "height": 728,
+      "fill": "$surface",
+      "stroke": "$panel-border",
+      "strokeWidth": {
+        "right": 1
+      },
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "EDFYA",
+          "name": "Workspaces header",
+          "width": "fill_container",
+          "height": 48,
+          "padding": [
+            0,
+            12
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "hbuFr",
+              "name": "Workspaces heading",
+              "fill": "$panel-text",
+              "content": "Workspaces",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "Fc2nc",
+              "name": "New workspace button",
+              "width": 32,
+              "height": 32,
+              "fill": "#FFFFFF",
+              "cornerRadius": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "path",
+                  "id": "doZWg",
+                  "name": "Fluent Add 20 regular",
+                  "metadata": {
+                    "type": "fluentui-system-icons",
+                    "commit": "a563cf9166f4f91aa617557ed272612b7f0a2f72",
+                    "asset": "assets/fluent/ic_fluent_add_20_regular.svg"
+                  },
+                  "geometry": "M10 2.5c0.2761 0 0.5 0.22386 0.5 0.5v6.5h6.5c0.2761 0 0.5 0.22386 0.5 0.5 0 0.2761-0.2239 0.5-0.5 0.5h-6.5v6.5c0 0.2761-0.2239 0.5-0.5 0.5-0.27614 0-0.5-0.2239-0.5-0.5v-6.5h-6.5c-0.27614 0-0.5-0.2239-0.5-0.5 0-0.27614 0.22386-0.5 0.5-0.5h6.5v-6.5c0-0.27614 0.22386-0.5 0.5-0.5z",
+                  "viewBox": [
+                    0,
+                    0,
+                    20,
+                    20
+                  ],
+                  "fill": "$panel-text",
+                  "width": 20,
+                  "height": 20
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "w1b201",
+          "name": "Workspace list",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            0,
+            12,
+            12,
+            12
+          ],
+          "children": [
+            {
+              "id": "XdegP",
+              "type": "ref",
+              "ref": "UJljR",
+              "name": "Ancilla workspace",
+              "fill": "#FFFFFF",
+              "width": "fill_container",
+              "height": "fit_content",
+              "descendants": {
+                "U4G9Wl": {
+                  "content": "Ancilla"
+                },
+                "aFyLl": {
+                  "content": "Ancilla is an AI and robotics company I’m building. My home is Brian Sherry. I’m currently working on an open source product…"
+                }
+              }
+            },
+            {
+              "id": "vO5Cg",
+              "type": "ref",
+              "ref": "UJljR",
+              "name": "General workspace",
+              "fill": "#FFFFFF",
+              "width": "fill_container",
+              "height": "fit_content",
+              "descendants": {
+                "U4G9Wl": {
+                  "content": "General"
+                },
+                "aFyLl": {
+                  "content": "Default workspace for general conversations"
+                }
+              }
+            },
+            {
+              "id": "oVT6D",
+              "type": "ref",
+              "ref": "UJljR",
+              "name": "River workspace",
+              "fill": "$panel-selected",
+              "width": "fill_container",
+              "height": "fit_content",
+              "descendants": {
+                "U4G9Wl": {
+                  "content": "River"
+                },
+                "aFyLl": {
+                  "content": "A workspace for managing River, a fintech startup."
+                }
+              }
+            },
+            {
+              "id": "I0Tb8F",
+              "type": "ref",
+              "ref": "UJljR",
+              "name": "Smoke Test workspace",
+              "fill": "#FFFFFF",
+              "width": "fill_container",
+              "height": "fit_content",
+              "descendants": {
+                "U4G9Wl": {
+                  "content": "Smoke Test WS"
+                },
+                "aFyLl": {
+                  "content": ""
+                }
+              }
+            },
+            {
+              "id": "GXpAx",
+              "type": "ref",
+              "ref": "UJljR",
+              "name": "Subconscious workspace",
+              "fill": "#FFFFFF",
+              "width": "fill_container",
+              "height": "fit_content",
+              "descendants": {
+                "U4G9Wl": {
+                  "content": "Subconscious"
+                },
+                "aFyLl": {
+                  "content": "The workspace I use to manage the Subconscious project and family of tools."
+                }
+              }
+            },
+            {
+              "id": "oJWeC",
+              "type": "ref",
+              "ref": "UJljR",
+              "name": "Workspace 5",
+              "fill": "#FFFFFF",
+              "width": "fill_container",
+              "height": "fit_content",
+              "descendants": {
+                "U4G9Wl": {
+                  "content": "Workspace 5"
+                },
+                "aFyLl": {
+                  "content": ""
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "bx6pn",
+      "enabled": false,
+      "x": 1749,
+      "y": 1828,
+      "name": "Component · Account panel · Sign in",
+      "reusable": true,
+      "width": 520,
+      "height": 748,
+      "fill": "$surface",
+      "layout": "vertical",
+      "padding": 28,
+      "children": [
+        {
+          "type": "text",
+          "id": "v4wTfR",
+          "name": "Account heading",
+          "fill": "$ink",
+          "content": "Account",
+          "fontFamily": "$font",
+          "fontSize": 24,
+          "fontWeight": "700"
+        },
+        {
+          "type": "frame",
+          "id": "qyPlR",
+          "name": "Heading spacer",
+          "width": "fill_container",
+          "height": 8
+        },
+        {
+          "type": "text",
+          "id": "f93IXk",
+          "name": "Account explanation",
+          "fill": "$panel-text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Sign in to connect this desktop app to your Subconscious account. Your local engine remains private and uses its own joining token.",
+          "lineHeight": 1.4,
+          "fontFamily": "$font",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "S8tZh",
+          "name": "Mode spacer",
+          "width": "fill_container",
+          "height": 20
+        },
+        {
+          "type": "frame",
+          "id": "ATesC",
+          "name": "Account mode selector",
+          "width": 210,
+          "height": 32,
+          "fill": "#F2F2F2",
+          "cornerRadius": 4,
+          "stroke": "$line",
+          "strokeWidth": 1,
+          "padding": 2,
+          "children": [
+            {
+              "type": "frame",
+              "id": "f1huF",
+              "name": "Sign in selected",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Z0Qo4",
+                  "name": "Sign in selected label",
+                  "fill": "$panel-text",
+                  "content": "Sign in",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "YXTyu",
+              "name": "Create account mode",
+              "width": "fill_container",
+              "height": "fill_container",
+              "cornerRadius": 3,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "gcuL3",
+                  "name": "Create account label",
+                  "fill": "$panel-muted",
+                  "content": "Create account",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "600"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "V6XGP",
+          "name": "Email address spacer",
+          "width": "fill_container",
+          "height": 20
+        },
+        {
+          "type": "text",
+          "id": "PVjrW",
+          "name": "Email address label",
+          "fill": "$panel-text",
+          "content": "Email address",
+          "fontFamily": "$font",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "h15wf",
+          "name": "Email address field",
+          "width": "fill_container",
+          "height": 40,
+          "cornerRadius": 3,
+          "stroke": "$line",
+          "strokeWidth": 1,
+          "padding": [
+            0,
+            12
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "yYqsK",
+              "name": "Email address value",
+              "fill": "$muted",
+              "content": "Enter your email address",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "A1usK",
+          "name": "Password spacer",
+          "width": "fill_container",
+          "height": 20
+        },
+        {
+          "type": "text",
+          "id": "k5G1Mp",
+          "name": "Password label",
+          "fill": "$panel-text",
+          "content": "Password",
+          "fontFamily": "$font",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "JkmVm",
+          "name": "Password field",
+          "width": "fill_container",
+          "height": 40,
+          "cornerRadius": 3,
+          "stroke": "$line",
+          "strokeWidth": 1,
+          "padding": [
+            0,
+            12
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "WeJTa",
+              "name": "Password value",
+              "fill": "$panel-text",
+              "content": "••••••••",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "fwGED",
+              "name": "Password action",
+              "fill": "$panel-muted",
+              "content": "Show",
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "mhstO",
+          "name": "Password helper",
+          "fill": "$muted",
+          "content": "At least 8 characters",
+          "fontFamily": "$font",
+          "fontSize": 11,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "zN4g3",
+          "name": "Submit spacer",
+          "width": "fill_container",
+          "height": 20
+        },
+        {
+          "type": "frame",
+          "id": "RubN4",
+          "name": "Sign in primary action",
+          "width": "fill_container",
+          "height": 40,
+          "fill": "$rail-selected",
+          "cornerRadius": 4,
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "r4ZBcm",
+              "name": "Sign in primary label",
+              "fill": "#FFFFFF",
+              "content": "Sign in",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "700"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "F6IFUW",
+      "x": 2333,
+      "y": 1828,
+      "name": "Component · Chat panel · Conversation",
+      "reusable": true,
+      "clip": true,
+      "width": 268,
+      "height": 728,
+      "fill": "$surface",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "w1lw0",
+          "name": "Chat header",
+          "width": "fill_container",
+          "height": 48,
+          "padding": [
+            0,
+            14
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "e2VIr",
+              "name": "Thread title",
+              "fill": "$panel-text",
+              "content": "Can you review the files…",
+              "fontFamily": "$font",
+              "fontSize": 13,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "b6czIC",
+              "name": "Chat header actions",
+              "fill": "$panel-muted",
+              "content": "＋   ⋯",
+              "fontFamily": "$font",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "EMrhD",
+          "name": "Conversation transcript",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "padding": [
+            14,
+            14,
+            10,
+            14
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "G8IOr",
+              "name": "User message alignment",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "T8xZGT",
+                  "name": "User message",
+                  "width": 220,
+                  "fill": "$panel-selected",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": [
+                    11,
+                    13
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LZZZp",
+                      "name": "User message text",
+                      "fill": "$panel-text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Can you review the files in this directory? They are PDFs and I need their contents summarized.",
+                      "lineHeight": 1.4,
+                      "fontFamily": "$font",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "edUbT",
+                      "name": "User message metadata",
+                      "fill": "$panel-muted",
+                      "content": "16/04/2026 07:49 am                                      ⧉",
+                      "fontFamily": "$font",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "Y2x6a3",
+              "name": "Assistant response",
+              "fill": "$panel-text",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "I understand what you’re asking for, but I need to clarify my capabilities. I do not have access to the local filesystem or the PDFs in that directory.",
+              "lineHeight": 1.45,
+              "fontFamily": "$font",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "OcaZ5",
+              "name": "Assistant tool guidance",
+              "fill": "$panel-text",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "What I can help with:\n\n1. Create a Python script that scans a folder of PDFs, extracts metadata, generates filenames from titles, and renames them safely.\n\n2. Create a PowerShell script for Windows that performs the same steps.\n\n3. Outline the review workflow before you run it locally.",
+              "lineHeight": 1.45,
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "qx4Oy",
+          "name": "Chat composer",
+          "width": "fill_container",
+          "height": 108,
+          "fill": "$surface",
+          "cornerRadius": 6,
+          "stroke": "$line",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            12,
+            14
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "BgTv5",
+              "name": "Composer placeholder",
+              "fill": "$muted",
+              "content": "Ask anything…",
+              "fontFamily": "$font",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "SprvT",
+              "name": "Composer controls",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "kQ5Hy",
+                  "name": "Attach files action",
+                  "fill": "$panel-muted",
+                  "content": "Attach files",
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "ZD5Li",
+                  "name": "Selected model",
+                  "fill": "$panel-text",
+                  "content": "DeepSeek-v3.2 (default)",
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "WgWzg",
+                  "name": "Send message action",
+                  "fill": "$panel-muted",
+                  "content": "›",
+                  "fontFamily": "$font",
+                  "fontSize": 20,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "bRhjo",
+      "x": 2717,
+      "y": 1828,
+      "name": "Component · Edit workspace main panel",
+      "reusable": true,
+      "clip": true,
+      "width": 460,
+      "height": 728,
+      "fill": "$surface",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "ka4C1",
+          "name": "Edit workspace header",
+          "width": "fill_container",
+          "height": 56,
+          "padding": [
+            0,
+            20
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "O4E0q1",
+              "name": "Edit workspace title",
+              "fill": "$panel-text",
+              "content": "Edit workspace",
+              "fontFamily": "$font",
+              "fontSize": 18,
+              "fontWeight": "700"
+            },
+            {
+              "type": "text",
+              "id": "b8lLaf",
+              "name": "Edit workspace actions",
+              "fill": "$panel-muted",
+              "content": "⌫     □",
+              "fontFamily": "$font",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "MxFyn",
+          "name": "Workspace editor form",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "padding": [
+            18,
+            20,
+            20,
+            20
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "lMZPO",
+              "name": "Workspace name label",
+              "fill": "$panel-text",
+              "content": "Name",
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "Jy66R",
+              "name": "Workspace name field",
+              "width": "fill_container",
+              "height": 38,
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "padding": [
+                0,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "x7Ovg",
+                  "name": "Workspace name field value",
+                  "fill": "$panel-text",
+                  "content": "River",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "HhrSE",
+              "name": "Description spacer",
+              "width": "fill_container",
+              "height": 12
+            },
+            {
+              "type": "text",
+              "id": "V2Vv5",
+              "name": "Workspace description label",
+              "fill": "$panel-text",
+              "content": "Description",
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "iee1x",
+              "name": "Workspace description field",
+              "width": "fill_container",
+              "height": 64,
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "padding": [
+                0,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "mRjgN",
+                  "name": "Workspace description field value",
+                  "fill": "$panel-text",
+                  "content": "A workspace for managing River, a fintech startup.",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "KBC5E",
+              "name": "Model spacer",
+              "width": "fill_container",
+              "height": 12
+            },
+            {
+              "type": "text",
+              "id": "rL8S8",
+              "name": "Default model label",
+              "fill": "$panel-text",
+              "content": "Default model",
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "FuVCE",
+              "name": "Default model field",
+              "width": "fill_container",
+              "height": 38,
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "padding": [
+                0,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "SeEaz",
+                  "name": "Default model field value",
+                  "fill": "$panel-text",
+                  "content": "DeepSeek-v3.2                                      ⌄",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pw8o7",
+              "name": "Folders spacer",
+              "width": "fill_container",
+              "height": 12
+            },
+            {
+              "type": "text",
+              "id": "YVtrN",
+              "name": "Workspace folders label",
+              "fill": "$panel-text",
+              "content": "RAG & workspace folders",
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "Mrus4",
+              "name": "Workspace folders explanation",
+              "fill": "$muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "These folders appear in the Files view and, when RAG is enabled, are indexed daily for semantic RAG.",
+              "lineHeight": 1.3,
+              "fontFamily": "$font",
+              "fontSize": 10,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "EnBm7",
+              "name": "Workspace path input",
+              "width": "fill_container",
+              "height": 34,
+              "fill": "$surface",
+              "cornerRadius": 3,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "padding": [
+                0,
+                10
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "wb9lf",
+                  "name": "Workspace path input value",
+                  "fill": "$panel-text",
+                  "content": "C:\\Projects\\example                                      +",
+                  "fontFamily": "$font",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "DvAw3",
+              "name": "Configured workspace path",
+              "width": "fill_container",
+              "height": 28,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "bT9JW",
+                  "name": "Configured workspace path value",
+                  "fill": "$panel-text",
+                  "content": "C:\\Users\\brian\\OneDrive\\Documents\\River",
+                  "fontFamily": "$font",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "jbdJ6",
+                  "name": "RAG toggle and actions",
+                  "fill": "$panel-text",
+                  "content": "RAG   ▣   ↻   ×",
+                  "fontFamily": "$font",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "WZlO8",
+              "name": "Approval spacer",
+              "width": "fill_container",
+              "height": 12
+            },
+            {
+              "type": "text",
+              "id": "gkg5G",
+              "name": "Require approval label",
+              "fill": "$panel-text",
+              "content": "Require approval",
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "Cro6N",
+              "name": "Create approval row",
+              "width": "fill_container",
+              "height": 26,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "aUkMk",
+                  "name": "Create approval label",
+                  "fill": "$panel-text",
+                  "content": "Create",
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "Rziuz",
+                  "name": "Create approval toggle",
+                  "width": 24,
+                  "height": 14,
+                  "fill": "$rail-selected",
+                  "cornerRadius": 3,
+                  "padding": 2,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 2,
+                      "id": "BejAV",
+                      "name": "Create approval knob",
+                      "fill": "#FFFFFF",
+                      "width": 10,
+                      "height": 10
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Vyin0",
+              "name": "Read approval row",
+              "width": "fill_container",
+              "height": 26,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "xlrk7",
+                  "name": "Read approval label",
+                  "fill": "$panel-text",
+                  "content": "Read",
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "KL8gl",
+                  "name": "Read approval toggle",
+                  "width": 24,
+                  "height": 14,
+                  "fill": "$rail-selected",
+                  "cornerRadius": 3,
+                  "padding": 2,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 2,
+                      "id": "REQco",
+                      "name": "Read approval knob",
+                      "fill": "#FFFFFF",
+                      "width": 10,
+                      "height": 10
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PHkGm",
+              "name": "Update approval row",
+              "width": "fill_container",
+              "height": 26,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "cO1I3",
+                  "name": "Update approval label",
+                  "fill": "$panel-text",
+                  "content": "Update",
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "S1B3PX",
+                  "name": "Update approval toggle",
+                  "width": 24,
+                  "height": 14,
+                  "fill": "$rail-selected",
+                  "cornerRadius": 3,
+                  "padding": 2,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 2,
+                      "id": "nqfos",
+                      "name": "Update approval knob",
+                      "fill": "#FFFFFF",
+                      "width": 10,
+                      "height": 10
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "GI9pX",
+              "name": "Delete approval row",
+              "width": "fill_container",
+              "height": 26,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "jb792",
+                  "name": "Delete approval label",
+                  "fill": "$panel-text",
+                  "content": "Delete",
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "X7p1j",
+                  "name": "Delete approval toggle",
+                  "width": 24,
+                  "height": 14,
+                  "fill": "$rail-selected",
+                  "cornerRadius": 3,
+                  "padding": 2,
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 2,
+                      "id": "PbaaQ",
+                      "name": "Delete approval knob",
+                      "fill": "#FFFFFF",
+                      "width": 10,
+                      "height": 10
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "mg3wQ",
+              "name": "Tools spacer",
+              "width": "fill_container",
+              "height": 12
+            },
+            {
+              "type": "text",
+              "id": "R9hYlk",
+              "name": "Tool allow list label",
+              "fill": "$panel-text",
+              "content": "Tool allow list",
+              "fontFamily": "$font",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "ZPxA8",
+              "name": "Tool allow list explanation",
+              "fill": "$muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Choose the built-in tool groups and individual functions this workspace may offer to agents.",
+              "lineHeight": 1.3,
+              "fontFamily": "$font",
+              "fontSize": 10,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "Ld5pj",
+              "name": "Built-in tools surface",
+              "width": "fill_container",
+              "height": 48,
+              "fill": "#F7F7F7",
+              "cornerRadius": 6,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "QoX9s",
+                  "name": "Built-in tools label",
+                  "fill": "$panel-text",
+                  "content": "Builtin Tools\nEnable tools provided by the engine.",
+                  "lineHeight": 1.3,
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "j9wTc",
+                  "name": "Built-in tools action",
+                  "fill": "$panel-text",
+                  "content": "▣    ⌄",
+                  "fontFamily": "$font",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "chatStandalone1",
+      "enabled": false,
+      "x": 2344,
+      "y": 1828,
+      "name": "Component · Chat panel · Conversation",
+      "reusable": true,
+      "clip": true,
+      "width": 320,
+      "height": 748,
+      "fill": "$surface",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "chatHeader1",
+          "name": "Chat header",
+          "width": "fill_container",
+          "height": 48,
+          "layout": "horizontal",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "padding": [0, 14],
+          "children": [
+            {"type":"text","id":"chatTitle1","name":"Thread title","fill":"$panel-text","content":"Can you review the files…","fontFamily":"$font","fontSize":13,"fontWeight":"600"},
+            {"type":"text","id":"chatActions1","name":"Chat header actions","fill":"$panel-muted","content":"＋   ⋯","fontFamily":"$font","fontSize":16,"fontWeight":"normal"}
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "chatTranscript1",
+          "name": "Conversation transcript",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "padding": [14, 14, 10, 14],
+          "children": [
+            {
+              "type": "frame",
+              "id": "chatUserAlign1",
+              "name": "User message alignment",
+              "width": "fill_container",
+              "layout": "horizontal",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "chatUserMessage1",
+                  "name": "User message",
+                  "width": 246,
+                  "fill": "$panel-selected",
+                  "cornerRadius": 6,
+                  "layout": "vertical",
+                  "gap": 6,
+                  "padding": [11, 13],
+                  "children": [
+                    {"type":"text","id":"chatUserText1","name":"User message text","fill":"$panel-text","textGrowth":"fixed-width","width":"fill_container","content":"Can you review the files in this directory? They are PDFs and I need their contents summarized.","lineHeight":1.4,"fontFamily":"$font","fontSize":12,"fontWeight":"normal"},
+                    {"type":"text","id":"chatUserMeta1","name":"User message metadata","fill":"$panel-muted","content":"16/04/2026 07:49 am                                      ⧉","fontFamily":"$font","fontSize":9,"fontWeight":"normal"}
+                  ]
+                }
+              ]
+            },
+            {"type":"text","id":"chatAssistantText1","name":"Assistant response","fill":"$panel-text","textGrowth":"fixed-width","width":"fill_container","content":"I understand what you’re asking for, but I need to clarify my capabilities. I do not have access to the local filesystem or the PDFs in that directory.","lineHeight":1.45,"fontFamily":"$font","fontSize":12,"fontWeight":"normal"},
+            {"type":"text","id":"chatAssistantGuidance1","name":"Assistant tool guidance","fill":"$panel-text","textGrowth":"fixed-width","width":"fill_container","content":"What I can help with:\n\n1. Create a Python script that scans a folder of PDFs, extracts metadata, generates filenames from titles, and renames them safely.\n\n2. Create a PowerShell script for Windows that performs the same steps.\n\n3. Outline the review workflow before you run it locally.","lineHeight":1.45,"fontFamily":"$font","fontSize":11,"fontWeight":"normal"}
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "chatComposer1",
+          "name": "Chat composer",
+          "width": "fill_container",
+          "height": 108,
+          "fill": "$surface",
+          "stroke": "$line",
+          "strokeWidth": 1,
+          "cornerRadius": 6,
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [12, 14],
+          "children": [
+            {"type":"text","id":"chatComposerPlaceholder1","name":"Composer placeholder","fill":"$muted","content":"Ask anything…","fontFamily":"$font","fontSize":12,"fontWeight":"normal"},
+            {"type":"frame","id":"chatComposerControls1","name":"Composer controls","width":"fill_container","layout":"horizontal","justifyContent":"space_between","alignItems":"center","children":[
+              {"type":"text","id":"chatAttach1","name":"Attach files action","fill":"$panel-muted","content":"Attach files","fontFamily":"$font","fontSize":11,"fontWeight":"normal"},
+              {"type":"text","id":"chatModel1","name":"Selected model","fill":"$panel-text","content":"DeepSeek-v3.2 (default)","fontFamily":"$font","fontSize":11,"fontWeight":"normal"},
+              {"type":"text","id":"chatSend1","name":"Send message action","fill":"$panel-muted","content":"›","fontFamily":"$font","fontSize":20,"fontWeight":"normal"}
+            ]}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "editWorkspace1",
+      "enabled": false,
+      "x": 2728,
+      "y": 1828,
+      "name": "Component · Edit workspace main panel",
+      "reusable": true,
+      "clip": true,
+      "width": 460,
+      "height": 748,
+      "fill": "$surface",
+      "layout": "vertical",
+      "children": [
+        {"type":"frame","id":"editHeader1","name":"Edit workspace header","width":"fill_container","height":56,"layout":"horizontal","justifyContent":"space_between","alignItems":"center","padding":[0,20],"children":[
+          {"type":"text","id":"editTitle1","name":"Edit workspace title","fill":"$panel-text","content":"Edit workspace","fontFamily":"$font","fontSize":18,"fontWeight":"700"},
+          {"type":"text","id":"editActions1","name":"Edit workspace actions","fill":"$panel-muted","content":"⌫     □","fontFamily":"$font","fontSize":15,"fontWeight":"normal"}
+        ]},
+        {"type":"frame","id":"editForm1","name":"Workspace editor form","width":"fill_container","height":"fill_container","layout":"vertical","gap":0,"padding":[18,20,20,20],"children":[
+          {"type":"text","id":"editNameLabel1","name":"Workspace name label","fill":"$panel-text","content":"Name","fontFamily":"$font","fontSize":11,"fontWeight":"600"},
+          {"type":"frame","id":"editNameField1","name":"Workspace name field","width":"fill_container","height":38,"fill":"$surface","stroke":"$line","strokeWidth":1,"cornerRadius":3,"layout":"horizontal","alignItems":"center","padding":[0,10],"children":[{"type":"text","id":"editNameValue1","name":"Workspace name value","fill":"$panel-text","content":"River","fontFamily":"$font","fontSize":12,"fontWeight":"normal"}]},
+          {"type":"frame","id":"editDescriptionGap1","name":"Description spacer","width":"fill_container","height":12},
+          {"type":"text","id":"editDescriptionLabel1","name":"Workspace description label","fill":"$panel-text","content":"Description","fontFamily":"$font","fontSize":11,"fontWeight":"600"},
+          {"type":"frame","id":"editDescriptionField1","name":"Workspace description field","width":"fill_container","height":64,"fill":"$surface","stroke":"$line","strokeWidth":1,"cornerRadius":3,"layout":"horizontal","alignItems":"center","padding":[0,10],"children":[{"type":"text","id":"editDescriptionValue1","name":"Workspace description value","fill":"$panel-text","content":"A workspace for managing River, a fintech startup.","fontFamily":"$font","fontSize":12,"fontWeight":"normal"}]},
+          {"type":"frame","id":"editModelGap1","name":"Model spacer","width":"fill_container","height":12},
+          {"type":"text","id":"editModelLabel1","name":"Default model label","fill":"$panel-text","content":"Default model","fontFamily":"$font","fontSize":11,"fontWeight":"600"},
+          {"type":"frame","id":"editModelField1","name":"Default model field","width":"fill_container","height":38,"fill":"$surface","stroke":"$line","strokeWidth":1,"cornerRadius":3,"layout":"horizontal","alignItems":"center","padding":[0,10],"children":[{"type":"text","id":"editModelValue1","name":"Default model value","fill":"$panel-text","content":"DeepSeek-v3.2                                      ⌄","fontFamily":"$font","fontSize":12,"fontWeight":"normal"}]},
+          {"type":"frame","id":"editFolderGap1","name":"Folders spacer","width":"fill_container","height":12},
+          {"type":"text","id":"editFoldersLabel1","name":"Workspace folders label","fill":"$panel-text","content":"RAG & workspace folders","fontFamily":"$font","fontSize":11,"fontWeight":"600"},
+          {"type":"text","id":"editFoldersHelp1","name":"Workspace folders explanation","fill":"$muted","textGrowth":"fixed-width","width":"fill_container","content":"These folders appear in the Files view and, when RAG is enabled, are indexed daily for semantic RAG.","lineHeight":1.3,"fontFamily":"$font","fontSize":10,"fontWeight":"normal"},
+          {"type":"frame","id":"editPathField1","name":"Workspace path input","width":"fill_container","height":34,"fill":"$surface","stroke":"$line","strokeWidth":1,"cornerRadius":3,"layout":"horizontal","alignItems":"center","padding":[0,10],"children":[{"type":"text","id":"editPathValue1","name":"Workspace path input value","fill":"$muted","content":"C:\\Projects\\example                                      +","fontFamily":"$font","fontSize":10,"fontWeight":"normal"}]},
+          {"type":"frame","id":"editConfiguredPath1","name":"Configured workspace path","width":"fill_container","height":28,"layout":"horizontal","justifyContent":"space_between","alignItems":"center","children":[{"type":"text","id":"editConfiguredPathValue1","name":"Configured workspace path value","fill":"$panel-text","content":"C:\\Users\\brian\\OneDrive\\Documents\\River","fontFamily":"$font","fontSize":10,"fontWeight":"normal"},{"type":"text","id":"editRagActions1","name":"RAG toggle and actions","fill":"$panel-text","content":"RAG   ▣   ↻   ×","fontFamily":"$font","fontSize":10,"fontWeight":"normal"}]},
+          {"type":"frame","id":"editApprovalGap1","name":"Approval spacer","width":"fill_container","height":12},
+          {"type":"text","id":"editApprovalLabel1","name":"Require approval label","fill":"$panel-text","content":"Require approval","fontFamily":"$font","fontSize":11,"fontWeight":"600"},
+          {"type":"text","id":"editApprovalRows1","name":"Approval controls","fill":"$panel-text","textGrowth":"fixed-width","width":"fill_container","content":"Create                                                            ▣\nRead                                                               ▣\nUpdate                                                           ▣\nDelete                                                            ▣","lineHeight":2.15,"fontFamily":"$font","fontSize":11,"fontWeight":"normal"},
+          {"type":"text","id":"editToolsLabel1","name":"Tool allow list label","fill":"$panel-text","content":"Tool allow list","fontFamily":"$font","fontSize":11,"fontWeight":"600"},
+          {"type":"text","id":"editToolsHelp1","name":"Tool allow list explanation","fill":"$muted","textGrowth":"fixed-width","width":"fill_container","content":"Choose the built-in tool groups and individual functions this workspace may offer to agents.","lineHeight":1.3,"fontFamily":"$font","fontSize":10,"fontWeight":"normal"},
+          {"type":"frame","id":"editBuiltinTools1","name":"Built-in tools surface","width":"fill_container","height":48,"fill":"#F7F7F7","stroke":"$line","strokeWidth":1,"cornerRadius":6,"layout":"horizontal","justifyContent":"space_between","alignItems":"center","padding":[0,12],"children":[{"type":"text","id":"editBuiltinToolsText1","name":"Built-in tools label","fill":"$panel-text","content":"Builtin Tools\nEnable tools provided by the engine.","lineHeight":1.3,"fontFamily":"$font","fontSize":11,"fontWeight":"normal"},{"type":"text","id":"editBuiltinToolsAction1","name":"Built-in tools action","fill":"$panel-text","content":"▣    ⌄","fontFamily":"$font","fontSize":11,"fontWeight":"normal"}]}
+        ]}
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "acctPanel1",
+      "x": 1760,
+      "y": 1828,
+      "name": "Component · Account panel · Sign in",
+      "reusable": true,
+      "width": 520,
+      "height": 748,
+      "fill": "$surface",
+      "layout": "vertical",
+      "gap": 0,
+      "padding": 28,
+      "children": [
+        {"type":"text","id":"acctTitle1","name":"Account heading","fill":"$ink","content":"Account","fontFamily":"$font","fontSize":24,"fontWeight":"700"},
+        {"type":"frame","id":"acctGapHeading1","name":"Heading spacer","width":"fill_container","height":8},
+        {"type":"text","id":"acctExplanation1","name":"Account explanation","fill":"$panel-text","textGrowth":"fixed-width","width":"fill_container","content":"Sign in to connect this desktop app to your Subconscious account. Your local engine remains private and uses its own joining token.","lineHeight":1.4,"fontFamily":"$font","fontSize":13,"fontWeight":"normal"},
+        {"type":"frame","id":"acctGapModes1","name":"Mode spacer","width":"fill_container","height":20},
+        {"type":"frame","id":"acctModes1","name":"Account mode selector","width":210,"height":32,"fill":"#F2F2F2","stroke":"$line","strokeWidth":1,"cornerRadius":4,"layout":"horizontal","padding":2,"children":[
+          {"type":"frame","id":"acctSignInMode1","name":"Sign in selected","width":"fill_container","height":"fill_container","fill":"$surface","stroke":"$line","strokeWidth":1,"cornerRadius":3,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"acctSignInModeText1","name":"Sign in selected label","fill":"$panel-text","content":"Sign in","fontFamily":"$font","fontSize":12,"fontWeight":"600"}]},
+          {"type":"frame","id":"acctCreateMode1","name":"Create account mode","width":"fill_container","height":"fill_container","cornerRadius":3,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"acctCreateModeText1","name":"Create account label","fill":"$panel-muted","content":"Create account","fontFamily":"$font","fontSize":12,"fontWeight":"600"}]}
+        ]},
+        {"type":"frame","id":"acctGapEmail1","name":"Email spacer","width":"fill_container","height":20},
+        {"type":"text","id":"acctEmailLabel1","name":"Email address label","fill":"$panel-text","content":"Email address","fontFamily":"$font","fontSize":12,"fontWeight":"600"},
+        {"type":"frame","id":"acctEmailField1","name":"Email address field","width":"fill_container","height":40,"fill":"$surface","stroke":"$line","strokeWidth":1,"cornerRadius":3,"layout":"horizontal","alignItems":"center","padding":[0,12],"children":[{"type":"text","id":"acctEmailValue1","name":"Email address value","fill":"$muted","content":"Enter your email address","fontFamily":"$font","fontSize":13,"fontWeight":"normal"}]},
+        {"type":"frame","id":"acctGapPassword1","name":"Password spacer","width":"fill_container","height":20},
+        {"type":"text","id":"acctPasswordLabel1","name":"Password label","fill":"$panel-text","content":"Password","fontFamily":"$font","fontSize":12,"fontWeight":"600"},
+        {"type":"frame","id":"acctPasswordField1","name":"Password field","width":"fill_container","height":40,"fill":"$surface","stroke":"$line","strokeWidth":1,"cornerRadius":3,"layout":"horizontal","justifyContent":"space_between","alignItems":"center","padding":[0,12],"children":[{"type":"text","id":"acctPasswordValue1","name":"Password value","fill":"$panel-text","content":"••••••••","fontFamily":"$font","fontSize":13,"fontWeight":"normal"},{"type":"text","id":"acctPasswordShow1","name":"Password show action","fill":"$panel-muted","content":"Show","fontFamily":"$font","fontSize":11,"fontWeight":"600"}]},
+        {"type":"text","id":"acctPasswordHelper1","name":"Password helper","fill":"$muted","content":"At least 8 characters","fontFamily":"$font","fontSize":11,"fontWeight":"normal"},
+        {"type":"frame","id":"acctGapSubmit1","name":"Submit spacer","width":"fill_container","height":20},
+        {"type":"frame","id":"acctSubmit1","name":"Sign in primary action","width":"fill_container","height":40,"fill":"$rail-selected","cornerRadius":4,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"acctSubmitText1","name":"Sign in primary label","fill":"#FFFFFF","content":"Sign in","fontFamily":"$font","fontSize":13,"fontWeight":"700"}]}
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "sidebarButtonBase1",
+      "x": 3240,
+      "y": 1828,
+      "name": "Component · Sidebar icon button",
+      "reusable": true,
+      "width": 32,
+      "height": 32,
+      "fill": "$surface",
+      "cornerRadius": 4,
+      "layout": "horizontal",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "sidebarButtonIconSlot1",
+          "name": "Icon slot",
+          "width": 20,
+          "height": 20
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "headerButtonBase1",
+      "x": 3292,
+      "y": 1828,
+      "name": "Component · Header icon button",
+      "reusable": true,
+      "width": 32,
+      "height": 32,
+      "fill": "$surface",
+      "cornerRadius": 4,
+      "layout": "horizontal",
+      "justifyContent": "center",
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "headerButtonIconSlot1",
+          "name": "Icon slot",
+          "width": 20,
+          "height": 20
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "captionBarV2",
+      "x": 3340,
+      "y": 1828,
+      "name": "Component · Windows caption bar · source parity",
+      "reusable": true,
+      "clip": true,
+      "width": 1024,
+      "height": 40,
+      "fill": "$caption-bg",
+      "stroke": "$line",
+      "strokeWidth": {"bottom": 1},
+      "layout": "horizontal",
+      "children": [
+        {
+          "type": "frame",
+          "id": "captionDragRegionV2",
+          "name": "Caption drag region",
+          "width": "fill_container",
+          "height": 40,
+          "layout": "horizontal",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "captionLogoSlotV2",
+              "name": "Application logo slot",
+              "width": 40,
+              "height": 40,
+              "layout": "horizontal",
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ref",
+                  "id": "captionLogoVectorV2",
+                  "name": "Subconscious logo vector",
+                  "ref": "dNU7y",
+                  "layoutPosition": "auto",
+                  "width": 13,
+                  "height": 20
+                }
+              ]
+            },
+            {"type":"frame","id":"captionTitleGapV2","name":"Title gap","width":3,"height":40},
+            {"type":"text","id":"captionTitleV2","name":"Application title","fill":"$ink","content":"Subconscious","fontFamily":"$font","fontSize":14,"fontWeight":"600"},
+            {"type":"frame","id":"captionStatusSpacerV2","name":"Caption flexible spacer","width":"fill_container","height":40},
+            {"type":"ellipse","id":"captionStatusDotV2","name":"Connection indicator","width":8,"height":8,"fill":"$online"},
+            {"type":"frame","id":"captionStatusGapV2","name":"Connection label gap","width":6,"height":40},
+            {"type":"text","id":"captionStatusTextV2","name":"Connection label","fill":"$muted","content":"connected","fontFamily":"$font","fontSize":12,"fontWeight":"normal"},
+            {"type":"frame","id":"captionStatusEndGapV2","name":"Connection trailing gap","width":12,"height":40}
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "captionPanelsV2",
+          "name": "Panel visibility controls",
+          "width": 126,
+          "height": 40,
+          "layout": "horizontal",
+          "children": [
+            {"type":"frame","id":"captionContextButtonV2","name":"Context panel visibility button","width":42,"height":40,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"captionContextGlyphV2","name":"Context panel glyph","fill":"$ink","content":"◧","fontFamily":"$font","fontSize":16,"fontWeight":"normal"}]},
+            {"type":"frame","id":"captionMainButtonV2","name":"Main panel visibility button","width":42,"height":40,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"captionMainGlyphV2","name":"Main panel glyph","fill":"$ink","content":"▥","fontFamily":"$font","fontSize":16,"fontWeight":"normal"}]},
+            {"type":"frame","id":"captionChatButtonV2","name":"Chat panel visibility button","width":42,"height":40,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"captionChatGlyphV2","name":"Chat panel glyph","fill":"$ink","content":"◨","fontFamily":"$font","fontSize":16,"fontWeight":"normal"}]}
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "captionWorkspacePickerV2",
+          "name": "Thread workspace picker",
+          "width": 180,
+          "height": 40,
+          "layout": "horizontal",
+          "alignItems": "center",
+          "padding": [0,12],
+          "children": [
+            {"type":"text","id":"captionWorkspaceGlyphV2","name":"Workspace folder glyph","fill":"$ink","content":"⌂","fontFamily":"$font","fontSize":16,"fontWeight":"normal"},
+            {"type":"frame","id":"captionWorkspaceGapV2","name":"Workspace label gap","width":7,"height":40},
+            {"type":"text","id":"captionWorkspaceLabelV2","name":"Workspace label","fill":"$ink","content":"General","fontFamily":"$font","fontSize":12,"fontWeight":"normal"},
+            {"type":"frame","id":"captionWorkspaceSpacerV2","name":"Workspace picker spacer","width":"fill_container","height":40},
+            {"type":"text","id":"captionWorkspaceChevronV2","name":"Workspace picker chevron","fill":"$ink","content":"⌄","fontFamily":"$font","fontSize":12,"fontWeight":"normal"}
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "captionWindowButtonsV2",
+          "name": "Window caption buttons",
+          "width": 138,
+          "height": 40,
+          "layout": "horizontal",
+          "children": [
+            {"type":"frame","id":"captionMinimizeV2","name":"Minimize window button","width":46,"height":40,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"captionMinimizeGlyphV2","name":"Minimize glyph","fill":"$rail-icon","content":"−","fontFamily":"$font","fontSize":16,"fontWeight":"normal"}]},
+            {"type":"frame","id":"captionMaximizeV2","name":"Maximize window button","width":46,"height":40,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"captionMaximizeGlyphV2","name":"Maximize glyph","fill":"$rail-icon","content":"□","fontFamily":"$font","fontSize":12,"fontWeight":"normal"}]},
+            {"type":"frame","id":"captionCloseV2","name":"Close window button","width":46,"height":40,"layout":"horizontal","justifyContent":"center","alignItems":"center","children":[{"type":"text","id":"captionCloseGlyphV2","name":"Close glyph","fill":"$rail-icon","content":"×","fontFamily":"$font","fontSize":17,"fontWeight":"normal"}]}
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "surface": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "ink": {
+      "type": "color",
+      "value": "#111111"
+    },
+    "muted": {
+      "type": "color",
+      "value": "#666666"
+    },
+    "accent": {
+      "type": "color",
+      "value": "#000000"
+    },
+    "line": {
+      "type": "color",
+      "value": "#D9D9D9"
+    },
+    "font": {
+      "type": "string",
+      "value": "Inter"
+    },
+    "canvas": {
+      "type": "color",
+      "value": "#F5F5F5"
+    },
+    "rail-icon": {
+      "type": "color",
+      "value": "#5F5F5F"
+    },
+    "rail-selected": {
+      "type": "color",
+      "value": "#000000"
+    },
+    "online": {
+      "type": "color",
+      "value": "#238636"
+    },
+    "caption-bg": {
+      "type": "color",
+      "value": "#FAFAFA"
+    },
+    "panel-selected": {
+      "type": "color",
+      "value": "#D8D8D8"
+    },
+    "panel-border": {
+      "type": "color",
+      "value": "#E2E2E2"
+    },
+    "panel-text": {
+      "type": "color",
+      "value": "#171717"
+    },
+    "panel-muted": {
+      "type": "color",
+      "value": "#4B4B4B"
+    }
+  },
+  "fileToken": "26e65aaf-7a4f-4f56-9c70-9cf12a2aae24"
+}

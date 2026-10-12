@@ -1,0 +1,73 @@
+{
+  "repository": "https://github.com/microsoft/fluentui-system-icons",
+  "commit": "a563cf9166f4f91aa617557ed272612b7f0a2f72",
+  "generatedAtUtc": "2026-10-05T13:21:45.1614354Z",
+  "assets": [
+    {
+      "icon": "apps_24_regular",
+      "file": "ic_fluent_apps_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Apps/SVG/ic_fluent_apps_24_regular.svg",
+      "sha256": "49ACD3CA4B7FFFCE746312A729EBC007EC82D3D7372BE9830577F50B541FA6DF"
+    },
+    {
+      "icon": "apps_24_filled",
+      "file": "ic_fluent_apps_24_filled.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Apps/SVG/ic_fluent_apps_24_filled.svg",
+      "sha256": "2F129B85454551F6E62525B34A19F113956A71ED4D278A897A1DF51CA222CE9C"
+    },
+    {
+      "icon": "chat_24_regular",
+      "file": "ic_fluent_chat_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Chat/SVG/ic_fluent_chat_24_regular.svg",
+      "sha256": "D6D2F402B87A7F79600F397B49AA1A4C40920B8EAE30091E8286A583A1A7C003"
+    },
+    {
+      "icon": "chat_24_filled",
+      "file": "ic_fluent_chat_24_filled.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Chat/SVG/ic_fluent_chat_24_filled.svg",
+      "sha256": "CF3884CE8B0457BB18F8415502BAD8BF1B4A5260A2B4347A5CC03674C8831AF6"
+    },
+    {
+      "icon": "document_copy_24_regular",
+      "file": "ic_fluent_document_copy_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Document%20Copy/SVG/ic_fluent_document_copy_24_regular.svg",
+      "sha256": "C5B03264974B14B3659166C7C9D7CD9E672D19A2D4C06CE6064E2FF3C7827BE5"
+    },
+    {
+      "icon": "document_copy_24_filled",
+      "file": "ic_fluent_document_copy_24_filled.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Document%20Copy/SVG/ic_fluent_document_copy_24_filled.svg",
+      "sha256": "0007B0A70D3BE31782B6FB59484BA51688B2BA40612EB17F3FFA827EE7069A13"
+    },
+    {
+      "icon": "settings_24_regular",
+      "file": "ic_fluent_settings_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Settings/SVG/ic_fluent_settings_24_regular.svg",
+      "sha256": "5AC05E6E11C9EC9F24703091C42CA1F5C91F4032CB0EEE35C892D1872A38871B"
+    },
+    {
+      "icon": "settings_24_filled",
+      "file": "ic_fluent_settings_24_filled.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Settings/SVG/ic_fluent_settings_24_filled.svg",
+      "sha256": "C19FF922990ADD433C3D5DDC2FB9843B3E4D31C1074EF05295D46C4EC8F23C83"
+    },
+    {
+      "icon": "person_24_regular",
+      "file": "ic_fluent_person_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Person/SVG/ic_fluent_person_24_regular.svg",
+      "sha256": "4F9862044A1AFFF206C2154D37D32CA652C4B9BA8BEB615510316F473E4D862F"
+    },
+    {
+      "icon": "person_24_filled",
+      "file": "ic_fluent_person_24_filled.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Person/SVG/ic_fluent_person_24_filled.svg",
+      "sha256": "1840F06C141D14A9CE0CF5C25056037B58CEF77CDB5B8AE216AE054375590380"
+    },
+    {
+      "icon": "add_20_regular",
+      "file": "ic_fluent_add_20_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/a563cf9166f4f91aa617557ed272612b7f0a2f72/assets/Add/SVG/ic_fluent_add_20_regular.svg",
+      "sha256": "FDF9FEFAF083FF2349AC94AFD47AAB8ECB554650781C5797176B9D6AD3CAEE05"
+    }
+  ]
+}

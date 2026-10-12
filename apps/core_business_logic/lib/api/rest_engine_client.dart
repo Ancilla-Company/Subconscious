@@ -281,17 +281,37 @@ final class RestEngineClient {
     ),
   );
 
+  /// Overwrites a workspace file.
+  ///
+  /// With [expectedVersion] the engine refuses the write (HTTP 409, see
+  /// [EngineApiException.isVersionConflict]) when the file on disk no longer
+  /// has that version, so an editor never silently replaces someone else's
+  /// change.
   Future<WorkspaceFileContent> writeFile({
     required String workspaceUuid,
     required int rootIndex,
     required String path,
     required String content,
+    String? expectedVersion,
   }) async => WorkspaceFileContent.fromJson(
     await _sendMapWithQuery(
       'PUT',
       'workspaces/${_segment(workspaceUuid)}/files/content',
-      <String, dynamic>{'content': content},
+      <String, dynamic>{'content': content, 'expectedVersion': ?expectedVersion},
       <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    ),
+  );
+
+  /// Version and size of a file on disk without transferring its content.
+  Future<WorkspaceFileVersion> fileVersion({
+    required String workspaceUuid,
+    required int rootIndex,
+    required String path,
+  }) async => WorkspaceFileVersion.fromJson(
+    await _getMap(
+      'workspaces/${_segment(workspaceUuid)}/files/version',
+      authenticate: true,
+      query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
     ),
   );
 
@@ -304,6 +324,25 @@ final class RestEngineClient {
       'POST',
       'workspaces/${_segment(workspaceUuid)}/files/directory',
       query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    ),
+  );
+
+  Future<WorkspaceFileEntry> moveWorkspacePath({
+    required String workspaceUuid,
+    required int sourceRootIndex,
+    required String sourcePath,
+    required int destinationRootIndex,
+    required String destinationPath,
+  }) async => WorkspaceFileEntry.fromJson(
+    await _sendMap(
+      'POST',
+      'workspaces/${_segment(workspaceUuid)}/files/move',
+      <String, dynamic>{
+        'sourceRootIndex': sourceRootIndex,
+        'sourcePath': sourcePath,
+        'destinationRootIndex': destinationRootIndex,
+        'destinationPath': destinationPath,
+      },
     ),
   );
 
@@ -422,6 +461,18 @@ final class RestEngineClient {
             .toList(growable: false),
         EngineSetting.fromJson,
       );
+
+  /// Deletes the settings that [getSettings] would return for the same
+  /// filters. A [key] or [tag] is required, and the number of removed rows is
+  /// returned.
+  Future<int> deleteSettings({String? key, String? tag, String? client}) async {
+    final dynamic value = await _request(
+      'DELETE',
+      'settings',
+      query: <String, String>{'key': ?key, 'tag': ?tag, 'client': ?client},
+    );
+    return value is Map ? (value['deleted'] as num?)?.toInt() ?? 0 : 0;
+  }
 
   Future<void> close() async => _client.close();
 

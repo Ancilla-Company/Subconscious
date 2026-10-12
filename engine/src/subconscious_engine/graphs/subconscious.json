@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "graph_id": "subconscious.meta.daily",
+  "kind": "subconscious",
+  "entry_node": "reflect",
+  "description": "Daily, telemetry-gated reflection over foreground execution friction.",
+  "nodes": [
+    {
+      "id": "reflect",
+      "type": "llm",
+      "model": "$subconscious",
+      "system_prompt": "You improve future assistant behavior from verified execution evidence. Inspect only the supplied telemetry run IDs and current context assets. Make narrow, reversible improvements; never invent user preferences. Candidate runs: {{ state.candidate_run_ids }}",
+      "tools": [
+        "subconscious:read_execution_telemetry",
+        "subconscious:read_context_asset",
+        "subconscious:write_user_context",
+        "subconscious:write_skill",
+        "subconscious:write_prompt_override"
+      ],
+      "context": {
+        "context_window": 65536,
+        "reserved_output_tokens": 8192,
+        "overflow_strategy": "summarize"
+      },
+      "transitions": [{"target": "done"}]
+    },
+    {"id": "done", "type": "end", "transitions": []}
+  ]
+}

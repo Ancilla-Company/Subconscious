@@ -7,24 +7,24 @@
 
 namespace {
 
-/// Window attribute that enables dark mode window decorations.
-///
-/// Redefined in case the developer's machine has a Windows SDK older than
-/// version 10.0.22000.0.
-/// See: https://docs.microsoft.com/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
+/// Flutter renders the caption, while DWM renders the resize frame, shadow,
+/// and rounded perimeter. These attributes are redefined for older SDKs.
+/// See: https://learn.microsoft.com/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
 
+constexpr DWORD kRoundWindowCorners = 2;
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
-
-/// Registry key for app theme preference.
-///
-/// A value of 0 indicates apps should use dark mode. A non-zero or missing
-/// value indicates apps should use light mode.
-constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
-  L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
-constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -144,6 +144,24 @@ bool Win32Window::Create(const std::wstring& title,
     return false;
   }
 
+  // Set both per-window icon sizes. Windows uses the large icon for the
+  // taskbar and window switcher, and the small icon for compact surfaces.
+  HINSTANCE module = GetModuleHandle(nullptr);
+  HICON small_icon = reinterpret_cast<HICON>(LoadImage(
+      module, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON,
+      Scale(16, scale_factor), Scale(16, scale_factor), LR_SHARED));
+  HICON large_icon = reinterpret_cast<HICON>(LoadImage(
+      module, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON,
+      Scale(32, scale_factor), Scale(32, scale_factor), LR_SHARED));
+  if (small_icon) {
+    SendMessage(window, WM_SETICON, ICON_SMALL,
+                reinterpret_cast<LPARAM>(small_icon));
+  }
+  if (large_icon) {
+    SendMessage(window, WM_SETICON, ICON_BIG,
+                reinterpret_cast<LPARAM>(large_icon));
+  }
+
   UpdateTheme(window);
 
   return OnCreate();
@@ -259,6 +277,17 @@ HWND Win32Window::GetHandle() {
   return window_handle_;
 }
 
+void Win32Window::SetFrameAppearance(COLORREF border_color,
+                                     COLORREF caption_color,
+                                     bool use_dark_mode) {
+  frame_border_color_ = border_color;
+  frame_caption_color_ = caption_color;
+  use_dark_mode_ = use_dark_mode;
+  if (window_handle_) {
+    UpdateTheme(window_handle_);
+  }
+}
+
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
 }
@@ -273,16 +302,13 @@ void Win32Window::OnDestroy() {
 }
 
 void Win32Window::UpdateTheme(HWND const window) {
-  DWORD light_mode;
-  DWORD light_mode_size = sizeof(light_mode);
-  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
-                               kGetPreferredBrightnessRegValue,
-                               RRF_RT_REG_DWORD, nullptr, &light_mode,
-                               &light_mode_size);
-
-  if (result == ERROR_SUCCESS) {
-    BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                          &enable_dark_mode, sizeof(enable_dark_mode));
-  }
+  const BOOL immersive_dark_mode = use_dark_mode_ ? TRUE : FALSE;
+  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &immersive_dark_mode, sizeof(immersive_dark_mode));
+  DwmSetWindowAttribute(window, DWMWA_BORDER_COLOR, &frame_border_color_,
+                        sizeof(frame_border_color_));
+  DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR, &frame_caption_color_,
+                        sizeof(frame_caption_color_));
+  DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &kRoundWindowCorners, sizeof(kRoundWindowCorners));
 }

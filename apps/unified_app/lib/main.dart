@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import 'features/account/account_controller.dart';
@@ -116,7 +115,6 @@ final class SubconsciousApp extends StatelessWidget {
           GlobalMaterialLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,
-          quill.FlutterQuillLocalizations.delegate,
         ],
         home: DashboardPage(
           controller: dashboardController,

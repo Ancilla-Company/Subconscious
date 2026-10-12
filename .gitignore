@@ -7,3 +7,18 @@ coverage/
 *.iml
 .idea/
 .DS_Store
+
+# Python engine
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+*.egg-info/
+
+# Browser extension
+apps/chromium_extension/.test-profile/
+apps/chromium_extension/screenshots/
+
+# IDE
+continue.txt

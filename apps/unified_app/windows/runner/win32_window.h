@@ -49,6 +49,11 @@ class Win32Window {
   // window properties. Returns nullptr if the window has been destroyed.
   HWND GetHandle();
 
+  // Updates the native DWM frame to match the Flutter color scheme.
+  void SetFrameAppearance(COLORREF border_color,
+                          COLORREF caption_color,
+                          bool use_dark_mode);
+
   // If true, closing this window will quit the application.
   void SetQuitOnClose(bool quit_on_close);
 
@@ -87,10 +92,13 @@ class Win32Window {
   // Retrieves a class instance pointer for |window|
   static Win32Window* GetThisFromHandle(HWND const window) noexcept;
 
-  // Update the window frame's theme to match the system theme.
-  static void UpdateTheme(HWND const window);
+  // Applies the cached app appearance to the native DWM frame.
+  void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+  COLORREF frame_border_color_ = RGB(224, 224, 224);
+  COLORREF frame_caption_color_ = RGB(255, 255, 255);
+  bool use_dark_mode_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

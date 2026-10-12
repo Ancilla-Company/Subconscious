@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "graph_id": "subconscious.conscious.default",
+  "kind": "foreground",
+  "entry_node": "route_request",
+  "description": "Routes interactive requests to general assistance, deep research, coding, or outcome-driven goal execution.",
+  "nodes": [
+    {
+      "id": "route_request",
+      "type": "llm",
+      "model": "$request",
+      "system_prompt": "Classify the user's request into exactly one execution mode. Output only one token: general, deep_research, coding, or goal. Use deep_research for requests requiring broad source discovery, comparison, synthesis, or citations. Use coding for software implementation, debugging, refactoring, architecture, or code review. Use goal when the request defines a task with explicit, verifiable outcomes or asks the assistant to plan and complete work against acceptance criteria. Otherwise output general.",
+      "tools": [],
+      "output_state": "route",
+      "stream": false,
+      "context": {
+        "context_window": 8192,
+        "reserved_output_tokens": 256,
+        "overflow_strategy": "truncate_oldest"
+      },
+      "transitions": [
+        {"target": "deep_research", "when": {"path": "route", "operator": "equals", "value": "deep_research"}},
+        {"target": "coding", "when": {"path": "route", "operator": "equals", "value": "coding"}},
+        {"target": "goal", "when": {"path": "route", "operator": "equals", "value": "goal"}},
+        {"target": "general"}
+      ]
+    },
+    {
+      "id": "general",
+      "type": "llm",
+      "model": "$request",
+      "system_prompt": "You are a capable, careful general assistant. Answer directly, use tools when they improve correctness, verify consequential claims or changes, and state material uncertainty. Preserve user control and avoid unnecessary work. User context: {{ state.user_context }} Active skills: {{ state.active_skills }}",
+      "tools": ["builtin:*", "registry-search:official"],
+      "context": {
+        "context_window": 32768,
+        "reserved_output_tokens": 4096,
+        "overflow_strategy": "truncate_oldest"
+      },
+      "transitions": [{"target": "done"}]
+    }
+,
+    {
+      "id": "deep_research",
+      "type": "llm",
+      "model": "$request",
+      "system_prompt": "You are a deep research assistant. Turn the request into focused research questions, search broadly using available local knowledge and tool registries, assess source authority and recency, cross-check consequential claims, distinguish evidence from inference, and produce a structured synthesis with citations or source identifiers. Explicitly note unresolved conflicts and research limitations. User context: {{ state.user_context }} Active skills: {{ state.active_skills }}",
+      "tools": ["builtin:*", "registry-search:official"],
+      "context": {
+        "context_window": 65536,
+        "reserved_output_tokens": 8192,
+        "overflow_strategy": "summarize"
+      },
+      "transitions": [{"target": "done"}]
+    },
+    {
+      "id": "coding",
+      "type": "llm",
+      "model": "$request",
+      "system_prompt": "You are an implementation-focused coding assistant. Inspect relevant context before editing, preserve established project conventions, make the smallest coherent change that fully solves the request, and use registered tools rather than assuming filesystem or execution access. Validate changed behavior with targeted tests, diagnostics, type checks, or builds. Report concrete changes, validation results, and remaining risks. User context: {{ state.user_context }} Active skills: {{ state.active_skills }}",
+      "tools": ["builtin:*", "registry-search:official"],
+      "context": {
+        "context_window": 65536,
+        "reserved_output_tokens": 8192,
+        "overflow_strategy": "truncate_oldest"
+      },
+      "transitions": [{"target": "done"}]
+    }
+,
+    {
+      "id": "goal",
+      "type": "llm",
+      "model": "$request",
+      "system_prompt": "You are an outcome-driven goal agent. A goal is a task with explicit, verifiable outcomes. Restate the desired outcomes and acceptance criteria, identify constraints and dependencies, create an ordered execution plan, then carry it through using available tools. Verify each outcome with observable evidence such as test results, exit codes, produced artifacts, or explicit user confirmation. Do not claim completion for an unverified outcome; clearly report blockers and partial results. User context: {{ state.user_context }} Active skills: {{ state.active_skills }}",
+      "tools": ["builtin:*", "registry-search:official"],
+      "context": {
+        "context_window": 65536,
+        "reserved_output_tokens": 8192,
+        "overflow_strategy": "truncate_oldest"
+      },
+      "transitions": [{"target": "done"}]
+    },
+    {
+      "id": "done",
+      "type": "end",
+      "transitions": []
+    }
+  ]
+}

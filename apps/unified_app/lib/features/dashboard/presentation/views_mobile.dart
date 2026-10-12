@@ -4,6 +4,7 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../account/account_controller.dart';
 import '../../chat/engine_llm_provider.dart';
@@ -57,7 +58,10 @@ final class MobileDashboardView extends StatelessWidget {
   );
 
   Widget _body() {
-    if (controller.selectedSection != DashboardSection.threads) {
+    // The chat only has room under Threads on mobile, so show it while a tool
+    // approval is waiting, without changing the selected section.
+    if (controller.selectedSection != DashboardSection.threads &&
+        controller.pendingToolApproval == null) {
       return DashboardMainPanel(
         controller: controller,
         accountController: accountController,
@@ -81,11 +85,11 @@ final class MobileDashboardView extends StatelessWidget {
         provider: provider,
         isComposerEnabled: controller.isConnected,
         workspace: controller.threadsWorkspace,
-        activeFile: controller.openFile == null
+        activeFile: controller.activeFileReference == null
             ? null
             : ChatFileReference(
-                rootIndex: controller.openFile!.rootIndex,
-                path: controller.openFile!.path,
+                rootIndex: controller.activeFileReference!.rootIndex,
+                path: controller.activeFileReference!.path,
               ),
         thread: controller.selectedThread,
         onCreateThread: controller.beginThreadDraft,
@@ -272,26 +276,15 @@ final class _MobileSidebarButton extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return SizedBox.square(
-      dimension: 40,
-      child: IconButton(
-        constraints: const BoxConstraints.tightFor(width: 40, height: 40),
-        isSelected: selected,
-        onPressed: onPressed,
-        padding: EdgeInsets.zero,
-        selectedIcon: Icon(selectedIcon, size: 20),
-        style: IconButton.styleFrom(
-          backgroundColor: selected ? colors.secondaryContainer : null,
-          foregroundColor: selected ? colors.onSecondaryContainer : null,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(0)),
-        ),
-        tooltip: tooltip,
-        icon: Icon(icon, size: 20),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SidebarButton(
+    icon: icon,
+    selectedIcon: selectedIcon,
+    tooltip: tooltip,
+    selected: selected,
+    onPressed: onPressed,
+    dimension: 40,
+    borderRadius: 0,
+  );
 }
 
 final class _MobileConnectionStatus extends StatelessWidget {

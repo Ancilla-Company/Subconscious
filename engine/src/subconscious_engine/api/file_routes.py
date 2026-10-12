@@ -27,7 +27,11 @@ def _path(request: Request) -> str | None:
 
 def _failure(error: Exception) -> JSONResponse:
     if isinstance(error, WorkspaceFileError):
-        return JSONResponse({"error": str(error)}, error.status_code)
+        body: dict[str, object] = {"error": str(error)}
+        if error.code is not None:
+            body["code"] = error.code
+        body.update(error.details)
+        return JSONResponse(body, error.status_code)
     if isinstance(error, FileNotFoundError):
         return JSONResponse({"error": "The requested workspace path does not exist."}, 404)
     if isinstance(error, (PermissionError, OSError)):
@@ -70,6 +74,16 @@ async def read_file(request: Request) -> Response:
         return _failure(error)
 
 
+async def file_version(request: Request) -> Response:
+    try:
+        async with request.app.state.database.session() as session:
+            result = await WorkspaceFileService(session).version(
+                request.path_params["uuid"], _root_index(request), _path(request) or "")
+        return json_response(result)
+    except (WorkspaceFileError, OSError) as error:
+        return _failure(error)
+
+
 async def preview_file(request: Request) -> Response:
     try:
         async with request.app.state.database.session() as session:
@@ -106,9 +120,13 @@ async def mutate_file(request: Request) -> Response:
     try:
         async with request.app.state.database.session() as session:
             service = WorkspaceFileService(session)
-            operation = service.create if request.method == "POST" else service.write
-            result = await operation(request.path_params["uuid"], _root_index(request),
-                                     _path(request) or "", body.content)
+            uuid, root_index, path = (
+                request.path_params["uuid"], _root_index(request), _path(request) or "")
+            if request.method == "POST":
+                result = await service.create(uuid, root_index, path, body.content)
+            else:
+                result = await service.write(
+                    uuid, root_index, path, body.content, body.expected_version)
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
         return _failure(error)
@@ -147,6 +165,7 @@ def file_routes() -> list[Route]:
         Route("/api/v1/workspaces/{uuid}/files/search", search_files, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files", list_files, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/content", read_file, methods=["GET"]),
+        Route("/api/v1/workspaces/{uuid}/files/version", file_version, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/preview", preview_file, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/content", mutate_file, methods=["POST", "PUT"]),
         Route("/api/v1/workspaces/{uuid}/files/directory", create_directory, methods=["POST"]),

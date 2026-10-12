@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../account/account_controller.dart';
-import '../../context/presentation/context_panel.dart';
+import '../../editor/presentation/workspace_file_editor.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../../settings/presentation/settings_main_panel.dart';
 import '../controller/dashboard_controller.dart';

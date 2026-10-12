@@ -13,10 +13,17 @@ dependencies = [
   "cryptography==46.0.4",
   "httpx==0.28.1",
   "keyring==25.7.0",
+  "openpyxl==3.1.5",
   "Pillow==12.3.0",
+  "PyYAML==6.0.3",
+  "pypdf==6.18.1",
+  "python-docx==1.2.0",
+  "python-pptx==1.0.2",
   "pystray==0.19.5",
+  "reportlab==5.0.1",
   "pydantic==2.12.4",
   "pydantic-ai==1.51.0",
+  "pydantic-graph==1.51.0",
   "sentence-transformers==5.6.1",
   "sqlalchemy==2.0.45",
   "starlette==0.47.3",
@@ -33,11 +40,15 @@ subconscious-engine = "subconscious_engine.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-subconscious_engine = ["*.ico"]
+subconscious_engine = ["*.ico", "graphs/*.json"]
 
 [project.optional-dependencies]
 test = [
   "pytest==8.3.5",
+]
+e2e = [
+  "pytest==8.3.5",
+  "selenium==4.39.0",
 ]
 
 [tool.pytest.ini_options]

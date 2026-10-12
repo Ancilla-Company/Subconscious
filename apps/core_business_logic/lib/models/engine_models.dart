@@ -423,12 +423,33 @@ final class WireFrame {
 }
 
 final class WorkspaceFileContent {
-  const WorkspaceFileContent({required this.content});
+  const WorkspaceFileContent({required this.content, this.version});
   final String content;
+
+  /// Hash of the exact bytes on disk. Send it back as `expectedVersion` so the
+  /// engine can refuse a save that would overwrite a newer change.
+  final String? version;
 
   factory WorkspaceFileContent.fromJson(Map<String, dynamic> json) =>
       WorkspaceFileContent(
         content: _stringValue(json, 'content', 'content') ?? '',
+        version: _stringValue(json, 'version', 'version'),
+      );
+}
+
+/// Cheap description of a file on disk, used to notice external changes
+/// without downloading the content.
+final class WorkspaceFileVersion {
+  const WorkspaceFileVersion({required this.version, required this.size});
+  final String version;
+  final int size;
+
+  factory WorkspaceFileVersion.fromJson(Map<String, dynamic> json) =>
+      WorkspaceFileVersion(
+        version:
+            _stringValue(json, 'version', 'version') ??
+            (throw const FormatException('File version is required.')),
+        size: (json['size'] as num?)?.toInt() ?? 0,
       );
 }
 

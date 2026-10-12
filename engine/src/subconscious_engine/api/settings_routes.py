@@ -30,6 +30,19 @@ async def update_settings(request: Request) -> Response:
     return json_response(values)
 
 
+async def delete_settings(request: Request) -> Response:
+    query = request.query_params
+    key, tag, client = query.get("key"), query.get("tag"), query.get("client")
+    # A bare client filter would wipe every setting a client owns, which is
+    # never what a caller means, so a key or a tag scope is mandatory.
+    if not key and not tag:
+        return JSONResponse({"error": "A key or tag is required to delete settings."}, 400)
+    async with request.app.state.database.session() as session:
+        deleted = await SettingsService(session).delete(key, tag, client)
+    return json_response({"deleted": deleted})
+
+
 def settings_routes() -> list[Route]:
     return [Route("/api/v1/settings", list_settings, methods=["GET"]),
-            Route("/api/v1/settings", update_settings, methods=["PUT"])]
+            Route("/api/v1/settings", update_settings, methods=["PUT"]),
+            Route("/api/v1/settings", delete_settings, methods=["DELETE"])]

@@ -23,10 +23,21 @@ class WorkspaceFileEntryDto(WireModel):
 
 class WorkspaceFileContentDto(WireModel):
     content: str
+    # SHA-256 (hex) of the exact bytes on disk, including any byte-order mark.
+    # Clients echo it back as ``expectedVersion`` to detect concurrent changes.
+    version: str
+
+
+class WorkspaceFileVersionDto(WireModel):
+    version: str
+    size: int
 
 
 class WriteWorkspaceFileRequest(WireModel):
     content: str | None = None
+    # When present, the write only succeeds if the file on disk still has this
+    # version. Omit it for an unconditional overwrite.
+    expected_version: str | None = None
 
 
 class MoveWorkspaceFileRequest(WireModel):

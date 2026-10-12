@@ -4,6 +4,7 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../account/account_controller.dart';
 import '../../chat/engine_llm_provider.dart';
@@ -268,11 +269,12 @@ final class _DesktopWebDashboardViewState
                 provider: provider,
                 isComposerEnabled: widget.controller.isConnected,
                 workspace: widget.controller.threadsWorkspace,
-                activeFile: widget.controller.openFile == null
+                activeFile: widget.controller.activeFileReference == null
                     ? null
                     : ChatFileReference(
-                        rootIndex: widget.controller.openFile!.rootIndex,
-                        path: widget.controller.openFile!.path,
+                        rootIndex:
+                            widget.controller.activeFileReference!.rootIndex,
+                        path: widget.controller.activeFileReference!.path,
                       ),
                 thread: widget.controller.selectedThread,
                 onCreateThread: widget.controller.beginThreadDraft,
@@ -421,6 +423,8 @@ final class _Sidebar extends StatelessWidget {
   final ValueChanged<DashboardSection> onPanelSelected;
   final VoidCallback onAccountSelected;
 
+  static const EdgeInsets _buttonPadding = EdgeInsets.fromLTRB(4, 4, 4, 0);
+
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: Theme.of(context).colorScheme.surface,
@@ -428,33 +432,37 @@ final class _Sidebar extends StatelessWidget {
       width: 40,
       child: Column(
         children: <Widget>[
-          _SidebarButton(
+          SidebarButton(
             icon: FluentIcons.apps_24_regular,
             selectedIcon: FluentIcons.apps_24_filled,
             tooltip: 'Workspaces',
+            outerPadding: _buttonPadding,
             selected: selectedPanel == DashboardSection.workspaces,
             onPressed: () => onPanelSelected(DashboardSection.workspaces),
           ),
-          _SidebarButton(
+          SidebarButton(
             icon: FluentIcons.chat_24_regular,
             selectedIcon: FluentIcons.chat_24_filled,
             tooltip: 'Threads',
+            outerPadding: _buttonPadding,
             selected: selectedPanel == DashboardSection.threads,
             onPressed: () => onPanelSelected(DashboardSection.threads),
           ),
-          _SidebarButton(
+          SidebarButton(
             icon: FluentIcons.document_copy_24_regular,
             selectedIcon: FluentIcons.document_copy_24_filled,
             tooltip: 'Files',
+            outerPadding: _buttonPadding,
             selected: selectedPanel == DashboardSection.files,
             onPressed: () => onPanelSelected(DashboardSection.files),
           ),
           const Spacer(),
           const _SidebarDivider(),
-          _SidebarButton(
+          SidebarButton(
             icon: FluentIcons.settings_24_regular,
             selectedIcon: FluentIcons.settings_24_filled,
             tooltip: 'Settings',
+            outerPadding: _buttonPadding,
             selected:
                 selectedPanel == DashboardSection.settings &&
                 !accountShortcutSelected,
@@ -464,10 +472,11 @@ final class _Sidebar extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 4),
             child: AnimatedBuilder(
               animation: accountController,
-              builder: (BuildContext context, Widget? child) => _SidebarButton(
+              builder: (BuildContext context, Widget? child) => SidebarButton(
                 icon: FluentIcons.person_24_regular,
                 selectedIcon: FluentIcons.person_24_filled,
                 tooltip: accountController.sidebarTooltip,
+                outerPadding: _buttonPadding,
                 selected:
                     selectedPanel == DashboardSection.settings &&
                     accountShortcutSelected,
@@ -492,44 +501,6 @@ final class _SidebarDivider extends StatelessWidget {
     endIndent: 4,
     color: Theme.of(context).colorScheme.outlineVariant,
   );
-}
-
-final class _SidebarButton extends StatelessWidget {
-  const _SidebarButton({
-    required this.icon,
-    required this.selectedIcon,
-    required this.tooltip,
-    required this.onPressed,
-    this.selected = false,
-  });
-
-  final IconData icon;
-  final IconData selectedIcon;
-  final String tooltip;
-  final VoidCallback onPressed;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-      child: IconButton(
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-        isSelected: selected,
-        onPressed: onPressed,
-        padding: EdgeInsets.zero,
-        selectedIcon: Icon(selectedIcon, size: 20),
-        style: IconButton.styleFrom(
-          backgroundColor: selected ? colors.secondaryContainer : null,
-          foregroundColor: selected ? colors.onSecondaryContainer : null,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        ),
-        tooltip: tooltip,
-        icon: Icon(icon, size: 20),
-      ),
-    );
-  }
 }
 
 final class _Unavailable extends StatelessWidget {

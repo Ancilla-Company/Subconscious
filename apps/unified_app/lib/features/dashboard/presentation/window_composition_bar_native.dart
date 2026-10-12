@@ -47,6 +47,7 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
   bool _hasRestoredWindowState = false;
   bool _isRestoringWindowState = false;
   bool _isClosing = false;
+  bool _isConfirmingClose = false;
   (int, int, Brightness)? _nativeFrameAppearance;
 
   @override
@@ -127,11 +128,53 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
   }
 
   Future<void> _closeWindow() async {
-    if (_isClosing) return;
+    if (_isClosing || _isConfirmingClose) return;
     await _captureWindowState();
+    // Unsaved editor text is written out before the window goes. Nothing is
+    // asked of the user unless that fails, because only then would closing
+    // lose the text.
+    final bool draftsStored = await widget.controller.documents
+        .flushDrafts()
+        .timeout(const Duration(seconds: 6), onTimeout: () => false);
+    if (!draftsStored &&
+        widget.controller.documents.hasUnsavedChanges &&
+        !await _confirmQuitWithUnstoredChanges()) {
+      return;
+    }
     _isClosing = true;
     await widget.controller.flushAppState();
     await windowManager.destroy();
+  }
+
+  Future<bool> _confirmQuitWithUnstoredChanges() async {
+    if (!mounted) return true;
+    _isConfirmingClose = true;
+    try {
+      return await showDialog<bool>(
+            context: context,
+            builder: (BuildContext context) => AlertDialog(
+              title: const Text("Unsaved changes couldn't be kept"),
+              content: const Text(
+                'The engine did not accept the text you have not saved yet, '
+                'so it cannot be restored next time. If you quit now it is '
+                'lost.',
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Keep editing'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Quit anyway'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+    } finally {
+      _isConfirmingClose = false;
+    }
   }
 
   @override

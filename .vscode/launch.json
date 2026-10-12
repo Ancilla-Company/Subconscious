@@ -16,6 +16,7 @@
         "50505"
       ],
       "env": {
+        "SUBCONSCIOUS_SERVER_URL": "http://127.0.0.1:5050/",
         "PYTHONPATH": "${workspaceFolder}/engine/src"
       },
       "justMyCode": true,
@@ -33,6 +34,22 @@
         "--dart-define=SUBCONSCIOUS_ENGINE_PORT=50505",
         "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
         "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token",
+      ],
+      "flutterMode": "debug",
+      "console": "terminal"
+    },
+    {
+      "name": "Unified Flutter App (Android Emulator)",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
+      "cwd": "${workspaceFolder}/apps/unified_app",
+      "deviceId": "emulator-5554",
+      "toolArgs": [
+        "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
+        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=50505",
+        "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
+        "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token"
       ],
       "flutterMode": "debug",
       "console": "terminal"

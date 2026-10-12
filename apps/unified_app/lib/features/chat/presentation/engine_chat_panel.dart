@@ -7,6 +7,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../editor/presentation/markdown/markdown_preview.dart';
 import '../engine_llm_provider.dart';
 import '../../settings/presentation/settings_main_panel.dart';
 
@@ -704,6 +705,8 @@ final class _MessageBubble extends StatelessWidget {
     final ColorScheme colors = Theme.of(context).colorScheme;
     final bool isUser = message.origin == EngineChatMessageOrigin.user;
     final bool isSystem = message.origin == EngineChatMessageOrigin.system;
+    final bool isAssistant =
+        message.origin == EngineChatMessageOrigin.assistant;
     final bool useNeutralForeground = isUser && useNeutralUserBubbleForeground;
     final Color? messageForeground = useNeutralForeground
         ? colors.onSecondaryContainer
@@ -715,11 +718,18 @@ final class _MessageBubble extends StatelessWidget {
     final Widget content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SelectableText(
-          text,
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(height: 1.45, color: messageForeground),
-        ),
+        if (isAssistant)
+          MarkdownPreview(
+            text: text,
+            embedded: true,
+            debounce: Duration.zero,
+          )
+        else
+          SelectableText(
+            text,
+            style: Theme.of(context).textTheme.bodyMedium
+                ?.copyWith(height: 1.45, color: messageForeground),
+          ),
         Row(
           children: <Widget>[
             if (timestamp != null)

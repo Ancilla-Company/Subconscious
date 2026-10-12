@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 import builtins
 from dataclasses import dataclass
+import hashlib
 from io import BytesIO
 import json
 import os
 from pathlib import Path
+import shutil
+import tempfile
+import threading
+import time
 import zipfile
 
 from sqlalchemy import select
@@ -17,8 +22,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from subconscious_engine.api.extra_schemas import (
     WorkspaceFileContentDto,
     WorkspaceFileEntryDto,
+    WorkspaceFileVersionDto,
 )
 from subconscious_engine.storage.models import Workspace
+
+_UTF8_BOM = b"\xef\xbb\xbf"
+# Atomic writes stage their bytes in a sibling file with this suffix. It is
+# hidden from listings and search so a save never shows up as a stray file.
+TEMP_SUFFIX = ".subconscious-tmp"
+# Writes to the same path are serialized so the version check and the replace
+# below cannot interleave with another save handled by this process.
+_WRITE_LOCKS = tuple(threading.Lock() for _ in range(64))
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,9 +44,22 @@ class WorkspaceFilePreview:
 
 
 class WorkspaceFileError(RuntimeError):
-    def __init__(self, status_code: int, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        code: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+        self.details = details or {}
+
+
+def content_version(raw: bytes) -> str:
+    """Return the version token for the exact bytes stored on disk."""
+    return hashlib.sha256(raw).hexdigest()
 
 
 class WorkspaceFileService:
@@ -143,10 +170,24 @@ class WorkspaceFileService:
         root = await self.root(workspace_uuid, root_index)
         return await asyncio.to_thread(self._create_sync, root, relative_path, content or "", encoded)
 
-    async def write(self, workspace_uuid: str, root_index: int, relative_path: str, content: str | None) -> WorkspaceFileContentDto:
+    async def write(
+        self,
+        workspace_uuid: str,
+        root_index: int,
+        relative_path: str,
+        content: str | None,
+        expected_version: str | None = None,
+    ) -> WorkspaceFileContentDto:
         encoded = self._encode(content)
         root = await self.root(workspace_uuid, root_index)
-        return await asyncio.to_thread(self._write_sync, root, relative_path, content or "", encoded)
+        return await asyncio.to_thread(
+            self._write_sync, root, relative_path, content or "", encoded, expected_version
+        )
+
+    async def version(self, workspace_uuid: str, root_index: int,
+                      relative_path: str) -> WorkspaceFileVersionDto:
+        root = await self.root(workspace_uuid, root_index)
+        return await asyncio.to_thread(self._version_sync, root, relative_path)
 
     async def create_directory(self, workspace_uuid: str, root_index: int, relative_path: str) -> WorkspaceFileEntryDto:
         root = await self.root(workspace_uuid, root_index)
@@ -173,7 +214,8 @@ class WorkspaceFileService:
         directory = self._existing(root, relative_path, allow_root=True)
         entries = [WorkspaceFileEntryDto(name=item.name,
                    relative_path=item.relative_to(root).as_posix(), is_directory=item.is_dir())
-                   for item in directory.iterdir() if not self._is_reparse(item)]
+                   for item in directory.iterdir()
+                   if not self._is_reparse(item) and not item.name.endswith(TEMP_SUFFIX)]
         return sorted(entries, key=lambda item: (not item.is_directory, item.name.casefold()))
 
     def _search_sync(self, root: Path, root_index: int, query: str,
@@ -189,6 +231,8 @@ class WorkspaceFileService:
                 and not self._is_reparse(base / name)
             ]
             for name in filenames:
+                if name.endswith(TEMP_SUFFIX):
+                    continue
                 visited += 1
                 if visited > self.SEARCH_MAX_FILES:
                     return matches
@@ -215,9 +259,21 @@ class WorkspaceFileService:
         if len(raw) > self.MAX_BYTES:
             raise WorkspaceFileError(400, "The requested file exceeds the 1 MB limit.")
         try:
-            return WorkspaceFileContentDto(content=raw.removeprefix(b"\xef\xbb\xbf").decode("utf-8"))
+            return WorkspaceFileContentDto(
+                content=raw.removeprefix(_UTF8_BOM).decode("utf-8"),
+                version=content_version(raw),
+            )
         except UnicodeDecodeError as error:
             raise WorkspaceFileError(400, "The requested file is not valid UTF-8 text.") from error
+
+    def _version_sync(self, root: Path, relative_path: str) -> WorkspaceFileVersionDto:
+        file = self._existing_file(root, relative_path)
+        if file.stat().st_size > self.MAX_BYTES:
+            raise WorkspaceFileError(400, "The requested file exceeds the 1 MB limit.")
+        raw = file.read_bytes()
+        if len(raw) > self.MAX_BYTES:
+            raise WorkspaceFileError(400, "The requested file exceeds the 1 MB limit.")
+        return WorkspaceFileVersionDto(version=content_version(raw), size=len(raw))
 
     def _preview_sync(self, root: Path, relative_path: str) -> WorkspaceFilePreview:
         file = self._existing_regular_file(root, relative_path)
@@ -315,18 +371,88 @@ class WorkspaceFileService:
                 os.fsync(stream.fileno())
         except FileExistsError as error:
             raise WorkspaceFileError(409, "A file or directory already exists at the requested path.") from error
-        return WorkspaceFileContentDto(content=content)
+        return WorkspaceFileContentDto(content=content, version=content_version(encoded))
 
-    def _write_sync(self, root: Path, relative_path: str, content: str, encoded: bytes) -> WorkspaceFileContentDto:
+    def _write_sync(
+        self,
+        root: Path,
+        relative_path: str,
+        content: str,
+        encoded: bytes,
+        expected_version: str | None = None,
+    ) -> WorkspaceFileContentDto:
+        """Replace a file atomically, optionally guarded by a content version.
+
+        The new bytes are staged in a sibling file, flushed to disk and renamed
+        over the target, so a crash or a failed write leaves the previous
+        contents intact instead of a truncated file. A byte-order mark on the
+        existing file is kept, because it is a property of the file rather than
+        of the text the user edits.
+        """
         file = self._existing_file(root, relative_path)
-        file = self._existing_file(root, relative_path)
-        with file.open("r+b") as stream:
-            stream.seek(0)
-            stream.write(encoded)
-            stream.truncate()
-            stream.flush()
-            os.fsync(stream.fileno())
-        return WorkspaceFileContentDto(content=content)
+        if not os.access(file, os.W_OK):
+            raise WorkspaceFileError(403, "The file is read-only.")
+        with self._write_lock(file):
+            if expected_version is not None:
+                current = self._disk_version(file)
+                if current != expected_version:
+                    raise WorkspaceFileError(
+                        409,
+                        "The file changed on disk after it was opened.",
+                        code="version_conflict",
+                        details={"currentVersion": current},
+                    )
+            with file.open("rb") as existing:
+                payload = _UTF8_BOM + encoded if existing.read(3) == _UTF8_BOM else encoded
+            if len(payload) > self.MAX_BYTES:
+                raise WorkspaceFileError(400, "Content exceeds the 1 MB limit.")
+            descriptor, staged_name = tempfile.mkstemp(
+                prefix=f".{file.name}.", suffix=TEMP_SUFFIX, dir=file.parent
+            )
+            staged = Path(staged_name)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                try:
+                    shutil.copymode(file, staged)
+                except OSError:
+                    pass
+                self._replace_with_retry(staged, file)
+            finally:
+                try:
+                    staged.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return WorkspaceFileContentDto(content=content, version=content_version(payload))
+
+    def _disk_version(self, file: Path) -> str | None:
+        """Version of the file on disk, or None when it is too large to have been read."""
+        if file.stat().st_size > self.MAX_BYTES:
+            return None
+        return content_version(file.read_bytes())
+
+    @staticmethod
+    def _write_lock(path: Path) -> threading.Lock:
+        return _WRITE_LOCKS[hash(os.path.normcase(str(path))) % len(_WRITE_LOCKS)]
+
+    @staticmethod
+    def _replace_with_retry(source: Path, target: Path) -> None:
+        # Windows refuses to replace a file another program holds open (search
+        # indexers, sync clients, antivirus). Those holds are normally brief.
+        delay = 0.02
+        for attempt in range(6):
+            try:
+                os.replace(source, target)
+                return
+            except PermissionError as error:
+                if attempt == 5:
+                    raise WorkspaceFileError(
+                        423, "The file is in use by another program. Try saving again."
+                    ) from error
+                time.sleep(delay)
+                delay *= 2
 
     def _create_directory_sync(self, root: Path, relative_path: str) -> WorkspaceFileEntryDto:
         directory = self._new_target(root, relative_path.rstrip("/\\"), file_target=False)
