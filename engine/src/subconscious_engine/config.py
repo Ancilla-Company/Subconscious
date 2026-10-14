@@ -8,7 +8,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class EngineConfig:
-    port: int = 0
+    # None selects the mode default (50506 production, 50505 development);
+    # 0 requests an ephemeral port.
+    port: int | None = None
     api: bool = True
     dev: bool = False
     gui: bool = False
@@ -21,8 +23,7 @@ class EngineConfig:
     subconscious_graph: Path | None = None
     subconscious_model_id: str | None = None
     subconscious_enabled: bool = True
-    subconscious_interval_seconds: float = 86_400
-    subconscious_jitter_ratio: float = 0.1
+    reflection_interval_seconds: float = 86_400
     account_server_url: str | None = None
 
     @property

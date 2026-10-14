@@ -48,7 +48,7 @@ def test_linux_data_directory_prefers_xdg_config_home():
         ("gui", False),
         ("tui", False),
         ("headless", False),
-        ("port", 0),
+        ("port", None),
         ("lan_enabled", False),
         ("node_id", None),
         ("data_directory", None),
@@ -56,3 +56,19 @@ def test_linux_data_directory_prefers_xdg_config_home():
 )
 def test_default_configuration_is_loopback_desktop_safe(field, expected):
     assert getattr(EngineConfig(), field) == expected
+
+
+def test_environment_selects_development_only_for_development(monkeypatch):
+    from subconscious_engine.configuration_file import (
+        environment_engine_overrides,
+        environment_is_development,
+    )
+
+    monkeypatch.delenv("SUBCONSCIOUS_ENV", raising=False)
+    assert environment_is_development() is False
+    assert "dev" not in environment_engine_overrides()
+    for value, expected in (("development", True), ("Development", True),
+                            ("production", False), ("staging", False)):
+        monkeypatch.setenv("SUBCONSCIOUS_ENV", value)
+        assert environment_is_development() is expected
+        assert environment_engine_overrides()["dev"] is expected

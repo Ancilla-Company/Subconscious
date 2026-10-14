@@ -13,6 +13,7 @@ from .configuration_file import (
     ConfigurationFileError,
     default_config_path,
     environment_engine_overrides,
+    environment_is_development,
     load_configuration,
     set_configuration_value,
     show_configuration,
@@ -69,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--port",
         type=int,
         default=None,
-        help="Listen port; zero uses 55681 in dev mode or an available port otherwise.",
+        help="Listen port; default is 50506 (production) or 50505 (development); zero picks an available port.",
     )
     start.add_argument("--lan", action="store_true", default=None, help="Bind to all IPv4 interfaces.")
     start.add_argument("--node-id", help="Advertise a stable engine node identifier.")
@@ -193,10 +194,16 @@ def _run_start(args: argparse.Namespace) -> int:
 
 
 def _spawn_background_service(args: argparse.Namespace) -> int:
-    command = [sys.executable, "-m", "subconscious_engine", "start"]
+    # PyInstaller sets sys.frozen; Nuitka defines __compiled__. In both, the
+    # executable is the program itself and `-m` is not available.
+    frozen = getattr(sys, "frozen", False) or "__compiled__" in globals()
+    if frozen:
+        command = [sys.executable, "start"]
+    else:
+        command = [sys.executable, "-m", "subconscious_engine", "start"]
     if args.dev:
         command.append("--dev")
-    if args.port:
+    if args.port is not None:
         command.extend(("--port", str(args.port)))
     if args.lan:
         command.append("--lan")
@@ -241,7 +248,7 @@ def _run_chat(args: argparse.Namespace) -> int:
         print(f"subconscious chat: {error}", file=sys.stderr)
         return 2
     prompt = sys.stdin.read() if args.prompt == "-" else args.prompt
-    dev = configured.engine.dev if args.dev is None else args.dev
+    dev = args.dev if args.dev is not None else environment_is_development(configured.engine.dev)
     data_directory = args.data_dir or configured.engine.data_directory
     timeout = args.timeout or 300.0
     workspace = args.workspace or configured.client.get("workspace")

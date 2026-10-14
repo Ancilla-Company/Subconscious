@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 class EngineHost:
-    DEVELOPMENT_PORT = 55681
+    DEVELOPMENT_PORT = 50505
+    PRODUCTION_PORT = 50506
     DEVELOPMENT_TOKEN = "subconscious-dev-token"
 
     def __init__(
@@ -101,8 +102,7 @@ class EngineHost:
         self.subconscious_worker = (
             SubconsciousWorker(
                 self.graph_engine,
-                config.subconscious_interval_seconds,
-                config.subconscious_jitter_ratio,
+                config.reflection_interval_seconds,
             )
             if config.subconscious_enabled
             else None
@@ -138,9 +138,9 @@ class EngineHost:
 
     @property
     def requested_port(self) -> int:
-        if self.config.dev and self.config.port == 0:
-            return self.DEVELOPMENT_PORT
-        return self.config.port
+        if self.config.port is not None:
+            return self.config.port
+        return self.DEVELOPMENT_PORT if self.config.dev else self.PRODUCTION_PORT
 
     @property
     def bound_port(self) -> int:

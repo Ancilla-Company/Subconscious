@@ -32,7 +32,15 @@ def default_config_path() -> Path:
     value = os.getenv("SUBCONSCIOUS_CONFIG")
     if value:
         return Path(value).expanduser()
-    return EngineConfig().resolved_data_directory / "config.yaml"
+    return EngineConfig(dev=environment_is_development()).resolved_data_directory / "config.yaml"
+
+
+def environment_is_development(default: bool = False) -> bool:
+    """SUBCONSCIOUS_ENV=development selects dev mode; any other value is production."""
+    value = os.environ.get("SUBCONSCIOUS_ENV")
+    if value is None or not value.strip():
+        return default
+    return value.strip().casefold() == "development"
 
 
 def load_configuration(path: Path | None) -> CommandConfiguration:
@@ -69,15 +77,14 @@ def write_template(path: Path, *, overwrite: bool = False) -> None:
     document = {
         "version": _VERSION,
         "engine": {
-            "port": 0, "dev": False, "headless": False, "lan_enabled": False,
+            "port": 50506, "dev": False, "headless": False, "lan_enabled": False,
             "node_id": None, "data_directory": None, "conscious_graph": None,
             "subconscious_graph": None, "subconscious_model_id": None,
-            "subconscious_enabled": True, "subconscious_interval_seconds": 86400,
-            "subconscious_jitter_ratio": 0.1,
+            "subconscious_enabled": True, "reflection_interval_seconds": 86400,
             "account_server_url": "https://api.subconscious.chat",
         },
         "client": {
-            "engine_url": "http://localhost", "token": "${SUBCONSCIOUS_ENGINE_TOKEN}",
+            "engine_url": "http://localhost:50506", "token": "${SUBCONSCIOUS_ENGINE_TOKEN}",
             "workspace": "General", "flutter_device": "windows",
         },
     }
@@ -127,18 +134,22 @@ def set_configuration_value(path: Path, dotted_key: str, value: str) -> None:
 
 def environment_engine_overrides() -> dict[str, Any]:
     names = {
-        "port": "SUBCONSCIOUS_PORT", "dev": "SUBCONSCIOUS_DEV",
-        "headless": "SUBCONSCIOUS_HEADLESS", "lan_enabled": "SUBCONSCIOUS_LAN_ENABLED",
-        "node_id": "SUBCONSCIOUS_NODE_ID", "data_directory": "SUBCONSCIOUS_DATA_DIR",
+        "port": "SUBCONSCIOUS_PORT",
+        "node_id": "SUBCONSCIOUS_NODE_ID",
+        "headless": "SUBCONSCIOUS_HEADLESS",
+        "lan_enabled": "SUBCONSCIOUS_LAN_ENABLED",
+        "data_directory": "SUBCONSCIOUS_DATA_DIR",
+        "account_server_url": "SUBCONSCIOUS_SERVER_URL",
         "conscious_graph": "SUBCONSCIOUS_CONSCIOUS_GRAPH",
         "subconscious_graph": "SUBCONSCIOUS_SUBCONSCIOUS_GRAPH",
         "subconscious_model_id": "SUBCONSCIOUS_REFLECTION_MODEL",
         "subconscious_enabled": "SUBCONSCIOUS_SUBCONSCIOUS_ENABLED",
-        "subconscious_interval_seconds": "SUBCONSCIOUS_SUBCONSCIOUS_INTERVAL_SECONDS",
-        "subconscious_jitter_ratio": "SUBCONSCIOUS_SUBCONSCIOUS_JITTER_RATIO",
-        "account_server_url": "SUBCONSCIOUS_SERVER_URL",
+        "reflection_interval_seconds": "SUBCONSCIOUS_REFLECTION_INTERVAL_SECONDS",
     }
-    return {key: _coerce_environment(key, os.environ[name]) for key, name in names.items() if name in os.environ}
+    overrides = {key: _coerce_environment(key, os.environ[name]) for key, name in names.items() if name in os.environ}
+    if os.environ.get("SUBCONSCIOUS_ENV", "").strip():
+        overrides["dev"] = environment_is_development()
+    return overrides
 
 
 def environment_client_overrides() -> dict[str, str]:
@@ -183,7 +194,7 @@ def _validate_engine_values(values: dict[str, Any]) -> None:
             raise ConfigurationFileError(f"engine.{key} must be a boolean.")
     if "port" in values and (not isinstance(values["port"], int) or not 0 <= values["port"] <= 65535):
         raise ConfigurationFileError("engine.port must be an integer from 0 to 65535.")
-    for key in ("subconscious_interval_seconds", "subconscious_jitter_ratio"):
+    for key in ("reflection_interval_seconds",):
         if key in values and (not isinstance(values[key], (int, float)) or values[key] < 0):
             raise ConfigurationFileError(f"engine.{key} must be a non-negative number.")
     if (url := values.get("account_server_url")) and (
@@ -209,6 +220,6 @@ def _coerce_environment(key: str, value: str) -> Any:
         return value.casefold() in {"true", "1"}
     if key == "port":
         return int(value)
-    if key in {"subconscious_interval_seconds", "subconscious_jitter_ratio"}:
+    if key == "reflection_interval_seconds":
         return float(value)
     return value

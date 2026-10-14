@@ -71,7 +71,7 @@ def test_host_defaults_choose_loopback_ephemeral_or_stable_dev_port(tmp_path):
     )
 
     assert production.bind_host == "127.0.0.1"
-    assert production.requested_port == 0
+    assert production.requested_port == EngineHost.PRODUCTION_PORT == 50506
     assert development.requested_port == EngineHost.DEVELOPMENT_PORT
     assert development.token.value == EngineHost.DEVELOPMENT_TOKEN
     assert lan.bind_host == "0.0.0.0"
@@ -82,7 +82,7 @@ def test_host_defaults_choose_loopback_ephemeral_or_stable_dev_port(tmp_path):
 def test_real_tcp_host_is_ready_authenticated_discoverable_and_cleans_up(tmp_path):
     async def scenario():
         host = EngineHost(
-            EngineConfig(data_directory=tmp_path, headless=True, node_id="node-a")
+            EngineConfig(port=0, data_directory=tmp_path, headless=True, node_id="node-a")
         )
         async with running_host(host):
             assert host.is_ready is True
@@ -121,7 +121,7 @@ def test_host_starts_tray_after_readiness_and_tray_quit_stops_server(tmp_path):
     async def scenario():
         factory = IndicatorFactory()
         host = EngineHost(
-            EngineConfig(data_directory=tmp_path),
+            EngineConfig(port=0, data_directory=tmp_path),
             status_indicator_factory=factory,
         )
         task = asyncio.create_task(host.serve())
@@ -152,7 +152,7 @@ def test_headless_host_never_constructs_tray_indicator(tmp_path):
     async def scenario():
         factory = IndicatorFactory()
         host = EngineHost(
-            EngineConfig(data_directory=tmp_path, headless=True),
+            EngineConfig(port=0, data_directory=tmp_path, headless=True),
             status_indicator_factory=factory,
         )
         async with running_host(host):
@@ -180,7 +180,7 @@ def test_port_conflict_fails_without_publishing_runtime_file(tmp_path):
 def test_runtime_write_failure_stops_server_and_closes_listener(tmp_path):
     async def scenario():
         host = EngineHost(
-            EngineConfig(data_directory=tmp_path, headless=True)
+            EngineConfig(port=0, data_directory=tmp_path, headless=True)
         )
         with patch(
             "subconscious_engine.host.RuntimeInfoWriter.write",
@@ -235,6 +235,7 @@ def test_lan_server_is_reachable_through_real_non_loopback_interface(tmp_path):
     async def scenario():
         host = EngineHost(
             EngineConfig(
+                port=0,
                 lan_enabled=True,
                 data_directory=tmp_path,
                 headless=True,

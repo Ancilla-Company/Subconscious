@@ -51,7 +51,7 @@ python -m pip install -e .
 subconscious start --dev
 ```
 
-Development mode uses port `55681` and the token `subconscious-dev-token`. Production mode picks a free port and generates a token. Run `subconscious --help` for all commands.
+Production is the default: port `50506`, a generated token, and the standard data directory. Set `SUBCONSCIOUS_ENV=development` (or pass `--dev`) for development mode: port `50505`, the token `subconscious-dev-token`, and a separate `-dev` data directory, so both can run on one machine. Run `subconscious --help` for all commands.
 
 ### 2. Run a client
 

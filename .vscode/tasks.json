@@ -24,19 +24,77 @@
       "args": [
         "build",
         "apk",
-        "--release"
+        "--release",
+        "--dart-define=SUBCONSCIOUS_SERVER_URL=https://api.subconscious.chat",
+        "--dart-define=SUBCONSCIOUS_ENGINE_DEV=false"
       ],
       "options": {
         "cwd": "${workspaceFolder}/apps/unified_app"
       },
       "group": "build",
       "problemMatcher": [],
-      "detail": "Builds build/app/outputs/flutter-apk/app-release.apk for standalone device testing.",
+      "detail": "Builds build/app/outputs/flutter-apk/app-release.apk against the production server (https://api.subconscious.chat), no dev engine or token.",
       "presentation": {
         "reveal": "always",
         "panel": "shared",
         "clear": false
       }
+    },
+    {
+      "label": "Package: Engine (PyInstaller)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": [
+        "-m", "PyInstaller",
+        "packaging/engine/subconscious.spec",
+        "--noconfirm",
+        "--distpath", "build/packaging/pyinstaller",
+        "--workpath", "build/packaging/pyinstaller-work"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Outputs build/packaging/pyinstaller/engine (subconscious.exe + subconscious-tray.exe)."
+    },
+    {
+      "label": "Package: Flutter Windows GUI",
+      "type": "shell",
+      "command": "flutter",
+      "args": ["build", "windows", "--release"],
+      "options": { "cwd": "${workspaceFolder}/apps/unified_app" },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Outputs apps/unified_app/build/windows/x64/runner/Release."
+    },
+    {
+      "label": "Package: TUI (Dart exe)",
+      "type": "shell",
+      "command": "New-Item -ItemType Directory -Force build/packaging/tui | Out-Null; dart compile exe apps/tui_app/bin/main.dart -o build/packaging/tui/subconscious-tui.exe",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Outputs build/packaging/tui/subconscious-tui.exe."
+    },
+    {
+      "label": "Package: MSIX (PyInstaller engine)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", "packaging/msix/build_msix.ps1",
+        "-Engine", "pyinstaller",
+        "-Python", "${command:python.interpreterPath}"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": [
+        "Package: Engine (PyInstaller)",
+        "Package: Flutter Windows GUI",
+        "Package: TUI (Dart exe)"
+      ],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Builds everything and packs build/packaging/Subconscious-pyinstaller-*.msix. Add Partner Center identity args to the script for Store uploads."
     }
   ],
   "inputs": [

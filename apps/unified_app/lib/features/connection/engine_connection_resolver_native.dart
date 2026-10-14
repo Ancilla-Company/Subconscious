@@ -6,7 +6,7 @@ import 'package:core_business_logic/core_business_logic.dart';
 const Duration _healthTimeout = Duration(seconds: 2);
 const EngineRuntimeInfo _developmentRuntime = EngineRuntimeInfo(
   host: '127.0.0.1',
-  port: 55681,
+  port: 50505,
   token: 'subconscious-dev-token',
   pid: 0,
   version: 'development',

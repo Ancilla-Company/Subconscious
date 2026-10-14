@@ -66,7 +66,7 @@ Uri? _configuredEngineEndpoint({required bool preferDev}) {
   );
   const String configuredPort = String.fromEnvironment(
     'SUBCONSCIOUS_ENGINE_PORT',
-    defaultValue: '55681',
+    defaultValue: '50505',
   );
   final String defaultDevUrl =
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android

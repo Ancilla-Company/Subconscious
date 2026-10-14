@@ -34,9 +34,10 @@ subconscious start --dev
 Running `subconscious` without a command prints help. `subconscious start`
 runs the engine with its tray status indicator. Add `--detached` to launch it as
 a background process, and independently add `--no-tray` when no tray icon is
-wanted. Development mode defaults to port `55681` and token
-`subconscious-dev-token`; production chooses an available port and generated
-token. Use `--lan` for all-interface IPv4 binding.
+wanted. Production is the default: port `50506` and a generated token.
+Development mode (`--dev` or `SUBCONSCIOUS_ENV=development`) defaults to port
+`50505`, token `subconscious-dev-token`, and a separate `-dev` data directory,
+so both can run side by side. `--port 0` picks any free port. Use `--lan` for all-interface IPv4 binding.
 
 The tray menu can copy a future-compatible join command containing the engine
 URL and joining token. It also exposes desktop, browser, and web UI launch
