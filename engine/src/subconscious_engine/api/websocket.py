@@ -7,12 +7,12 @@ from collections.abc import Callable
 from contextlib import suppress
 import json
 from threading import RLock
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from pydantic_ai import Tool
 from pydantic_ai.messages import BinaryContent, ToolCallPart
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -67,6 +67,7 @@ _UI_DESTINATIONS = {
     "show_context", "hide_context",
 }
 _CLIENT_TOOL_TIMEOUT_SECONDS = 60
+_TASK_FRAMES = frozenset({"task.submit", "task.cancel", "thread.subscribe", "thread.unsubscribe"})
 
 
 def _parse_context_file(value: Any, identifier: str) -> ContextFile | None:
@@ -212,6 +213,24 @@ class ClientRegistry:
             with suppress(Exception):
                 await session._send(frame_type, data)
 
+    async def broadcast_local(self, frame_type: str, data: dict[str, Any]) -> int:
+        """Send to clients connected to this engine only (never hive peers).
+
+        Returns how many sessions the frame reached.
+        """
+        with self._lock:
+            recipients = tuple(
+                session
+                for session in self._sessions.values()
+                if getattr(session.socket, "link", None) is None
+            )
+        delivered = 0
+        for session in recipients:
+            with suppress(Exception):
+                await session._send(frame_type, data)
+                delivered += 1
+        return delivered
+
     def subscribe(
         self, listener: Callable[[tuple[str, ...]], None]
     ) -> Callable[[], None]:
@@ -247,8 +266,23 @@ class ClientRegistry:
             listener(snapshot)
 
 
+class SessionTransport(Protocol):
+    """What a chat session needs from its transport.
+
+    ``WebSocket`` satisfies this, and so does the hive ``PeerTransport`` that
+    carries the same frames over WebRTC data channels. ``receive_json`` raises
+    ``WebSocketDisconnect`` when the transport closes.
+    """
+
+    app: Any
+
+    async def accept(self) -> None: ...
+    async def receive_json(self) -> Any: ...
+    async def send_json(self, data: Any) -> None: ...
+
+
 class WebSocketSession:
-    def __init__(self, socket: WebSocket) -> None:
+    def __init__(self, socket: SessionTransport) -> None:
         self.socket = socket
         self.app = socket.app
         self.client_id: str | None = None
@@ -275,6 +309,9 @@ class WebSocketSession:
                 future.cancel()
             for _, future in self.pending_client_tools.values():
                 future.cancel()
+            manager = self._tasks()
+            if manager is not None:
+                manager.session_closed(self)
             await self.app.state.client_registry.release(self.client_id)
 
     async def _handle(self, frame: Any) -> None:
@@ -311,6 +348,8 @@ class WebSocketSession:
             await self._client_tool_result(turn_id, data)
         elif frame_type in {"profile.set", "tool.result"}:
             return
+        elif frame_type in _TASK_FRAMES and self._tasks() is not None:
+            await self._tasks().handle_frame(self, frame_type, data, turn_id)
         else:
             await self._error(f"Unknown frame type: {frame_type}")
 
@@ -346,6 +385,11 @@ class WebSocketSession:
     async def _cancel(self, turn_id: Any) -> None:
         if isinstance(turn_id, str) and turn_id == self.active_turn_id:
             await self._stop_active_turn()
+        elif isinstance(turn_id, str) and self._tasks() is not None:
+            await self._tasks().handle_frame(self, "task.cancel", {"task_id": turn_id}, turn_id)
+
+    def _tasks(self) -> Any:
+        return getattr(self.app.state, "task_manager", None)
 
     async def _stop_active_turn(self) -> None:
         task = self.active_turn
@@ -418,6 +462,17 @@ class WebSocketSession:
             return
         pending = self.pending.get(approval_id)
         if pending is None:
+            remote = getattr(self.app.state, "remote_tools", None)
+            # A hive peer must never answer the prompt for its own remote tool call.
+            if (
+                remote is not None
+                and getattr(self.socket, "link", None) is None
+                and remote.handle_approval(approval_id, decision)
+            ):
+                return
+            manager = self._tasks()
+            if manager is not None and await manager.handle_approval(self, turn_id, approval_id, decision):
+                return
             await self._error("Approval request was not found or has already completed.")
         elif turn_id is not None and turn_id != pending[0]:
             await self._error("Approval response does not belong to this chat turn.")
@@ -564,7 +619,20 @@ class WebSocketSession:
             if name in self.client_tools
         ]
 
-    async def _run_turn(self, turn_id: str, data: dict[str, Any]) -> None:
+    async def _run_turn(
+        self,
+        turn_id: str,
+        data: dict[str, Any],
+        *,
+        client_msg_uuid: str | None = None,
+        thread_uuid_hint: str | None = None,
+    ) -> tuple[str, str | None]:
+        """Run one chat turn. Returns ``(outcome, error)`` for task bookkeeping.
+
+        ``client_msg_uuid`` makes the user message idempotent (a task retried after a
+        reconnect never duplicates it); ``thread_uuid_hint`` is the uuid a new thread
+        must take so a task can name its thread before the executor creates it.
+        """
         thread_uuid = ""
         try:
             created_thread = False
@@ -576,52 +644,71 @@ class WebSocketSession:
                 data.get("file_context")
             )
             if not isinstance(content, str) or (isinstance(requested_thread, str) == isinstance(requested_workspace, str)):
-                await self._error("chat.send requires content and exactly one of thread_uuid or workspace_uuid")
-                return
+                message = "chat.send requires content and exactly one of thread_uuid or workspace_uuid"
+                await self._error(message)
+                return "failed", message
             async with self.app.state.database.session() as session:
                 if isinstance(requested_thread, str):
                     thread = await session.scalar(select(ConversationThread).options(
-                        selectinload(ConversationThread.workspace)).where(ConversationThread.uuid == requested_thread))
+                        selectinload(ConversationThread.workspace)).where(
+                        ConversationThread.uuid == requested_thread, ConversationThread.deleted_at.is_(None)))
                     if thread is None:
-                        await self._send("chat.error", {"thread_uuid": requested_thread,
-                            "error": f"Thread '{requested_thread}' not found."}, turn_id)
-                        return
+                        message = f"Thread '{requested_thread}' not found."
+                        await self._send("chat.error", {"thread_uuid": requested_thread, "error": message}, turn_id)
+                        return "failed", message
                     workspace = thread.workspace
                 else:
-                    workspace = await session.scalar(select(Workspace).where(Workspace.uuid == requested_workspace))
+                    workspace = await session.scalar(select(Workspace).where(
+                        Workspace.uuid == requested_workspace, Workspace.deleted_at.is_(None)))
                     if workspace is None:
-                        await self._send("chat.error", {"thread_uuid": "",
-                            "error": f"Workspace '{requested_workspace}' not found."}, turn_id)
-                        return
-                    now = utc_now()
-                    thread = ConversationThread(uuid=str(uuid4()), workspace_id=workspace.id,
-                        title=self._title(content), default_model_id=None, created_at=now, updated_at=now)
-                    session.add(thread)
-                    await session.flush()
-                    created_thread = True
+                        message = f"Workspace '{requested_workspace}' not found."
+                        await self._send("chat.error", {"thread_uuid": "", "error": message}, turn_id)
+                        return "failed", message
+                    thread = None
+                    if thread_uuid_hint:  # a retried task reuses the thread it already created
+                        thread = await session.scalar(select(ConversationThread).where(
+                            ConversationThread.uuid == thread_uuid_hint,
+                            ConversationThread.workspace_id == workspace.id,
+                            ConversationThread.deleted_at.is_(None)))
+                    if thread is None:
+                        now = utc_now()
+                        thread = ConversationThread(uuid=thread_uuid_hint or str(uuid4()), workspace_id=workspace.id,
+                            title=self._title(content), default_model_id=None, created_at=now, updated_at=now)
+                        session.add(thread)
+                        await session.flush()
+                        created_thread = True
                 thread_uuid = thread.uuid
                 selected_model = model_id if isinstance(model_id, str) else (
                     thread.default_model_id or workspace.default_model_id or "echo")
                 config = ModelConfig(id="echo", provider="subconscious", model="echo") if selected_model.casefold() == "echo" \
                     else await self.app.state.model_configuration_store.resolve(selected_model)
                 if config is None:
-                    await self._send("chat.error", {"thread_uuid": thread_uuid,
-                        "error": f"Model configuration '{selected_model}' was not found."}, turn_id)
-                    return
-                prior = (await session.scalars(select(Message).where(Message.thread_id == thread.id)
-                                               .order_by(Message.created_at, Message.id))).all()
+                    message = f"Model configuration '{selected_model}' was not found."
+                    await self._send("chat.error", {"thread_uuid": thread_uuid, "error": message}, turn_id)
+                    return "failed", message
+                history_query = select(Message).where(Message.thread_id == thread.id, Message.deleted_at.is_(None))
+                if client_msg_uuid:
+                    history_query = history_query.where(Message.uuid != client_msg_uuid)
+                prior = (await session.scalars(history_query.order_by(
+                    Message.hlc, func.coalesce(Message.origin_node_id, ""), Message.uuid))).all()
                 history = [(message.role, message.content) for message in prior
                            if message.role in {"user", "assistant", "system"}]
                 thread.default_model_id = config.id
                 if not thread.title:
                     thread.title = self._title(content)
                 thread.updated_at = utc_now()
-                user_message = Message(uuid=str(uuid4()), thread_id=thread.id, role="user", content=content)
-                session.add(user_message)
+                user_message = await session.scalar(select(Message).where(Message.uuid == client_msg_uuid)) \
+                    if client_msg_uuid else None
+                publish_user_message = user_message is None
+                if user_message is None:
+                    user_message = Message(uuid=client_msg_uuid or str(uuid4()), thread_id=thread.id,
+                                           role="user", content=content)
+                    session.add(user_message)
                 await session.commit()
                 if created_thread:
                     await self._publish_thread_created(thread, workspace)
-                await self._publish_message(user_message, thread_uuid)
+                if publish_user_message:
+                    await self._publish_message(user_message, thread_uuid)
                 tools_enabled = data.get("tools_enabled", True) is not False
                 tools = []
                 tool_context = ToolContext(
@@ -643,6 +730,12 @@ class WebSocketSession:
                         tool_context,
                         approval,
                     )
+                    remote_toolset = getattr(self.app.state, "remote_toolset", None)
+                    if remote_toolset is not None:
+                        # Opt-in per workspace/thread (tools_config "remote"); empty otherwise.
+                        tools.extend(await remote_toolset.tools_for_turn(
+                            tools_raw, task_id=turn_id, workspace_uuid=workspace.uuid,
+                            approval=approval))
                 tools.extend(self._ui_tools(turn_id))
                 agent_content: str | list[Any] = content
                 if (active_file is not None or tagged_files or attachments) and \
@@ -660,11 +753,24 @@ class WebSocketSession:
                     ]
                     agent_content = [context_prompt, *binary_parts] \
                         if binary_parts else context_prompt
+                streamed: list[str] = []
+
+                async def stream_delta(delta: Any) -> None:
+                    # Real per-token streaming: model.delta -> chat.delta, in arrival order.
+                    if isinstance(delta, str) and delta:
+                        streamed.append(delta)
+                        await self._send("chat.delta", {"thread_uuid": thread_uuid, "delta": delta}, turn_id)
+
                 graph_engine = getattr(self.app.state, "graph_engine", None)
                 if graph_engine is None:
+                    async def agent_event(event: dict[str, Any]) -> None:
+                        if event.get("type") == "model.delta":
+                            await stream_delta(event.get("delta"))
+
                     result = await self.app.state.agent_manager.execute(
                         config, agent_content, history, tools,
                         lambda call: self._request_approval(turn_id, thread_uuid, call),
+                        event_sink=agent_event,
                     )
                 else:
                     async def graph_event(event: dict[str, Any]) -> None:
@@ -676,6 +782,8 @@ class WebSocketSession:
                         await self.app.state.event_bus.publish(
                             "graph.execution", {"thread_uuid": thread_uuid, **event}
                         )
+                        if event.get("type") == "model.delta":
+                            await stream_delta(event.get("delta"))
 
                     result = await graph_engine.run_conscious(
                         config,
@@ -699,13 +807,23 @@ class WebSocketSession:
                 session.add(assistant)
                 await session.commit()
                 await self._publish_message(assistant, thread_uuid)
-            if result.text:
-                await self._send("chat.delta", {"thread_uuid": thread_uuid, "delta": result.text}, turn_id)
+            # Whatever streaming did not already deliver (nothing, or the tail) goes out
+            # now so clients that accumulate chat.delta always end with the final text.
+            already = "".join(streamed)
+            if result.text and result.text != already:
+                if not already:
+                    await self._send("chat.delta", {"thread_uuid": thread_uuid, "delta": result.text}, turn_id)
+                elif result.text.startswith(already):
+                    await self._send("chat.delta", {"thread_uuid": thread_uuid,
+                                                    "delta": result.text[len(already):]}, turn_id)
             await self._send("chat.done", {"thread_uuid": thread_uuid}, turn_id)
+            return "done", None
         except asyncio.CancelledError:
             await self._send("chat.cancelled", {"thread_uuid": thread_uuid}, turn_id)
+            return "cancelled", None
         except Exception as error:
             await self._send("chat.error", {"thread_uuid": thread_uuid, "error": str(error)}, turn_id)
+            return "failed", str(error) or error.__class__.__name__
         finally:
             for approval_id, (pending_turn, future) in tuple(self.pending.items()):
                 if pending_turn == turn_id:

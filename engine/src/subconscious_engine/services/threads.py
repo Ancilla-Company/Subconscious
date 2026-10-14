@@ -15,19 +15,24 @@ class ThreadService:
         self.session = session
 
     async def list(self, workspace_uuid: str) -> list[ThreadDto]:
-        workspace = await self.session.scalar(select(Workspace).where(Workspace.uuid == workspace_uuid))
+        workspace = await self.session.scalar(
+            select(Workspace).where(Workspace.uuid == workspace_uuid, Workspace.deleted_at.is_(None)))
         if workspace is None:
             return []
-        query = select(ConversationThread).where(ConversationThread.workspace_id == workspace.id).order_by(ConversationThread.updated_at.desc())
+        query = (select(ConversationThread)
+                 .where(ConversationThread.workspace_id == workspace.id, ConversationThread.deleted_at.is_(None))
+                 .order_by(ConversationThread.updated_at.desc()))
         rows = (await self.session.scalars(query)).all()
         return [self._dto(row, workspace) for row in rows]
 
     async def get(self, uuid: str) -> ConversationThread | None:
-        query = select(ConversationThread).options(selectinload(ConversationThread.workspace)).where(ConversationThread.uuid == uuid)
+        query = (select(ConversationThread).options(selectinload(ConversationThread.workspace))
+                 .where(ConversationThread.uuid == uuid, ConversationThread.deleted_at.is_(None)))
         return await self.session.scalar(query)
 
     async def create(self, request: CreateThreadRequest) -> ThreadDto | None:
-        workspace = await self.session.scalar(select(Workspace).where(Workspace.uuid == request.workspace_uuid))
+        workspace = await self.session.scalar(
+            select(Workspace).where(Workspace.uuid == request.workspace_uuid, Workspace.deleted_at.is_(None)))
         if workspace is None:
             return None
         values = request.model_dump(exclude={"workspace_uuid"}, by_alias=False)
@@ -45,7 +50,7 @@ class ThreadService:
         return self._dto(row, row.workspace)
 
     async def delete(self, row: ConversationThread) -> None:
-        await self.session.delete(row)
+        row.deleted_at = utc_now()  # tombstone; purged after the retention window
         await self.session.commit()
 
     @staticmethod

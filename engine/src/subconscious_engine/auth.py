@@ -17,6 +17,25 @@ class EngineAuthToken:
         return cls(secrets.token_urlsafe(32))
 
 
+PEER_STATE_KEY = "hive_peer_principal"
+
+
+@dataclass(frozen=True, slots=True)
+class PeerPrincipal:
+    """An authenticated remote node; only the in-process tunnel may create one."""
+
+    node_id: str
+    role: str
+
+
+def trusted_peer(scope: Scope) -> PeerPrincipal | None:
+    """Return the tunnel-set principal. Real clients cannot place Python objects in
+    ASGI scope state (servers build it from lifespan state, never from the wire)."""
+    state = scope.get("state")
+    value = state.get(PEER_STATE_KEY) if isinstance(state, dict) else None
+    return value if isinstance(value, PeerPrincipal) else None
+
+
 class BearerAuthMiddleware:
     def __init__(self, app: ASGIApp, token: EngineAuthToken) -> None:
         self.app = app
@@ -25,6 +44,10 @@ class BearerAuthMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = scope.get("path", "")
         if not path.startswith("/api/v1") or path.startswith("/api/v1/health"):
+            await self.app(scope, receive, send)
+            return
+        if scope["type"] == "http" and trusted_peer(scope) is not None:
+            # Authenticated and authorised by the hive tunnel before dispatch.
             await self.app(scope, receive, send)
             return
         headers = {key.lower(): value for key, value in scope.get("headers", [])}

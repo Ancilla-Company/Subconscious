@@ -1,5 +1,7 @@
 import 'package:core_business_logic/core_business_logic.dart';
 
+import '../hive/hive_repository_resolver.dart';
+
 Future<EngineRepository?> resolveEngineRepository({
   required Uri? explicitEndpoint,
   required String explicitToken,
@@ -7,7 +9,9 @@ Future<EngineRepository?> resolveEngineRepository({
 }) async {
   final Uri? endpoint = explicitEndpoint;
   if (endpoint == null || endpoint.host.isEmpty || explicitToken.isEmpty) {
-    return null;
+    // Web has no local engine: use a home engine over WebRTC when signed in
+    // (reduced trust, see HiveRuntime).
+    return resolveHiveRepository();
   }
   final Uri baseUri = endpoint.replace(
     path: '/api/v1/',

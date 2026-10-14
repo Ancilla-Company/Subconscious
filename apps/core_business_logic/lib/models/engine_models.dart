@@ -386,6 +386,9 @@ final class ToolApprovalRequest {
     required this.toolName,
     required this.arguments,
     required this.operation,
+    this.remote = false,
+    this.peerName,
+    this.peerNodeId,
   });
 
   final String turnId;
@@ -394,6 +397,11 @@ final class ToolApprovalRequest {
   final String toolName;
   final Map<String, dynamic> arguments;
   final String operation;
+
+  /// True when a hive peer asks to run one of this node's exported tools.
+  final bool remote;
+  final String? peerName;
+  final String? peerNodeId;
 }
 
 final class WireFrame {

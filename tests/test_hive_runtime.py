@@ -1,0 +1,614 @@
+"""Hive runtime tests: signalling client, service lifecycle, routes, config, CLI."""
+
+import asyncio
+import json
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+
+import httpx
+import pytest
+
+from subconscious_engine.__main__ import build_parser
+from subconscious_engine.account import AccountUser
+from subconscious_engine.api.app import create_app
+from subconscious_engine.auth import EngineAuthToken
+from subconscious_engine.config import EngineConfig, HiveConfig
+from subconscious_engine.configuration_file import (
+    ConfigurationFileError,
+    set_configuration_value,
+)
+from subconscious_engine.hive.directory import HiveApiError
+from subconscious_engine.hive.errors import HiveError
+from subconscious_engine.hive.identity import (
+    NodeIdentity,
+    approval_message,
+    b64u_encode,
+    short_authentication_string,
+    signal_auth_message,
+    verify_signature,
+)
+from subconscious_engine.hive.service import HiveService
+from subconscious_engine.hive.signaling import (
+    BACKOFF_MAX_SECONDS,
+    SignalingClient,
+    backoff_delay,
+    signal_url,
+)
+from subconscious_engine.storage import Database
+
+ACCESS_TOKEN = "access-token-value-123"
+TICKET = "ticket-value-abc"
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+async def until(predicate, timeout=10.0):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() > deadline:
+            raise AssertionError("condition not reached")
+        await asyncio.sleep(0.02)
+
+
+# --- signalling client --------------------------------------------------------------
+
+
+class FakeTicketApi:
+    base_url = "https://api.example.test/"
+
+    def __init__(self):
+        self.tickets = 0
+
+    async def signal_ticket(self, node_id):
+        self.tickets += 1
+        return {"ticket": TICKET, "challenge": f"challenge-{self.tickets}", "expires_in": 30}
+
+
+class FakeSocket:
+    def __init__(self, identity, reply="auth.ok"):
+        self.identity = identity
+        self.reply = reply
+        self.sent = []
+        self.inbox = asyncio.Queue()
+        self.closed = False
+
+    async def send(self, message):
+        frame = json.loads(message)
+        self.sent.append(frame)
+        if frame["type"] == "auth":
+            if self.reply == "auth.ok":
+                data = {"node_id": self.identity.node_id, "hive_id": "hive-1"}
+            else:
+                data = {"code": "auth_failed"}
+            self.inbox.put_nowait({"v": 1, "type": self.reply, "data": data})
+
+    async def recv(self):
+        item = await self.inbox.get()
+        if item is None:
+            raise ConnectionError("closed")
+        return json.dumps(item)
+
+    async def close(self, code=1000, reason=""):
+        self.closed = True
+
+
+def _signaling(identity, sockets, sleeps, replies=None):
+    replies = list(replies or [])
+
+    async def connect(url):
+        assert url == "wss://api.example.test/signal"
+        socket = FakeSocket(identity, replies.pop(0) if replies else "auth.ok")
+        sockets.append(socket)
+        return socket
+
+    async def sleep(delay):
+        if delay == 3600:  # the refresh timer: never fires during a test
+            await asyncio.Event().wait()
+        sleeps.append(delay)
+        await asyncio.sleep(0)
+
+    return SignalingClient(
+        FakeTicketApi(), identity, connect=connect, refresh_interval=3600, sleep=sleep, rng=lambda: 0.5
+    )
+
+
+def test_backoff_has_jitter_and_is_capped():
+    assert backoff_delay(0, rng=lambda: 1.0) == 1.0
+    assert backoff_delay(3, rng=lambda: 1.0) == 8.0
+    assert backoff_delay(30, rng=lambda: 1.0) == BACKOFF_MAX_SECONDS
+    assert backoff_delay(5, rng=lambda: 0.0) == 0.5
+    assert backoff_delay(5, rng=lambda: 0.25) < backoff_delay(5, rng=lambda: 0.75)
+
+
+def test_signal_url_maps_scheme_and_appends_path():
+    assert signal_url("https://api.example.test/") == "wss://api.example.test/signal"
+    assert signal_url("http://127.0.0.1:8000") == "ws://127.0.0.1:8000/signal"
+
+
+def test_signaling_authenticates_dispatches_refreshes_and_reconnects_with_backoff():
+    async def scenario():
+        identity = NodeIdentity.generate()
+        sockets, sleeps, received = [], [], []
+        client = _signaling(identity, sockets, sleeps)
+
+        async def on_signal(data):
+            received.append(data)
+
+        client.on("signal", on_signal)
+        client.start()
+        try:
+            await client.wait_connected(5)
+            socket = sockets[0]
+            auth = socket.sent[0]
+            assert auth["type"] == "auth" and auth["data"]["node_id"] == identity.node_id
+            assert auth["data"]["ticket"] == TICKET
+            assert verify_signature(
+                identity.public_key, auth["data"]["sig"],
+                signal_auth_message("challenge-1", TICKET, identity.node_id),
+            )
+            assert client.hive_id == "hive-1"
+            await until(lambda: any(f["type"] == "presence.set" for f in socket.sent))
+
+            socket.inbox.put_nowait({"v": 1, "type": "signal", "data": {"sid": "s", "from": "n_x"}})
+            await until(lambda: received)
+            assert received[0]["from"] == "n_x"
+
+            await client.refresh_auth()
+            refresh = socket.sent[-1]
+            assert refresh["type"] == "auth.refresh" and "node_id" not in refresh["data"]
+            assert verify_signature(
+                identity.public_key, refresh["data"]["sig"],
+                signal_auth_message("challenge-2", TICKET, identity.node_id),
+            )
+
+            await client.send_signal("sid", "n_y", "bye", {}, None)
+            assert socket.sent[-1]["data"] == {"sid": "sid", "to": "n_y", "kind": "bye", "body": {}}
+
+            socket.inbox.put_nowait(None)  # connection drops
+            await until(lambda: len(sockets) == 2)
+            await client.wait_connected(5)
+            assert sleeps and 0.5 <= sleeps[0] <= BACKOFF_MAX_SECONDS
+            assert sockets[0].closed
+        finally:
+            await client.stop()
+        assert not client.connected
+        with pytest.raises(ConnectionError):
+            await client.send("presence.set", {})
+    run(scenario())
+
+
+def test_signaling_sends_application_level_pings_so_the_server_idle_timeout_never_fires():
+    async def scenario():
+        identity = NodeIdentity.generate()
+        socket = FakeSocket(identity)
+
+        async def connect(url):
+            return socket
+
+        client = SignalingClient(
+            FakeTicketApi(), identity, connect=connect, refresh_interval=3600, heartbeat_interval=0.05
+        )
+        client.start()
+        try:
+            await client.wait_connected(5)
+            await until(lambda: sum(1 for f in socket.sent if f["type"] == "ping") >= 2)
+        finally:
+            await client.stop()
+        count = sum(1 for f in socket.sent if f["type"] == "ping")
+        await asyncio.sleep(0.2)
+        assert sum(1 for f in socket.sent if f["type"] == "ping") == count  # stops with the session
+    run(scenario())
+
+
+def test_signaling_rejected_auth_never_connects_and_retries():
+    async def scenario():
+        identity = NodeIdentity.generate()
+        sockets, sleeps = [], []
+        client = _signaling(identity, sockets, sleeps, replies=["error", "error", "auth.ok"])
+        client.start()
+        try:
+            await client.wait_connected(5)
+            assert len(sockets) == 3 and client.failures == 2
+            assert len(sleeps) == 2
+        finally:
+            await client.stop()
+    run(scenario())
+
+
+def test_signaling_rejects_oversized_frames():
+    async def scenario():
+        identity = NodeIdentity.generate()
+        client = _signaling(identity, [], [])
+        client.start()
+        try:
+            await client.wait_connected(5)
+            with pytest.raises(ValueError):
+                await client.send("signal", {"body": "x" * (70 * 1024)})
+        finally:
+            await client.stop()
+    run(scenario())
+
+
+# --- service lifecycle ---------------------------------------------------------------
+
+
+class MemoryStore:
+    def __init__(self, seed=None):
+        self.value = seed
+
+    def read(self):
+        return self.value
+
+    def write(self, seed):
+        self.value = seed
+
+    def delete(self):
+        self.value = None
+
+
+class FakeAccount:
+    server_base_url = "http://127.0.0.1:9"
+
+    def __init__(self):
+        self.listeners = []
+        self.current_account_user = None
+
+    def subscribe(self, listener):
+        self.listeners.append(listener)
+        return lambda: self.listeners.remove(listener)
+
+    def emit(self, user):
+        self.current_account_user = user
+        for listener in list(self.listeners):
+            listener(user)
+
+    def access_token(self):
+        return ACCESS_TOKEN
+
+    async def refresh_access_token(self):
+        return ACCESS_TOKEN
+
+    async def restore(self):
+        return None
+
+
+class FakeServerApi:
+    """Stands in for the node registry; keeps its own node list like the server."""
+
+    base_url = "http://127.0.0.1:9/"
+
+    def __init__(self):
+        self.nodes = []
+        self.calls = []
+
+    async def list_nodes(self):
+        return {"hive_id": "hive-1", "nodes": [dict(n) for n in self.nodes]}
+
+    async def register(self, body):
+        self.calls.append(("register", body))
+        entry = {
+            "id": None, "kind": body["kind"], "name": body["name"], "platform": body["platform"],
+            "app_version": body["app_version"], "protocol_version": 1, "public_key": body["public_key"],
+            "status": "active" if not self.nodes else "pending", "approved_by": None,
+            "approval_sig": None, "capabilities": {}, "online": False,
+        }
+        from subconscious_engine.hive.identity import b64u_decode, derive_node_id
+
+        entry["id"] = derive_node_id(b64u_decode(body["public_key"]))
+        self.nodes.append(entry)
+        return entry
+
+    async def signal_ticket(self, node_id):
+        raise HiveApiError("offline", 503)  # the network layer retries quietly
+
+    async def ice_config(self, node_id):
+        return {"ice_servers": [], "ttl": 60}
+
+    async def approve(self, node_id, approver_node_id, sig):
+        self.calls.append(("approve", node_id, approver_node_id, sig))
+
+    async def revoke(self, node_id):
+        self.calls.append(("revoke", node_id))
+
+    async def create_invite(self, node_id):
+        return {"code": "invite-123", "expires_at": "later"}
+
+    async def close(self):
+        return None
+
+
+def _user(identifier="user-1"):
+    return AccountUser(id=identifier, email=f"{identifier}@example.test", connected_providers=())
+
+
+def _service(tmp_path, account, api, store=None):
+    service = HiveService(
+        account=account,
+        credential_store=SimpleNamespace(),
+        data_directory=tmp_path,
+        api=api,
+        identity_store=store or MemoryStore(),
+        node_name="test-node",
+    )
+    service.attach(SimpleNamespace(state=SimpleNamespace(client_registry=None)))
+    return service
+
+
+def test_service_starts_only_when_signed_in_and_tears_down_on_logout_and_account_change(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), FakeServerApi()
+        service = _service(tmp_path, account, api)
+        assert service.state == "stopped" and service.identity is None
+        account.emit(_user("user-1"))
+        await until(lambda: service.state == "running")
+        snapshot = service.snapshot()
+        assert [n["local"] and n["trusted"] and n["status"] == "active" for n in snapshot["nodes"]] == [True]
+        assert snapshot["hive_id"] == "hive-1" and snapshot["node_id"] == service.identity.node_id
+        assert ACCESS_TOKEN not in json.dumps(snapshot)
+        assert service.signaling is not None and service.peers is not None
+        first_identity = service.identity.node_id
+
+        account.emit(None)  # logout
+        await service._pending_apply
+        assert service.state == "stopped"
+        assert service.signaling is None and service.peers is None and service.directory is None
+
+        api.nodes.clear()
+        account.emit(_user("user-2"))  # a different account on the same machine
+        await until(lambda: service.state == "running")
+        assert service.directory.user_id == "user-2"
+        assert service.identity.node_id == first_identity  # the node key belongs to the machine
+        await service.shutdown()
+        assert service.state == "stopped" and not account.listeners
+    run(scenario())
+
+
+def test_disabled_service_ignores_account_changes(tmp_path):
+    async def scenario():
+        account = FakeAccount()
+        service = HiveService(
+            account=account, credential_store=SimpleNamespace(), data_directory=tmp_path,
+            enabled=False, api=FakeServerApi(), identity_store=MemoryStore(),
+        )
+        service.attach(SimpleNamespace(state=SimpleNamespace(client_registry=None)))
+        account.emit(_user())
+        await asyncio.sleep(0.1)
+        assert service.state == "stopped" and service.snapshot()["enabled"] is False
+        await service.startup()
+        await service.shutdown()
+    run(scenario())
+
+
+def _entry(identity, status="active", approver=None, sig=None):
+    return {
+        "id": identity.node_id, "kind": "engine", "name": "n", "platform": "t", "app_version": "0",
+        "protocol_version": 1, "public_key": identity.public_key_b64u, "status": status,
+        "approved_by": approver.node_id if approver else None, "approval_sig": sig,
+        "capabilities": {}, "online": False,
+    }
+
+
+def test_approval_requires_matching_short_code_and_signs_the_new_key(tmp_path):
+    async def scenario():
+        root, newcomer = NodeIdentity.generate(), NodeIdentity.generate()
+        account, api = FakeAccount(), FakeServerApi()
+        api.nodes = [_entry(root), _entry(newcomer, status="pending")]
+        service = _service(tmp_path, account, api, MemoryStore(b64u_encode(root.seed())))
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        code = short_authentication_string(root.public_key, newcomer.public_key)
+        assert service.sas_for(newcomer.node_id) == code
+        with pytest.raises(HiveError) as wrong:
+            await service.approve(newcomer.node_id, "000000" if code != "000000" else "111111")
+        assert wrong.value.status_code == 400
+        with pytest.raises(HiveError) as missing:
+            await service.approve("n_unknown", code)
+        assert missing.value.status_code == 404
+        with pytest.raises(HiveError) as root_again:
+            await service.approve(root.node_id, code)  # already active, not pending
+        assert root_again.value.status_code == 404
+        assert not [c for c in api.calls if c[0] == "approve"]
+
+        await service.approve(newcomer.node_id, code)
+        _, node_id, approver_id, sig = next(c for c in api.calls if c[0] == "approve")
+        assert node_id == newcomer.node_id and approver_id == root.node_id
+        assert verify_signature(
+            root.public_key, sig, approval_message("user-1", newcomer.public_key_b64u)
+        )
+        invite = await service.create_invite()
+        assert invite["code"] == "invite-123"
+        await service.revoke(newcomer.node_id)
+        assert ("revoke", newcomer.node_id) in api.calls
+        with pytest.raises(HiveError):
+            await service.revoke("n_unknown")
+        await service.shutdown()
+    run(scenario())
+
+
+def test_untrusted_local_node_waits_and_cannot_approve_or_invite(tmp_path):
+    async def scenario():
+        root = NodeIdentity.generate()
+        me = NodeIdentity.generate()
+        account, api = FakeAccount(), FakeServerApi()
+        api.nodes = [_entry(root), _entry(me, status="pending")]
+        service = _service(tmp_path, account, api, MemoryStore(b64u_encode(me.seed())))
+        account.emit(_user())
+        await until(lambda: service.state == "pending")
+        assert service.signaling is None  # no network presence until approved
+        with pytest.raises(HiveError) as invite:
+            await service.create_invite()
+        assert invite.value.status_code == 403
+        with pytest.raises(HiveError) as approve:
+            await service.approve(root.node_id, "123456")
+        assert approve.value.status_code == 403
+        await service.shutdown()
+    run(scenario())
+
+
+def test_management_calls_without_a_session_are_rejected(tmp_path):
+    async def scenario():
+        service = _service(tmp_path, FakeAccount(), FakeServerApi())
+        for call in (service.enroll(None), service.create_invite(), service.approve("n_x", "1"), service.revoke("n_x")):
+            with pytest.raises(HiveError) as error:
+                await call
+            assert error.value.status_code == 409
+    run(scenario())
+
+
+# --- routes --------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def route_client(tmp_path, hive_service):
+    database = Database(tmp_path / "routes.db")
+    await database.initialize()
+
+    async def resolve(identifier):
+        return None
+
+    app = create_app(
+        database, EngineAuthToken("secret-token"),
+        model_configuration_store=SimpleNamespace(resolve=resolve),
+    )
+    app.state.hive_service = hive_service
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+            yield client
+    finally:
+        await database.close()
+
+
+class StubHive:
+    def __init__(self):
+        self.approved = []
+
+    def snapshot(self):
+        return {"enabled": True, "state": "running", "detail": "", "node_id": "n_a", "hive_id": "h", "nodes": []}
+
+    async def enroll(self, invite):
+        if invite == "bad":
+            raise HiveError("Invite is not valid.", 400)
+        return self.snapshot()
+
+    async def create_invite(self):
+        return {"code": "c", "expires_at": "e"}
+
+    async def approve(self, node_id, sas):
+        if sas != "123456":
+            raise HiveError("The short authentication code does not match.", 400)
+        self.approved.append(node_id)
+
+    async def revoke(self, node_id):
+        raise HiveError("Unknown node.", 404)
+
+
+def test_hive_routes_require_the_engine_bearer_and_report_errors(tmp_path):
+    async def scenario():
+        auth = {"Authorization": "Bearer secret-token"}
+        async with route_client(tmp_path, StubHive()) as client:
+            for method, path in (
+                ("GET", "/api/v1/hive/nodes"), ("POST", "/api/v1/hive/enroll"),
+                ("POST", "/api/v1/hive/invites"), ("POST", "/api/v1/hive/nodes/n_x/approve"),
+                ("DELETE", "/api/v1/hive/nodes/n_x"),
+            ):
+                assert (await client.request(method, path)).status_code == 401
+                assert (await client.request(method, path, headers={"Authorization": "Bearer nope"})).status_code == 401
+            listing = await client.get("/api/v1/hive/nodes", headers=auth)
+            assert listing.status_code == 200 and listing.json()["state"] == "running"
+            assert ACCESS_TOKEN not in listing.text and "access_token" not in listing.text
+            assert (await client.post("/api/v1/hive/enroll", json={"invite_code": "bad"}, headers=auth)).status_code == 400
+            assert (await client.post("/api/v1/hive/enroll", json={}, headers=auth)).status_code == 200
+            assert (await client.post("/api/v1/hive/invites", json={}, headers=auth)).json()["code"] == "c"
+            missing_code = await client.post("/api/v1/hive/nodes/n_x/approve", json={}, headers=auth)
+            assert missing_code.status_code == 400
+            wrong = await client.post("/api/v1/hive/nodes/n_x/approve", json={"sas": "000000"}, headers=auth)
+            assert wrong.status_code == 400 and "does not match" in wrong.json()["error"]
+            ok = await client.post("/api/v1/hive/nodes/n_x/approve", json={"sas": "123456"}, headers=auth)
+            assert ok.status_code == 200
+            assert (await client.delete("/api/v1/hive/nodes/n_x", headers=auth)).status_code == 404
+    run(scenario())
+
+
+def test_hive_routes_degrade_when_the_service_is_absent(tmp_path):
+    async def scenario():
+        auth = {"Authorization": "Bearer secret-token"}
+        async with route_client(tmp_path, None) as client:
+            listing = (await client.get("/api/v1/hive/nodes", headers=auth)).json()
+            assert listing["enabled"] is False and listing["nodes"] == []
+            assert (await client.post("/api/v1/hive/enroll", json={}, headers=auth)).status_code == 503
+    run(scenario())
+
+
+def test_account_session_access_token_is_not_served_by_any_route(tmp_path):
+    from subconscious_engine.account import AccountSessionService
+
+    assert callable(AccountSessionService.access_token)
+
+    async def scenario():
+        async with route_client(tmp_path, None) as client:
+            auth = {"Authorization": "Bearer secret-token"}
+            for path in ("/api/v1/account", "/api/v1/account/session", "/api/v1/hive/nodes"):
+                response = await client.get(path, headers=auth)
+                assert "access_token" not in response.text and "accessToken" not in response.text
+    run(scenario())
+
+
+# --- configuration + CLI --------------------------------------------------------------
+
+
+def test_hive_config_defaults_and_validation(tmp_path):
+    config = EngineConfig()
+    assert config.hive == HiveConfig(enabled=True, server_url=None, stun_servers=(), node_name=None)
+    assert config.resolved_hive_server_url == config.resolved_account_server_url
+    path = tmp_path / "config.yaml"
+    set_configuration_value(path, "engine.hive.enabled", "false")
+    set_configuration_value(path, "engine.hive.stun_servers", "[\"stun:stun.example.test:3478\"]")
+    set_configuration_value(path, "engine.hive.node_name", "my-vps")
+    text = path.read_text(encoding="utf-8")
+    assert "enabled: false" in text and "my-vps" in text
+    for key, value in (
+        ("engine.hive.enabled", "yes please"), ("engine.hive.server_url", "ftp://x"),
+        ("engine.hive.stun_servers", "[\"http://x\"]"), ("engine.hive.bogus", "1"),
+        ("engine.hive.node_name", "[1]"),
+    ):
+        with pytest.raises(ConfigurationFileError):
+            set_configuration_value(path, key, value)
+
+
+def test_node_cli_parses_every_subcommand():
+    parser = build_parser()
+    assert parser.parse_args(["node", "list"]).node_command == "list"
+    enroll = parser.parse_args(["node", "enroll", "--invite", "abc"])
+    assert enroll.node_command == "enroll" and enroll.invite == "abc"
+    assert parser.parse_args(["node", "invite"]).node_command == "invite"
+    approve = parser.parse_args(["node", "approve", "n_abc", "--sas", "123456"])
+    assert (approve.node_id, approve.sas) == ("n_abc", "123456")
+    assert parser.parse_args(["node", "revoke", "n_abc"]).node_id == "n_abc"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["node"])
+
+
+def test_node_cli_shows_the_short_code_for_pending_nodes(capsys, monkeypatch):
+    from subconscious_engine import __main__ as cli
+
+    nodes = [{"id": "n_new", "name": "vps", "status": "pending", "local": False, "online": True, "sas": "042517"}]
+
+    async def fake_request(method, path, body=None, **kwargs):
+        if path == "nodes" and method == "GET":
+            return {"state": "running", "detail": "", "nodes": nodes}
+        if path.endswith("/approve"):
+            assert body == {"sas": "042517"}
+            return {"approved": True}
+        raise AssertionError(path)
+
+    monkeypatch.setattr("subconscious_engine.client.hive_request", fake_request)
+    args = build_parser().parse_args(["node", "approve", "n_new", "--sas", "042517"])
+    assert cli._run_node(args) == 0
+    output = capsys.readouterr().out
+    assert "042517" in output and "approved" in output.lower()
+    args = build_parser().parse_args(["node", "list"])
+    assert cli._run_node(args) == 0
+    assert "code 042517" in capsys.readouterr().out

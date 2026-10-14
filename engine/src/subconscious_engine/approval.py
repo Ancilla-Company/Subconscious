@@ -28,6 +28,8 @@ _PREFIXES: tuple[tuple[str, str], ...] = (
 
 
 def classify_operation(tool_name: str) -> str:
+    # Remote tools are named "<node alias>__<tool>"; classify by the tool itself.
+    tool_name = tool_name.rpartition("__")[2] or tool_name
     explicit = _EXPLICIT.get(tool_name)
     if explicit is not None:
         return explicit

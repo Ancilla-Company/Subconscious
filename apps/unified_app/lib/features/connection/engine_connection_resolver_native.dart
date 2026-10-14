@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:core_business_logic/core_business_logic.dart';
 
+import '../hive/hive_repository_resolver.dart';
+
 const Duration _healthTimeout = Duration(seconds: 2);
 const EngineRuntimeInfo _developmentRuntime = EngineRuntimeInfo(
   host: '127.0.0.1',
@@ -40,6 +42,10 @@ Future<EngineRepository?> resolveEngineRepository({
   if (preferDev && await _isReachable(_developmentRuntime)) {
     return _repositoryFromRuntime(_developmentRuntime);
   }
+  // No local engine is reachable: if signed in to the server, use a home
+  // engine from the node list over WebRTC (webrtc.md section 9).
+  final EngineRepository? remote = await resolveHiveRepository();
+  if (remote != null) return remote;
   if (discoveryError != null) throw discoveryError;
   return null;
 }

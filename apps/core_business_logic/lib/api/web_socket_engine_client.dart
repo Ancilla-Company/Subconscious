@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/engine_models.dart';
+import 'engine_socket.dart';
+import 'task_socket_mixin.dart';
 
-final class WebSocketEngineClient {
+final class WebSocketEngineClient with TaskSocketMixin implements EngineSocket {
   WebSocketEngineClient({required this.endpoint});
   final Uri endpoint;
   final StreamController<WireFrame> _frames =
@@ -15,9 +17,12 @@ final class WebSocketEngineClient {
   int _sequence = 0;
   bool _closing = false;
 
+  @override
   Stream<WireFrame> get frames => _frames.stream;
+  @override
   bool get isConnected => _channel != null;
 
+  @override
   Future<void> connect() async {
     if (isConnected) return;
     final WebSocketChannel channel = WebSocketChannel.connect(endpoint);
@@ -39,6 +44,7 @@ final class WebSocketEngineClient {
     }
   }
 
+  @override
   String send({required String type, Map<String, dynamic>? data, String? id}) {
     final WebSocketChannel? channel = _channel;
     if (channel == null)
@@ -49,6 +55,7 @@ final class WebSocketEngineClient {
     return frameId;
   }
 
+  @override
   String sendChat({
     required String content,
     String? threadUuid,
@@ -74,6 +81,7 @@ final class WebSocketEngineClient {
     );
   }
 
+  @override
   void registerUiTools() => send(
     type: 'tool.register',
     data: <String, dynamic>{
@@ -87,6 +95,7 @@ final class WebSocketEngineClient {
     },
   );
 
+  @override
   void respondToolApproval({
     required String turnId,
     required String approvalId,
@@ -100,6 +109,7 @@ final class WebSocketEngineClient {
     },
   );
 
+  @override
   void sendClientToolResult({
     required String turnId,
     required String requestId,
@@ -117,14 +127,17 @@ final class WebSocketEngineClient {
     },
   );
 
+  @override
   void cancelChat(String turnId) => send(
     type: 'chat.cancel',
     id: turnId,
     data: <String, dynamic>{'turn_id': turnId},
   );
 
+  @override
   Future<void> close() => _disconnect();
 
+  @override
   Future<void> dispose() async {
     await _disconnect();
     if (!_frames.isClosed) await _frames.close();

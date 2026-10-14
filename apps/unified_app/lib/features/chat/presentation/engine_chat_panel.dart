@@ -8,7 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../editor/presentation/markdown/markdown_preview.dart';
+import '../../hive/executor_selection.dart';
 import '../engine_llm_provider.dart';
+import 'executor_widgets.dart';
 import '../../settings/presentation/settings_main_panel.dart';
 
 typedef MaterializeThreadDraftCallback = Future<EngineLlmProvider> Function(
@@ -43,9 +45,12 @@ final class EngineChatPanel extends StatefulWidget {
     this.title,
     this.draftToolsConfig,
     this.useNeutralUserBubbleForeground = false,
+    this.executors,
     super.key,
   });
 
+  /// Where tasks can run. When null (no hive) the picker is not shown.
+  final ExecutorDirectory? executors;
   final EngineLlmProvider provider;
   final bool isComposerEnabled;
   final Workspace? workspace;
@@ -101,7 +106,35 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       unawaited(_loadWorkspaceDefaultModel());
     }
     if (widget.isComposerEnabled) unawaited(_loadModels());
+    _bindExecutors();
     _scheduleScrollToBottom();
+  }
+
+  /// Applies the stored per thread executor choice and name lookup.
+  void _bindExecutors() {
+    final ExecutorDirectory? directory = widget.executors;
+    if (directory == null) return;
+    final EngineLlmProvider provider = widget.provider;
+    provider.nodeNameOf = directory.nameOf;
+    final String? thread = provider.threadUuid;
+    if (thread == null) return;
+    unawaited(provider.refreshTaskInfo());
+    unawaited(() async {
+      final String? stored = await directory.loadSelection(thread);
+      if (stored != null && identical(provider, widget.provider)) {
+        provider.selectExecutor(stored);
+      }
+    }());
+  }
+
+  void _selectExecutor(String? nodeId) {
+    final ExecutorDirectory? directory = widget.executors;
+    final EngineLlmProvider provider = widget.provider;
+    provider.selectExecutor(nodeId);
+    final String? thread = provider.threadUuid;
+    if (directory != null && thread != null) {
+      unawaited(directory.saveSelection(thread, nodeId));
+    }
   }
 
   @override
@@ -140,6 +173,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       _models = const <ModelInfo>[];
       _isUpdatingModel = false;
       if (widget.isComposerEnabled) unawaited(_loadModels());
+      _bindExecutors();
       _scheduleScrollToBottom();
       return;
     }
@@ -391,7 +425,19 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
         if (materialize == null) {
           throw StateError('The draft thread cannot be created.');
         }
+        final String? chosenExecutor = widget.provider.executorNodeId;
         provider = await materialize(content);
+        // The draft's choice follows the new thread and is stored for it.
+        if (chosenExecutor != null && !identical(provider, widget.provider)) {
+          provider.selectExecutor(chosenExecutor);
+          final String? created = provider.threadUuid;
+          if (created != null) {
+            unawaited(widget.executors?.saveSelection(created, chosenExecutor));
+          }
+        }
+        if (widget.executors case final ExecutorDirectory directory) {
+          provider.nodeNameOf = directory.nameOf;
+        }
       }
       _clearComposerContext();
       if (mounted) {
@@ -575,6 +621,8 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                       request: request,
                       onDecision: widget.onToolApproval,
                     ),
+                if (!_showThreadSettings && widget.executors != null)
+                  TaskStatusBar(provider: widget.provider),
                 if (!_showThreadSettings)
                   _Composer(
                     controller: _composer,
@@ -591,6 +639,14 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                     onFileSelected: _selectTaggedFile,
                     onAddAttachment: () => unawaited(_pickAttachments()),
                     onRemoveAttachment: _removeAttachment,
+                    executorPicker: widget.executors == null
+                        ? null
+                        : ExecutorPicker(
+                            provider: widget.provider,
+                            directory: widget.executors!,
+                            onSelected: _selectExecutor,
+                            enabled: widget.isComposerEnabled && !_isSending,
+                          ),
                     onModelSelected: (String modelId) =>
                         unawaited(_selectModel(modelId)),
                     onSend: _send,
@@ -738,6 +794,8 @@ final class _MessageBubble extends StatelessWidget {
                 style: Theme.of(context).textTheme.labelSmall
                     ?.copyWith(color: metadataForeground),
               ),
+            if (isAssistant && message.ranOn != null)
+              NodeBadge(name: message.ranOn!),
             const Spacer(),
             IconButton(
               tooltip: 'Copy message',
@@ -830,6 +888,18 @@ final class _ToolApprovalCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (request.remote)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '${request.peerName ?? 'Another device'} wants to use a tool '
+                'on this device',
+                key: const ValueKey<String>('remote-approval-peer'),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: colors.onTertiaryContainer,
+                ),
+              ),
+            ),
           Text(
             'Approval required: ${request.toolName}',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -884,7 +954,11 @@ final class _Composer extends StatelessWidget {
     required this.onRemoveAttachment,
     required this.onModelSelected,
     required this.onSend,
+    this.executorPicker,
   });
+
+  /// Optional "run on" control shown next to the send button.
+  final Widget? executorPicker;
 
   final TextEditingController controller;
   final FocusNode focusNode;
@@ -1137,6 +1211,10 @@ final class _Composer extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (executorPicker case final Widget picker) ...<Widget>[
+                  SizedBox.square(dimension: 32, child: picker),
+                  const SizedBox(width: 4),
+                ],
                 IconButton(
                   tooltip: enabled ? 'Send' : 'Engine unavailable',
                   constraints: const BoxConstraints.tightFor(

@@ -201,8 +201,10 @@ final class _AnonymousAccountState extends State<_AnonymousAccount> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
-      const Text(
-        'Sign in to connect this desktop app to your Subconscious account. Your local engine remains private and uses its own joining token.',
+      Text(
+        widget.controller.usesServerAccount
+            ? 'Sign in to your Subconscious account to reach your engines from this device. Your data stays on your own computers.'
+            : 'Sign in to connect this desktop app to your Subconscious account. Your local engine remains private and uses its own joining token.',
       ),
       const SizedBox(height: 20),
       SegmentedButton<_AccountForm>(

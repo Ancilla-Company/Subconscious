@@ -108,6 +108,39 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--timeout", type=_positive_float, default=None)
     chat.set_defaults(handler=_run_chat)
 
+    # Node - hive membership (talks to the running local engine)
+    node = subcommands.add_parser("node", help="Manage hive nodes for the signed-in account.")
+    node.add_argument("--dev", action="store_true", default=None, help="Use development mode.")
+    node.add_argument("--data-dir", type=Path, help="Override runtime discovery data directory.")
+    node_actions = node.add_subparsers(dest="node_command", required=True)
+    node_actions.add_parser("list", help="List the account's nodes.").set_defaults(handler=_run_node)
+    node_enroll = node_actions.add_parser("enroll", help="Register this node with the hive.")
+    node_enroll.add_argument("--invite", help="One-time invite code from an approved node.")
+    node_enroll.set_defaults(handler=_run_node)
+    node_actions.add_parser("invite", help="Create a 10 minute invite code.").set_defaults(handler=_run_node)
+    node_approve = node_actions.add_parser("approve", help="Approve a pending node.")
+    node_approve.add_argument("node_id")
+    node_approve.add_argument("--sas", help="6 digit code shown on the new node (prompted if omitted).")
+    node_approve.set_defaults(handler=_run_node)
+    node_revoke = node_actions.add_parser("revoke", help="Revoke a node.")
+    node_revoke.add_argument("node_id")
+    node_revoke.set_defaults(handler=_run_node)
+
+    # Hive - local hive data maintenance (offline; the engine must be stopped)
+    hive = subcommands.add_parser("hive", help="Maintain local hive sync data.")
+    hive.add_argument("--dev", action="store_true", default=None, help="Use development mode.")
+    hive.add_argument("--data-dir", type=Path, help="Override the engine data directory.")
+    hive_actions = hive.add_subparsers(dest="hive_command", required=True)
+    hive_reset = hive_actions.add_parser(
+        "reset-local",
+        help="Forget local hive sync state (log, tasks, hive id) so this machine can join another account.",
+    )
+    hive_reset.add_argument(
+        "--confirm", action="store_true",
+        help="Required. Deletes sync history and tombstones; your own workspaces and threads are kept.",
+    )
+    hive_reset.set_defaults(handler=_run_hive)
+
     # Client - start an engine client service
     for name, description in (
         ("tui", "Start the terminal client."),
@@ -194,9 +227,9 @@ def _run_start(args: argparse.Namespace) -> int:
 
 
 def _spawn_background_service(args: argparse.Namespace) -> int:
-    # PyInstaller sets sys.frozen; Nuitka defines __compiled__. In both, the
-    # executable is the program itself and `-m` is not available.
-    frozen = getattr(sys, "frozen", False) or "__compiled__" in globals()
+    # PyInstaller sets sys.frozen. Then the executable is the program itself
+    # and `-m` is not available.
+    frozen = getattr(sys, "frozen", False)
     if frozen:
         command = [sys.executable, "start"]
     else:
@@ -295,6 +328,106 @@ def _run_chat(args: argparse.Namespace) -> int:
         print(result.response)
         if result.created_thread:
             print(f"Thread: {result.thread_uuid}", file=sys.stderr)
+    return 0
+
+
+def _print_nodes(snapshot: dict[str, object]) -> None:
+    print(f"Hive state: {snapshot.get('state')} {snapshot.get('detail') or ''}".rstrip())
+    nodes = snapshot.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        print("No nodes registered.")
+        return
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        flags = [str(node.get("status"))]
+        if node.get("local"):
+            flags.append("this node")
+        if node.get("online"):
+            flags.append("online")
+        if node.get("tier"):
+            flags.append(f"link:{node.get('tier')}")
+        line = f"{node.get('id')}  {node.get('name')}  [{', '.join(flags)}]"
+        if node.get("status") == "pending" and node.get("sas"):
+            line += f"  code {node['sas']}"
+        print(line)
+
+
+def _run_node(args: argparse.Namespace) -> int:
+    from .client import EngineClientError, hive_request
+
+    dev = args.dev if args.dev is not None else False
+    command = args.node_command
+
+    async def run() -> None:
+        common = {"dev": dev, "data_directory": args.data_dir}
+        if command == "list":
+            _print_nodes(await hive_request("GET", "nodes", **common))
+        elif command == "enroll":
+            body = {"invite_code": args.invite} if args.invite else {}
+            snapshot = await hive_request("POST", "enroll", body, **common)
+            _print_nodes(snapshot)
+            local = next((n for n in snapshot.get("nodes", []) if n.get("local")), None)
+            if local and local.get("status") == "pending":
+                print(
+                    "Waiting for approval. Run 'subconscious node approve "
+                    f"{local['id']}' on an approved node and compare the 6 digit "
+                    "code it shows with the code shown there."
+                )
+        elif command == "invite":
+            invite = await hive_request("POST", "invites", {}, **common)
+            print(f"Invite code: {invite.get('code')} (expires {invite.get('expires_at')})")
+        elif command == "approve":
+            nodes = (await hive_request("GET", "nodes", **common)).get("nodes", [])
+            target = next((n for n in nodes if n.get("id") == args.node_id), None)
+            if target is None:
+                raise EngineClientError("Unknown node.")
+            print(f"Short authentication code for {target.get('name')}: {target.get('sas')}")
+            print("Confirm the new node displays the same 6 digits before approving.")
+            sas = args.sas or input("Enter the code shown on the new node: ").strip()
+            await hive_request("POST", f"nodes/{args.node_id}/approve", {"sas": sas}, **common)
+            print("Node approved.")
+        else:
+            await hive_request("DELETE", f"nodes/{args.node_id}", **common)
+            print("Node revoked.")
+
+    try:
+        asyncio.run(run())
+    except (EngineClientError, KeyboardInterrupt, EOFError) as error:
+        print(f"subconscious node: {error or 'interrupted'}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _run_hive(args: argparse.Namespace) -> int:
+    from .config import EngineConfig
+    from .hive.sync.engine import SyncEngine
+    from .runtime import RuntimeInfoReader
+    from .storage import Database
+
+    if not args.confirm:
+        print("subconscious hive reset-local: pass --confirm to wipe local hive data.", file=sys.stderr)
+        return 2
+    config = EngineConfig(dev=bool(args.dev), data_directory=args.data_dir)
+    directory = config.resolved_data_directory
+    if RuntimeInfoReader.read(directory) is not None:
+        print("subconscious hive reset-local: stop the running engine first.", file=sys.stderr)
+        return 1
+
+    async def reset() -> None:
+        database = Database(directory / "subconscious.db")
+        try:
+            await database.initialize()
+            await SyncEngine(database).reset_local()
+        finally:
+            await database.close()
+
+    try:
+        asyncio.run(reset())
+    except Exception as error:
+        print(f"subconscious hive reset-local: {error}", file=sys.stderr)
+        return 1
+    print("Local hive data was reset. Sign in again to join a hive.")
     return 0
 
 

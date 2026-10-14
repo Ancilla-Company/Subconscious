@@ -4,14 +4,31 @@ import 'dart:convert';
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
 
+import '../hive/hive_runtime.dart';
+
 enum AccountStatus { initializing, anonymous, authenticated }
 
 typedef EngineClientProvider = FutureOr<RestEngineClient?> Function();
 
 final class AccountController extends ChangeNotifier {
-  AccountController({required this.clientProvider});
+  /// With [serverRuntime] the controller signs in directly against the
+  /// Subconscious server (phones, tablets and the web have no local engine).
+  /// Without it, account actions go through the local engine.
+  AccountController({
+    required this.clientProvider,
+    this.serverRuntime,
+    this.onSessionChanged,
+  }) {
+    serverRuntime?.addListener(_syncFromRuntime);
+  }
 
   final EngineClientProvider clientProvider;
+  final HiveRuntime? serverRuntime;
+
+  /// Called after a sign-in, sign-up or sign-out so the app can reconnect.
+  final FutureOr<void> Function()? onSessionChanged;
+
+  bool get usesServerAccount => serverRuntime != null;
 
   AccountStatus status = AccountStatus.initializing;
   AccountUser? _user;
@@ -33,6 +50,13 @@ final class AccountController extends ChangeNotifier {
 
   Future<void> restoreSession() async {
     if (status != AccountStatus.initializing) return;
+    final HiveRuntime? server = serverRuntime;
+    if (server != null) {
+      await server.restore();
+      _applyServerSession(server);
+      notifyListeners();
+      return;
+    }
     try {
       final RestEngineClient? client = await clientProvider();
       if (client == null) {
@@ -47,31 +71,74 @@ final class AccountController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> signIn({required String email, required String password}) =>
-      _performSessionAction(
-        (RestEngineClient client) =>
-            client.login(email: email.trim(), password: password),
-      );
+  Future<bool> signIn({required String email, required String password}) {
+    final HiveRuntime? server = serverRuntime;
+    if (server != null) {
+      return _performServerAction(() async {
+        await server.account.loginWithEmail(
+          email: email.trim(),
+          password: password,
+        );
+      });
+    }
+    return _performSessionAction(
+      (RestEngineClient client) =>
+          client.login(email: email.trim(), password: password),
+    );
+  }
 
-  Future<String?> requestSignupCode({required String email}) => _performMessage(
-    (RestEngineClient client) => client.requestSignupCode(email: email.trim()),
-  );
+  Future<String?> requestSignupCode({required String email}) {
+    final HiveRuntime? server = serverRuntime;
+    if (server != null) {
+      return _performServerMessage(
+        () => server.account.requestSignupCode(email.trim()),
+      );
+    }
+    return _performMessage(
+      (RestEngineClient client) =>
+          client.requestSignupCode(email: email.trim()),
+    );
+  }
 
   Future<bool> completeSignup({
     required String email,
     required String code,
     required String password,
     String? displayName,
-  }) => _performSessionAction(
-    (RestEngineClient client) => client.completeSignup(
-      email: email.trim(),
-      code: code.trim(),
-      password: password,
-      displayName: displayName,
-    ),
-  );
+  }) {
+    final HiveRuntime? server = serverRuntime;
+    if (server != null) {
+      return _performServerAction(() async {
+        await server.account.completeSignup(
+          email: email.trim(),
+          code: code.trim(),
+          password: password,
+          displayName: displayName,
+        );
+      });
+    }
+    return _performSessionAction(
+      (RestEngineClient client) => client.completeSignup(
+        email: email.trim(),
+        code: code.trim(),
+        password: password,
+        displayName: displayName,
+      ),
+    );
+  }
 
   Future<void> signOut() async {
+    final HiveRuntime? server = serverRuntime;
+    if (server != null) {
+      _user = null;
+      status = AccountStatus.anonymous;
+      error = null;
+      notice = null;
+      notifyListeners();
+      await server.signOut();
+      await _notifySessionChanged();
+      return;
+    }
     _user = null;
     status = AccountStatus.anonymous;
     error = null;
@@ -119,6 +186,86 @@ final class AccountController extends ChangeNotifier {
     }
   }
 
+  /// Server sign-in or sign-up: the account client has already stored the
+  /// session, so start the hive (device registration and signalling) and
+  /// reconnect to the home engine.
+  Future<bool> _performServerAction(Future<void> Function() action) async {
+    final HiveRuntime server = serverRuntime!;
+    _beginRequest();
+    try {
+      await action();
+      await server.adoptSession();
+      _applyServerSession(server);
+      notice = null;
+      isBusy = false;
+      notifyListeners();
+      await _notifySessionChanged();
+      return true;
+    } on Object catch (caughtError) {
+      error = _messageFor(caughtError);
+      return false;
+    } finally {
+      isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> _performServerMessage(Future<String> Function() action) async {
+    _beginRequest();
+    try {
+      final String message = await action();
+      notice = message;
+      return message;
+    } on Object catch (caughtError) {
+      error = _messageFor(caughtError);
+      return null;
+    } finally {
+      isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  void _applyServerSession(HiveRuntime server) {
+    final ServerUser? user = server.account.user;
+    if (user == null) {
+      _user = null;
+      status = AccountStatus.anonymous;
+      return;
+    }
+    _user = AccountUser(
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      connectedProviders: const <String>[],
+    );
+    status = AccountStatus.authenticated;
+  }
+
+  void _syncFromRuntime() {
+    final HiveRuntime? server = serverRuntime;
+    if (server == null || isBusy || status == AccountStatus.initializing) {
+      return;
+    }
+    final bool signedIn = server.isSignedIn;
+    if (signedIn == isAuthenticated) return;
+    _applyServerSession(server);
+    notifyListeners();
+  }
+
+  Future<void> _notifySessionChanged() async {
+    try {
+      await onSessionChanged?.call();
+    } on Object {
+      // Reconnect failures are shown by the connection status.
+    }
+  }
+
+  @override
+  void dispose() {
+    serverRuntime?.removeListener(_syncFromRuntime);
+    super.dispose();
+  }
+
   Future<RestEngineClient> _requiredClient() async {
     final RestEngineClient? client = await clientProvider();
     if (client == null) throw StateError('The local engine is not connected.');
@@ -148,6 +295,7 @@ final class AccountController extends ChangeNotifier {
   }
 
   static String _messageFor(Object error) {
+    if (error is HiveApiException) return error.message;
     if (error is EngineApiException && error.body != null) {
       try {
         final Object? value = jsonDecode(error.body!);

@@ -1,6 +1,7 @@
 """Cloud account sessions owned exclusively by the local engine."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 import logging
 from typing import Any, Protocol
@@ -186,6 +187,10 @@ class AccountServerClient:
             base_url=self._base_url, timeout=15.0
         )
 
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -298,7 +303,35 @@ class AccountSessionService:
         )
         self._refresh_token: str | None = None
         self._access_token: str | None = None
+        self._user: AccountUser | None = None
+        self._listeners: list[Callable[[AccountUser | None], None]] = []
         self._lock = asyncio.Lock()
+
+    def subscribe(
+        self, listener: Callable[[AccountUser | None], None]
+    ) -> Callable[[], None]:
+        """Be told (synchronously) when the signed-in user changes or signs out."""
+        self._listeners.append(listener)
+
+        def unsubscribe() -> None:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+        return unsubscribe
+
+    @property
+    def current_account_user(self) -> AccountUser | None:
+        return self._user
+
+    def _set_user(self, user: AccountUser | None) -> None:
+        previous = self._user
+        self._user = user
+        if (previous.id if previous else None) != (user.id if user else None):
+            for listener in tuple(self._listeners):
+                try:
+                    listener(user)
+                except Exception:  # listeners must never break account flows
+                    _LOGGER.debug("Account listener failed.", exc_info=True)
 
     async def close(self) -> None:
         await self._server.close()
@@ -323,7 +356,24 @@ class AccountSessionService:
                 email, password
             )
             self._set_session(access_token, refresh_token)
+            self._set_user(user)
             return user
+
+    def access_token(self) -> str | None:
+        """Current access token for in-process server clients; never exposed over HTTP."""
+        return self._access_token
+
+    @property
+    def server_base_url(self) -> str:
+        return self._server.base_url
+
+    async def refresh_access_token(self) -> str | None:
+        """Rotate tokens and return the new access token (None when logged out)."""
+        async with self._lock:
+            if self._refresh_token is None:
+                return None
+            await self._refresh_user()
+            return self._access_token
 
     async def request_signup_code(self, email: str) -> str:
         return await self._server.register(email)
@@ -336,6 +386,7 @@ class AccountSessionService:
                 email, code, password, display_name
             )
             self._set_session(access_token, refresh_token)
+            self._set_user(user)
             return user
 
     async def logout(self) -> None:
@@ -354,7 +405,9 @@ class AccountSessionService:
         assert self._refresh_token is not None
         access_token, refresh_token = await self._server.refresh(self._refresh_token)
         self._set_session(access_token, refresh_token)
-        return await self._server.current_user(access_token)
+        user = await self._server.current_user(access_token)
+        self._set_user(user)
+        return user
 
     def _set_session(self, access_token: str, refresh_token: str) -> None:
         self._store.write(refresh_token)
@@ -364,6 +417,7 @@ class AccountSessionService:
     def _clear_local_session(self) -> None:
         self._access_token = None
         self._refresh_token = None
+        self._set_user(None)
         self._store.delete()
 
 

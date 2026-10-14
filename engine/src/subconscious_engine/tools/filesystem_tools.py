@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 import shutil
+from collections.abc import Sequence
 from typing import Any, Callable
 
 from subconscious_engine.tools.document_files import SUPPORTED, read_document, write_document
@@ -29,10 +31,55 @@ def _summary(path: Path) -> dict[str, Any]:
     }
 
 
-def filesystem_tool_entries() -> list[ToolEntry]:
+class OutsideRootsError(ValueError):
+    """A path resolved outside the folders a remote caller may touch."""
+
+
+def scoped_resolver(roots: Callable[[], Sequence[str]]) -> Callable[[str], Path]:
+    """Build a path resolver that only accepts paths inside ``roots``.
+
+    The path is resolved to its real location first (``..`` collapsed, symlinks and
+    junctions followed, drive/case normalised on Windows), then compared against
+    the resolved roots. Relative paths are taken relative to the first root. Roots
+    are re-read on every call so configuration changes apply immediately.
+    """
+
+    def resolve(value: str) -> Path:
+        if not isinstance(value, str) or not value or "\x00" in value:
+            raise ValueError("A filesystem path is required.")
+        current = [Path(root).resolve() for root in roots()]
+        if not current:
+            raise OutsideRootsError("No folders are shared for remote filesystem access.")
+        if os.name == "nt":
+            # Device paths (\\?\, \\.\) and NTFS alternate data streams bypass naive prefix checks.
+            if value.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")):
+                raise OutsideRootsError("Path is outside the shared folders.")
+            if ":" in (value[2:] if len(value) > 1 and value[1] == ":" else value):
+                raise OutsideRootsError("Path is outside the shared folders.")
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = current[0] / candidate
+        real = candidate.resolve()
+        folded = os.path.normcase(str(real))
+        for root in current:
+            base = os.path.normcase(str(root))
+            if folded == base or folded.startswith(base.rstrip("\\/") + os.sep):
+                return real
+        raise OutsideRootsError("Path is outside the shared folders.")
+
+    return resolve
+
+
+def filesystem_tool_entries(resolve: Callable[[str], Path] = _path) -> list[ToolEntry]:
+    """Tool definitions. ``resolve`` maps a user supplied path to a ``Path``.
+
+    The default accepts any path (local use, approval gated). The remote variant
+    passes ``scoped_resolver`` and also stops directory copies from following links.
+    """
+    scoped = resolve is not _path
     def list_filesystem_directory(_: Any) -> Any:
         async def list_directory(path: str) -> dict[str, Any]:
-            directory = _path(path)
+            directory = resolve(path)
             if not directory.is_dir():
                 raise ValueError(f"Not a directory: {directory}")
             entries = await asyncio.to_thread(lambda: [_summary(item) for item in directory.iterdir()])
@@ -41,7 +88,7 @@ def filesystem_tool_entries() -> list[ToolEntry]:
 
     def read_filesystem_file(_: Any) -> Any:
         async def read_file(path: str, encoding: str = "utf-8") -> dict[str, Any]:
-            file = _path(path)
+            file = resolve(path)
             if not file.is_file():
                 return {"status": "error", "path": str(file),
                         "error": "The requested path is not a file."}
@@ -68,7 +115,7 @@ def filesystem_tool_entries() -> list[ToolEntry]:
     def write_filesystem_file(_: Any) -> Any:
         async def write_file(path: str, content: Any, create_parents: bool = False,
                              encoding: str = "utf-8") -> dict[str, Any]:
-            file = _path(path)
+            file = resolve(path)
             try:
                 if file.suffix.casefold() in SUPPORTED:
                     return await asyncio.to_thread(
@@ -91,7 +138,7 @@ def filesystem_tool_entries() -> list[ToolEntry]:
     def create_filesystem_file(_: Any) -> Any:
         async def create_file(path: str, content: str = "", create_parents: bool = False,
                               encoding: str = "utf-8") -> dict[str, Any]:
-            file = _path(path)
+            file = resolve(path)
             def create() -> None:
                 if create_parents:
                     file.parent.mkdir(parents=True, exist_ok=True)
@@ -103,14 +150,14 @@ def filesystem_tool_entries() -> list[ToolEntry]:
 
     def create_filesystem_directory(_: Any) -> Any:
         async def create_directory(path: str, create_parents: bool = False) -> dict[str, Any]:
-            directory = _path(path)
+            directory = resolve(path)
             await asyncio.to_thread(directory.mkdir, parents=create_parents, exist_ok=False)
             return {"status": "created", **_summary(directory)}
         return create_directory
 
     def delete_filesystem_path(_: Any) -> Any:
         async def delete_path(path: str, recursive: bool = False) -> dict[str, str]:
-            target = _path(path)
+            target = resolve(path)
             def delete() -> None:
                 if target.is_symlink() or target.is_file():
                     target.unlink()
@@ -124,7 +171,7 @@ def filesystem_tool_entries() -> list[ToolEntry]:
 
     def move_filesystem_path(_: Any) -> Any:
         async def move_path(source: str, destination: str, create_parents: bool = False) -> dict[str, str]:
-            origin, target = _path(source), _path(destination)
+            origin, target = resolve(source), resolve(destination)
             def move() -> None:
                 if create_parents:
                     target.parent.mkdir(parents=True, exist_ok=True)
@@ -135,11 +182,16 @@ def filesystem_tool_entries() -> list[ToolEntry]:
 
     def copy_filesystem_path(_: Any) -> Any:
         async def copy_path(source: str, destination: str, create_parents: bool = False) -> dict[str, str]:
-            origin, target = _path(source), _path(destination)
+            origin, target = resolve(source), resolve(destination)
             def copy() -> None:
                 if create_parents:
                     target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(origin, target) if origin.is_dir() else shutil.copy2(origin, target)
+                if origin.is_dir():
+                    # Scoped copies keep links as links so a link inside a shared folder
+                    # cannot pull outside content into it.
+                    shutil.copytree(origin, target, symlinks=scoped)
+                else:
+                    shutil.copy2(origin, target)
             await asyncio.to_thread(copy)
             return {"status": "copied", "source": str(origin), "destination": str(target)}
         return copy_path

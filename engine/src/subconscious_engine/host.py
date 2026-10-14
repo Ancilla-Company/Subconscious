@@ -21,6 +21,7 @@ from .configuration import EncryptedModelConfigurationStore
 from .events import EventBus
 from .graph_engine import GraphEngine
 from .graphs import GraphKind, load_graph_schema
+from .hive.service import HiveService
 from .subconscious_loop import SubconsciousWorker
 from .telemetry import TelemetryStore
 from .tool_registry import PortableToolRegistry, ToolRegistryConfig
@@ -122,7 +123,24 @@ class EngineHost:
             self.graph_engine,
             self.subconscious_worker,
             self.account_session_service,
+            remote_tools_config=config.hive.remote_tools,
         )
+        hive = config.hive
+        self.hive_service = HiveService(
+            account=self.account_session_service,
+            credential_store=self.model_configuration_store,
+            data_directory=config.resolved_data_directory,
+            enabled=hive.enabled,
+            server_url=hive.server_url,
+            stun_servers=hive.stun_servers,
+            node_name=hive.node_name,
+            app_version=__version__,
+            direct_timeout=hive.direct_timeout_seconds,
+            relay_enabled=hive.relay_enabled,
+            force_relay=hive.force_relay,
+        )
+        self.app.state.hive_service = self.hive_service
+        self.hive_service.attach(self.app)
         self._status_indicator_factory = status_indicator_factory
         self._status_indicator: BackgroundStatusIndicator | None = None
         self._server: uvicorn.Server | None = None
@@ -229,8 +247,18 @@ class EngineHost:
                 )
                 self._status_indicator.start(self.request_stop, self.token.value)
             self._ready.set()
-            await server_task
+            # Resume an existing account session and start the hive only if the
+            # user is signed in; failures never block the local engine.
+            hive_startup = asyncio.create_task(self.hive_service.startup())
+            try:
+                await server_task
+            finally:
+                hive_startup.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await hive_startup
         finally:
+            with suppress(Exception):
+                await self.hive_service.shutdown()
             self._signal_stop()
             if server_task is not None and not server_task.done():
                 with suppress(asyncio.CancelledError):

@@ -12,3 +12,13 @@ subconscious start --dev
 ```
 
 Alternatively, set `engine.account_server_url: http://127.0.0.1:5050/` in the engine YAML configuration. The local engine joining token remains a separate credential used only between Flutter and the engine.
+
+## Devices, executor picker and relay fallback
+
+Signing in to the hive (Settings, Devices) registers this device as a thin node. It lists the other nodes of your account with their connection tier (`direct` or `ws-relay`) and lets you approve pending devices after comparing the six digit code.
+
+**Where a message runs.** When another full node (an engine) is online, a "run on" control appears next to the send button. The default is the engine this app is connected to (the home engine). Picking another node sends the message as a task (`task.submit` with `executor`) through the home engine, which forwards it. The choice is stored per thread on this device only and is never synced. Without a choice the normal chat path is used unchanged. A status line above the composer shows queued, running, waiting for approval, done, failed, cancelled or interrupted with the node name, plus a Cancel button while the task is active, and assistant replies produced by a chosen node carry a small badge with its name. Task state comes from `task.status` frames, so thin clients need nothing but the home engine connection. The thread's latest task is also read from `GET /api/v1/hive/tasks` when the route is reachable.
+
+**Tools exported by other devices.** When a peer asks to use a tool this device exports and the policy is `ask`, the approval card names the peer ("Work laptop wants to use a tool on this device"). Another UI answering first dismisses the prompt.
+
+**Relay fallback.** Each connection tries a direct WebRTC link first (8 seconds by default). If it fails and the server reports `ws_relay_enabled`, the link is carried over the signalling socket as end to end encrypted frames (X25519, HKDF-SHA256, ChaCha20-Poly1305, peer identity checked against the pinned directory key; the server only sees ciphertext). The tier then shows `ws-relay`. In the background the app retries a direct link (no more often than every 60 seconds, backing off) and switches over without interrupting the chat or REST calls. See `webrtc.md` Appendix B for the protocol and `subconscious-dart/tests/vectors/relay_v1.json` for the cross-check vectors.

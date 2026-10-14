@@ -30,6 +30,12 @@ from subconscious_engine.tools import ToolRegistry
 from .account_routes import account_routes
 from .event_routes import event_routes
 from .file_routes import file_routes
+from subconscious_engine.config import RemoteToolsConfig
+from subconscious_engine.hive.remote_tools import RemoteToolService, RemoteToolset
+from subconscious_engine.hive.sync.engine import SyncEngine
+from subconscious_engine.hive.tasks import TaskManager
+
+from .hive_routes import hive_routes
 from .model_routes import model_routes
 from .rag_routes import rag_routes
 from .settings_routes import settings_routes
@@ -74,6 +80,7 @@ def create_app(
     graph_engine: GraphEngine | None = None,
     subconscious_worker: SubconsciousWorker | None = None,
     account_session_service: AccountSessionService | None = None,
+    remote_tools_config: RemoteToolsConfig | None = None,
 ) -> Starlette:
     store = model_configuration_store or EncryptedModelConfigurationStore(
         database.path.parent
@@ -90,8 +97,11 @@ def create_app(
     agents = agent_manager or AgentManager()
 
     @asynccontextmanager
-    async def lifespan(_: Starlette) -> AsyncIterator[None]:
+    async def lifespan(app: Starlette) -> AsyncIterator[None]:
         await database.initialize()
+        # Work that was running when the engine last stopped did not finish.
+        with suppress(Exception):
+            await app.state.task_manager.recover()
         if graph_engine is not None:
             await graph_engine.telemetry.initialize()
         scheduler = (
@@ -120,6 +130,7 @@ def create_app(
     routes = [
         Route("/api/v1/health", health),
         *account_routes(),
+        *hive_routes(),
         Route("/api/v1/workspaces", list_workspaces, methods=["GET"]),
         Route("/api/v1/workspaces", create_workspace, methods=["POST"]),
         Route("/api/v1/workspaces/{uuid}", get_workspace, methods=["GET"]),
@@ -166,6 +177,15 @@ def create_app(
             "subconscious_worker": subconscious_worker,
             "account_session_service": account_service,
             "client_registry": ClientRegistry(),
+            "hive_service": None,
+            "sync_engine": SyncEngine(database),
+            "task_manager": TaskManager(app),
         }
     )
+    # Remote tools (webrtc.md section 8): both halves are inert until a peer asks or a
+    # workspace/thread opts in, and the owner side exports nothing by default.
+    app.state.remote_tools = RemoteToolService(
+        app, remote_tools_config, database.path.parent / "hive" / "remote_tools.json"
+    )
+    app.state.remote_toolset = RemoteToolset(app)
     return app

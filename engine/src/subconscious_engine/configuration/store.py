@@ -191,6 +191,29 @@ class EncryptedModelConfigurationStore:
                 self._write_unlocked(secrets)
         self._locked(operation)
 
+    def get_node_identity_seed(self) -> str | None:
+        """Return the base64url Ed25519 seed of this node (never exposed via the API)."""
+        def operation() -> str | None:
+            identity = self._read_unlocked().get("node_identity")
+            seed = identity.get("seed") if isinstance(identity, dict) else None
+            return seed if isinstance(seed, str) and seed else None
+        return self._locked(operation)
+
+    def set_node_identity_seed(self, seed: str) -> None:
+        def operation() -> None:
+            secrets = self._read_unlocked()
+            secrets["node_identity"] = {"seed": seed}
+            self._write_unlocked(secrets)
+        self._locked(operation)
+
+    def remove_node_identity_seed(self) -> None:
+        def operation() -> None:
+            secrets = self._read_unlocked()
+            if "node_identity" in secrets:
+                del secrets["node_identity"]
+                self._write_unlocked(secrets)
+        self._locked(operation)
+
     def _locked(self, operation: Callable[[], T]) -> T:
         try:
             with self._thread_lock, _InterprocessFileLock(self.lock_file_path):

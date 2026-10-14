@@ -9,6 +9,7 @@ description = "Python port of the Subconscious .NET engine"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "aiortc==1.15.0",
   "aiosqlite==0.22.1",
   "cryptography==46.0.4",
   "httpx==0.28.1",

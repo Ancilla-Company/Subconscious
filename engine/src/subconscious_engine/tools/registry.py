@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 import math
 import operator
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 from zoneinfo import ZoneInfo, available_timezones
 
 import httpx
@@ -93,6 +93,10 @@ def merge_tool_config(workspace_raw: str | None, thread_raw: str | None) -> str 
 class ToolRegistry:
     def __init__(self) -> None:
         self._specs = self._build_specs()
+
+    @property
+    def specs(self) -> tuple[ToolSpec, ...]:
+        return tuple(self._specs)
 
     def catalog(self) -> dict[str, list[dict[str, str]]]:
         result: dict[str, list[dict[str, str]]] = {}

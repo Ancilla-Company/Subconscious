@@ -11,6 +11,7 @@ import '../../account/account_controller.dart';
 import '../../account/presentation/account_panel.dart';
 import '../../connection/engine_connection_resolver.dart';
 import '../../dashboard/controller/dashboard_controller.dart';
+import '../../hive/presentation/nodes_page.dart';
 import '../controller/settings_controller.dart';
 
 final class SettingsMainPanel extends StatelessWidget {
@@ -107,6 +108,8 @@ final class _GeneralSettingsPage extends StatelessWidget {
         const _FieldLabel('Engine Connection'),
         _RemoteEngineConnectionForm(controller: dashboardController),
       ],
+      const _FieldLabel('Devices'),
+      const HiveDevicesEntry(),
       if (controller.isLoadingGeneral) const LinearProgressIndicator(),
       if (controller.generalError case final Object error)
         _SettingsError(error: error),

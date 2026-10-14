@@ -10,6 +10,7 @@ import '../../editor/controller/editor_tab.dart';
 import '../../editor/controller/file_gateway.dart';
 import '../../editor/controller/workspace_paths.dart';
 import '../../editor/data/engine_draft_store.dart';
+import '../../hive/executor_selection.dart';
 import '../../settings/controller/settings_controller.dart';
 
 enum EngineConnectionStatus { disconnected, connecting, connected }
@@ -68,6 +69,7 @@ final class DashboardController extends ChangeNotifier {
     this.initialWorkspaceUuid,
     Uri? initialEndpoint,
     String? initialToken,
+    this.executors,
   }) : _explicitEndpoint = initialEndpoint,
        _explicitToken = initialToken {
     settings = DashboardSettingsController(
@@ -93,6 +95,10 @@ final class DashboardController extends ChangeNotifier {
   static const String navigationTag = 'navigation';
 
   final EngineRepositoryResolver _repositoryResolver;
+
+  /// Executor choices for the composer picker (the hive runtime in the app);
+  /// null hides the picker.
+  final ExecutorDirectory? executors;
   final String? initialWorkspaceUuid;
   late final DashboardSettingsController settings;
 
@@ -889,11 +895,14 @@ final class DashboardController extends ChangeNotifier {
     _toolApprovalQueue.clear();
     _approvedUiToolActions.clear();
     _engineEventRepository = eventRepository;
+    _watchedThread = null;
     _engineEventSubscription = eventRepository.socket.frames.listen(
       _handleEngineEvent,
       onError: (_) {},
     );
     eventRepository.socket.registerUiTools();
+    final ThreadInfo? openThread = selectedThread;
+    if (openThread != null) _watchThread(eventRepository, openThread.uuid);
   }
 
   void _handleEngineEvent(WireFrame frame) {
@@ -902,6 +911,20 @@ final class DashboardController extends ChangeNotifier {
     switch (frame.type) {
       case 'tool.approval.request':
         _enqueueToolApproval(frame, data);
+        return;
+      case 'tool.approval.resolved':
+        // Another UI answered; dismiss the prompt here.
+        final Object? resolved = data['approval_id'];
+        if (resolved is String) _dismissToolApproval(resolved);
+        return;
+      case 'task.status':
+        final Object? taskThread = data['thread_uuid'];
+        final Object? taskStatus = data['status'];
+        if (taskThread is String &&
+            selectedThread?.uuid == taskThread &&
+            TaskStatus.parse(taskStatus).isTerminal) {
+          unawaited(_refreshSelectedThreadHistory(taskThread));
+        }
         return;
       case 'client.tool.request':
         unawaited(_handleClientToolRequest(frame, data));
@@ -933,9 +956,11 @@ final class DashboardController extends ChangeNotifier {
   void _enqueueToolApproval(WireFrame frame, Map<String, dynamic> data) {
     final String? turnId = frame.id;
     final Object? rawArguments = data['arguments'];
+    // A hive peer's request for one of our exported tools has no thread.
+    final bool remote = data['remote'] == true;
     if (turnId == null ||
         data['approval_id'] is! String ||
-        data['thread_uuid'] is! String ||
+        (data['thread_uuid'] is! String && !remote) ||
         data['tool_name'] is! String ||
         rawArguments is! Map) {
       return;
@@ -943,12 +968,21 @@ final class DashboardController extends ChangeNotifier {
     final ToolApprovalRequest request = ToolApprovalRequest(
       turnId: turnId,
       approvalId: data['approval_id']! as String,
-      threadUuid: data['thread_uuid']! as String,
+      threadUuid: data['thread_uuid'] is String
+          ? data['thread_uuid']! as String
+          : '',
       toolName: data['tool_name']! as String,
       arguments: rawArguments.cast<String, dynamic>(),
       operation: data['operation'] is String
           ? data['operation']! as String
           : 'update',
+      remote: remote,
+      peerName: data['peer_name'] is String
+          ? data['peer_name']! as String
+          : null,
+      peerNodeId: data['peer_node_id'] is String
+          ? data['peer_node_id']! as String
+          : null,
     );
     if (pendingToolApproval?.approvalId == request.approvalId ||
         _toolApprovalQueue.any(
@@ -969,9 +1003,41 @@ final class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _watchedThread;
+
+  /// `thread.subscribe` for live updates of tasks started elsewhere (a thin
+  /// client sees deltas and status of work running on other nodes).
+  void _watchThread(EngineRepository current, String threadUuid) {
+    if (_watchedThread == threadUuid) return;
+    try {
+      final String? previous = _watchedThread;
+      if (previous != null) current.socket.unsubscribeThread(previous);
+      current.socket.subscribeThread(threadUuid);
+      _watchedThread = threadUuid;
+    } on Object {
+      // Older engines or a closed socket: updates arrive after a refresh.
+      _watchedThread = null;
+    }
+  }
+
+  void _dismissToolApproval(String approvalId) {
+    final int before = _toolApprovalQueue.length;
+    _toolApprovalQueue.removeWhere(
+      (ToolApprovalRequest item) => item.approvalId == approvalId,
+    );
+    bool changed = _toolApprovalQueue.length != before;
+    if (pendingToolApproval?.approvalId == approvalId) {
+      pendingToolApproval = _toolApprovalQueue.isEmpty
+          ? null
+          : _toolApprovalQueue.removeAt(0);
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
   Future<void> respondToToolApproval(bool approved) async {
     final ToolApprovalRequest? request = pendingToolApproval;
-    final WebSocketEngineClient? socket = repository?.socket;
+    final EngineSocket? socket = repository?.socket;
     if (request == null || socket == null) return;
     pendingToolApproval = _toolApprovalQueue.isEmpty
         ? null
@@ -1001,7 +1067,7 @@ final class DashboardController extends ChangeNotifier {
     WireFrame frame,
     Map<String, dynamic> data,
   ) async {
-    final WebSocketEngineClient? socket = repository?.socket;
+    final EngineSocket? socket = repository?.socket;
     final String? turnId = frame.id;
     final String? requestId = data['request_id'] is String
         ? data['request_id']! as String
@@ -1572,6 +1638,7 @@ final class DashboardController extends ChangeNotifier {
       );
       provider.replaceEngineHistory(messages);
       chatProvider = provider;
+      _watchThread(currentRepository, thread.uuid);
     } on Object catch (caughtError) {
       if (!_disposed && requestVersion == _chatRequestVersion) {
         chatError = caughtError;

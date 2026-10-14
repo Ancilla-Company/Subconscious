@@ -10,6 +10,7 @@ import 'features/connection/engine_connection_resolver.dart';
 import 'features/dashboard/controller/dashboard_controller.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'features/dashboard/presentation/window_composition_bar.dart';
+import 'features/hive/hive_runtime.dart';
 import 'features/settings/controller/settings_controller.dart';
 
 Future<void> main() async {
@@ -33,12 +34,17 @@ Future<void> main() async {
     ),
     initialEndpoint: explicitEndpoint,
     initialToken: token,
+    executors: HiveRuntime.shared,
     initialWorkspaceUuid: const String.fromEnvironment(
       'SUBCONSCIOUS_WORKSPACE_UUID',
     ),
   );
   final AccountController accountController = AccountController(
     clientProvider: () => controller.repository?.rest,
+    // Phones, tablets and the web have no local engine: sign in directly
+    // against the server and reach a home engine over WebRTC.
+    serverRuntime: _hasLocalEngine ? null : HiveRuntime.shared,
+    onSessionChanged: controller.reconnectNow,
   );
   unawaited(_loadEngineAndRestoreAccount(controller, accountController));
   runApp(
@@ -59,6 +65,18 @@ Future<void> _loadEngineAndRestoreAccount(
     await accountController.restoreSession();
   }
 }
+
+/// Whether this platform can run an engine next to the app.
+bool get _hasLocalEngine =>
+    !kIsWeb &&
+    switch (defaultTargetPlatform) {
+      TargetPlatform.windows ||
+      TargetPlatform.macOS ||
+      TargetPlatform.linux => true,
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.fuchsia => false,
+    };
 
 Uri? _configuredEngineEndpoint({required bool preferDev}) {
   const String configuredUrl = String.fromEnvironment(

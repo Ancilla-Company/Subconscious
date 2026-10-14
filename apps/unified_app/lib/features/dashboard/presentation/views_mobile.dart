@@ -8,8 +8,11 @@ import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../account/account_controller.dart';
 import '../../chat/engine_llm_provider.dart';
+import '../../account/presentation/account_panel.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
+import '../../hive/hive_runtime.dart';
+import '../../hive/presentation/home_engine_panel.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
@@ -26,7 +29,7 @@ final class MobileDashboardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
+    animation: Listenable.merge(<Listenable>[controller, accountController]),
     builder: (BuildContext context, Widget? child) => Scaffold(
       drawer: Drawer(
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
@@ -66,6 +69,18 @@ final class MobileDashboardView extends StatelessWidget {
         controller: controller,
         accountController: accountController,
       );
+    }
+    // No local engine on this device: until a home engine is reachable, show
+    // sign-in (direct to the server) or why no engine could be reached.
+    final HiveRuntime? server = accountController.serverRuntime;
+    if (server != null && !controller.isConnected && !controller.isLoading) {
+      return accountController.isAuthenticated
+          ? HomeEnginePanel(
+              runtime: server,
+              error: controller.error,
+              onRetry: controller.reconnectNow,
+            )
+          : AccountPanel(controller: accountController);
     }
     if (controller.isLoading || controller.isLoadingChat) {
       return const Center(child: CircularProgressIndicator());
@@ -115,6 +130,7 @@ final class MobileDashboardView extends StatelessWidget {
             ),
         title: controller.selectedThread?.title ?? controller.pendingDraftTitle,
         draftToolsConfig: controller.pendingDraftToolsConfig,
+        executors: controller.executors,
         useNeutralUserBubbleForeground:
             controller.settings.accentTheme == AppAccentTheme.neutral,
       );

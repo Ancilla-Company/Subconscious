@@ -342,3 +342,42 @@ async def _receive_frame(socket: Any, timeout: float) -> dict[str, Any]:
     if not isinstance(frame, dict):
         raise EngineClientError("The engine returned an invalid WebSocket frame.")
     return frame
+
+
+async def hive_request(
+    method: str,
+    path: str,
+    body: dict[str, Any] | None = None,
+    *,
+    dev: bool = False,
+    data_directory: Path | None = None,
+) -> Any:
+    """Call a local ``/api/v1/hive/*`` management route on the running engine."""
+    config = EngineConfig(dev=dev, data_directory=data_directory)
+    runtime = RuntimeInfoReader.read(config.resolved_data_directory)
+    if runtime is None:
+        raise EngineClientError(
+            "The engine is not running or its runtime file is unavailable; "
+            "run 'subconscious start'."
+        )
+    base_url = f"http://{runtime.host}:{runtime.port}/api/v1/hive/"
+    try:
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            headers={"Authorization": f"Bearer {runtime.token}"},
+            timeout=30.0,
+            trust_env=False,
+        ) as client:
+            response = await client.request(method, path, json=body)
+    except httpx.HTTPError as error:
+        raise EngineClientError(f"Could not connect to the engine: {error}") from error
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if response.is_error:
+        message = payload.get("error") if isinstance(payload, dict) else None
+        raise EngineClientError(
+            message if isinstance(message, str) else f"The engine returned {response.status_code}."
+        )
+    return payload

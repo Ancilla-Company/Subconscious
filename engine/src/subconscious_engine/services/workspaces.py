@@ -2,11 +2,11 @@
 
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from subconscious_engine.api.schemas import CreateWorkspaceRequest, WorkspaceDto
-from subconscious_engine.storage.models import Network, Workspace, utc_now
+from subconscious_engine.storage.models import ConversationThread, Network, Workspace, utc_now
 
 
 class WorkspaceService:
@@ -14,11 +14,13 @@ class WorkspaceService:
         self.session = session
 
     async def list(self) -> list[WorkspaceDto]:
-        rows = (await self.session.scalars(select(Workspace).order_by(Workspace.name))).all()
+        rows = (await self.session.scalars(
+            select(Workspace).where(Workspace.deleted_at.is_(None)).order_by(Workspace.name))).all()
         return [self._dto(row) for row in rows]
 
     async def get(self, uuid: str) -> Workspace | None:
-        return await self.session.scalar(select(Workspace).where(Workspace.uuid == uuid))
+        return await self.session.scalar(
+            select(Workspace).where(Workspace.uuid == uuid, Workspace.deleted_at.is_(None)))
 
     async def create(self, request: CreateWorkspaceRequest) -> WorkspaceDto:
         network = await self.session.scalar(select(Network))
@@ -41,7 +43,13 @@ class WorkspaceService:
         return self._dto(row)
 
     async def delete(self, row: Workspace) -> None:
-        await self.session.delete(row)
+        """Soft delete: the tombstone syncs, and its threads are hidden with it."""
+        now = utc_now()
+        row.deleted_at = now
+        await self.session.execute(
+            update(ConversationThread)
+            .where(ConversationThread.workspace_id == row.id, ConversationThread.deleted_at.is_(None))
+            .values(deleted_at=now))
         await self.session.commit()
 
     @staticmethod

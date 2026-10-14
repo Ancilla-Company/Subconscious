@@ -304,6 +304,7 @@ final class _DesktopWebDashboardViewState
                     widget.controller.selectedThread?.title ??
                     widget.controller.pendingDraftTitle,
                 draftToolsConfig: widget.controller.pendingDraftToolsConfig,
+                executors: widget.controller.executors,
                 useNeutralUserBubbleForeground:
                     widget.controller.settings.accentTheme ==
                     AppAccentTheme.neutral,

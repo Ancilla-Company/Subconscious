@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../models/engine_models.dart';
+import '../models/task_models.dart';
 import 'engine_exception.dart';
 
 final class RestEngineClient {
@@ -200,6 +201,29 @@ final class RestEngineClient {
       },
     );
     return ChatMessage.fromJson(json);
+  }
+
+  /// `GET /api/v1/hive/tasks` (reachable by thin clients through the tunnel).
+  Future<List<TaskRecord>> listTasks({
+    String? status,
+    String? threadUuid,
+    int limit = 100,
+  }) async {
+    final Map<String, dynamic> body = await _getMap(
+      'hive/tasks',
+      authenticate: true,
+      query: <String, String>{
+        'status': ?status,
+        'thread_uuid': ?threadUuid,
+        'limit': '$limit',
+      },
+    );
+    final Object? tasks = body['tasks'];
+    if (tasks is! List) return const <TaskRecord>[];
+    return <TaskRecord>[
+      for (final Object? raw in tasks)
+        if (TaskRecord.tryParse(raw) case final TaskRecord task) task,
+    ];
   }
 
   Future<List<ModelInfo>> listModels() async =>

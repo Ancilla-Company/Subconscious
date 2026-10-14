@@ -10,9 +10,10 @@ from typing import Any
 
 import yaml
 
-from .config import EngineConfig
+from .config import EngineConfig, HiveConfig, remote_tools_from_mapping
 
 _VERSION = 1
+_HIVE_KEYS = frozenset(field.name for field in fields(HiveConfig))
 _ENV_PATTERN = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
 _ENGINE_KEYS = frozenset(field.name for field in fields(EngineConfig))
 _CLIENT_KEYS = frozenset({"engine_url", "token", "workspace", "flutter_device"})
@@ -82,6 +83,18 @@ def write_template(path: Path, *, overwrite: bool = False) -> None:
             "subconscious_graph": None, "subconscious_model_id": None,
             "subconscious_enabled": True, "reflection_interval_seconds": 86400,
             "account_server_url": "https://api.subconscious.chat",
+            "hive": {
+                "enabled": True, "server_url": None, "stun_servers": [], "node_name": None,
+                "direct_timeout_seconds": 8.0, "relay_enabled": True,
+                # force_relay is a test/diagnostic switch (skips WebRTC); leave it off.
+                "force_relay": False,
+                # Everything is off until a tool is named here (webrtc.md section 8).
+                "remote_tools": {
+                    "tools": {}, "filesystem_roots": [], "call_timeout_seconds": 60,
+                    "max_result_bytes": 262144, "max_concurrent_calls": 4,
+                    "approval_timeout_seconds": 60,
+                },
+            },
         },
         "client": {
             "engine_url": "http://localhost:50506", "token": "${SUBCONSCIOUS_ENGINE_TOKEN}",
@@ -97,6 +110,11 @@ def show_configuration(path: Path | None, *, reveal_secrets: bool = False) -> st
     configuration = load_configuration(selected)
     engine = asdict(configuration.engine)
     engine = {key: str(value) if isinstance(value, Path) else value for key, value in engine.items()}
+    engine["hive"] = {
+        **engine["hive"],
+        "stun_servers": list(configuration.engine.hive.stun_servers),
+        "remote_tools": configuration.engine.hive.remote_tools.to_mapping(),
+    }
     client = dict(configuration.client)
     if not reveal_secrets and client.get("token"):
         client["token"] = "********"
@@ -105,11 +123,16 @@ def show_configuration(path: Path | None, *, reveal_secrets: bool = False) -> st
 
 def set_configuration_value(path: Path, dotted_key: str, value: str) -> None:
     parts = dotted_key.split(".")
-    if len(parts) != 2 or parts[0] not in {"engine", "client"}:
+    hive_key = len(parts) == 3 and parts[:2] == ["engine", "hive"]
+    if (len(parts) != 2 and not hive_key) or parts[0] not in {"engine", "client"}:
         raise ConfigurationFileError("Configuration key must be engine.<key> or client.<key>.")
-    allowed = _ENGINE_KEYS if parts[0] == "engine" else _CLIENT_KEYS
-    if parts[1] not in allowed:
-        raise ConfigurationFileError(f"Unknown {parts[0]} setting: {parts[1]}.")
+    if hive_key:
+        if parts[2] not in _HIVE_KEYS:
+            raise ConfigurationFileError(f"Unknown hive setting: {parts[2]}.")
+    else:
+        allowed = _ENGINE_KEYS if parts[0] == "engine" else _CLIENT_KEYS
+        if parts[1] not in allowed:
+            raise ConfigurationFileError(f"Unknown {parts[0]} setting: {parts[1]}.")
     raw: dict[str, Any] = {}
     if path.exists():
         try:
@@ -121,8 +144,12 @@ def set_configuration_value(path: Path, dotted_key: str, value: str) -> None:
     section = raw.setdefault(parts[0], {})
     if not isinstance(section, dict):
         raise ConfigurationFileError(f"{parts[0]} must be a mapping.")
+    if hive_key:
+        section = section.setdefault("hive", {})
+        if not isinstance(section, dict):
+            raise ConfigurationFileError("engine.hive must be a mapping.")
     try:
-        section[parts[1]] = yaml.safe_load(value)
+        section[parts[-1]] = yaml.safe_load(value)
     except yaml.YAMLError as error:
         raise ConfigurationFileError(f"Invalid setting value: {error}") from error
     candidate = path.with_suffix(path.suffix + ".tmp")
@@ -185,6 +212,15 @@ def _engine_from_mapping(values: dict[str, Any]) -> EngineConfig:
     for key in ("data_directory", "conscious_graph", "subconscious_graph"):
         if converted.get(key) is not None:
             converted[key] = Path(str(converted[key])).expanduser()
+    if "hive" in converted:
+        hive = converted["hive"] or {}
+        converted["hive"] = HiveConfig(
+            **{
+                **hive,
+                "stun_servers": tuple(hive.get("stun_servers") or ()),
+                "remote_tools": remote_tools_from_mapping(hive.get("remote_tools")),
+            }
+        )
     return EngineConfig(**converted)
 
 
@@ -197,12 +233,48 @@ def _validate_engine_values(values: dict[str, Any]) -> None:
     for key in ("reflection_interval_seconds",):
         if key in values and (not isinstance(values[key], (int, float)) or values[key] < 0):
             raise ConfigurationFileError(f"engine.{key} must be a non-negative number.")
+    if "hive" in values:
+        _validate_hive_values(values["hive"])
     if (url := values.get("account_server_url")) and (
         not isinstance(url, str) or not url.startswith(("http://", "https://"))
     ):
         raise ConfigurationFileError(
             "engine.account_server_url must start with http:// or https://."
         )
+
+
+def _validate_hive_values(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise ConfigurationFileError("engine.hive must be a mapping.")
+    _validate_keys(value, _HIVE_KEYS, "engine.hive")
+    if "enabled" in value and not isinstance(value["enabled"], bool):
+        raise ConfigurationFileError("engine.hive.enabled must be a boolean.")
+    url = value.get("server_url")
+    if url is not None and (not isinstance(url, str) or not url.startswith(("http://", "https://"))):
+        raise ConfigurationFileError("engine.hive.server_url must start with http:// or https://.")
+    stun = value.get("stun_servers")
+    if stun is not None and (
+        not isinstance(stun, list)
+        or not all(isinstance(s, str) and s.startswith(("stun:", "stuns:")) for s in stun)
+    ):
+        raise ConfigurationFileError("engine.hive.stun_servers must be a list of stun: URIs.")
+    name = value.get("node_name")
+    if name is not None and not isinstance(name, str):
+        raise ConfigurationFileError("engine.hive.node_name must be a string.")
+    for flag in ("relay_enabled", "force_relay"):
+        if flag in value and not isinstance(value[flag], bool):
+            raise ConfigurationFileError(f"engine.hive.{flag} must be a boolean.")
+    timeout = value.get("direct_timeout_seconds")
+    if "direct_timeout_seconds" in value and (
+        isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0.1 <= timeout <= 120
+    ):
+        raise ConfigurationFileError("engine.hive.direct_timeout_seconds must be a number from 0.1 to 120.")
+    try:
+        remote_tools_from_mapping(value.get("remote_tools"))
+    except ValueError as error:
+        raise ConfigurationFileError(f"Invalid engine.hive.remote_tools: {error}") from error
 
 
 def _validate_client_values(values: dict[str, Any]) -> None:
