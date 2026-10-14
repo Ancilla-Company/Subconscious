@@ -1,20 +1,21 @@
 # Assembles the MSIX layout and packs it with makeappx.
-# Run the build tasks first: engine (PyInstaller or Nuitka), Flutter Windows, TUI.
+# Run the build tasks first: engine (PyInstaller), Flutter Windows, TUI.
 #
 # Store submission: use the Product identity values from Partner Center
 # (-IdentityName, -Publisher, -PublisherDisplayName). Microsoft signs the package
 # on ingestion, so no certificate is needed for the Store upload.
 # Local install: pass -CertPath/-CertPassword to sign with a trusted test cert.
 param(
-  [ValidateSet('pyinstaller', 'nuitka')] [string] $Engine = 'pyinstaller',
   [string] $IdentityName = 'Subconscious.Placeholder',
   [string] $Publisher = 'CN=Placeholder',
   [string] $PublisherDisplayName = 'Subconscious',
   [string] $Version = '0.1.0.0',
+  [string] $Python = 'python',
   [string] $CertPath,
   [string] $CertPassword
 )
 $ErrorActionPreference = 'Stop'
+$Engine = 'pyinstaller'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $build = Join-Path $root 'build\packaging'
 $layout = Join-Path $build 'msix-layout'
@@ -23,8 +24,8 @@ $engineDir = Join-Path $build "$Engine\engine"
 $guiDir = Join-Path $root 'apps\unified_app\build\windows\x64\runner\Release'
 $tuiExe = Join-Path $build 'tui\subconscious-tui.exe'
 
-# PyInstaller makes two exes; Nuitka makes one that serves both roles.
-if ($Engine -eq 'pyinstaller') { $trayExe = 'subconscious-tray.exe' } else { $trayExe = 'subconscious.exe' }
+# PyInstaller makes two exes: the tray app and the CLI.
+$trayExe = 'subconscious-tray.exe'
 $cliExe = 'subconscious.exe'
 
 foreach ($required in @($engineDir, $guiDir, $tuiExe, (Join-Path $engineDir $cliExe), (Join-Path $engineDir $trayExe))) {
@@ -55,7 +56,7 @@ Copy-Item $tuiExe (Join-Path $layout 'tui')
 Get-ChildItem $layout -Recurse -Directory -Force -Filter 'default-docx-template' |
   ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
 
-python (Join-Path $PSScriptRoot 'make_logos.py') `
+& $Python (Join-Path $PSScriptRoot 'make_logos.py') `
   (Join-Path $root 'engine\src\subconscious_engine\app_icon.ico') (Join-Path $layout 'Assets')
 if ($LASTEXITCODE -ne 0) { throw 'Logo generation failed' }
 

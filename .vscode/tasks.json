@@ -82,7 +82,6 @@
       "args": [
         "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", "packaging/msix/build_msix.ps1",
-        "-Engine", "pyinstaller",
         "-Python", "${command:python.interpreterPath}"
       ],
       "options": { "cwd": "${workspaceFolder}" },
