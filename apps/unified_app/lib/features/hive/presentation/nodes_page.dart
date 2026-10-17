@@ -191,7 +191,10 @@ final class _NodeList extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    _loadFailedMessage(error),
+                    _loadFailedMessage(
+                      error,
+                      runtime.account.lastAuthError,
+                    ),
                     style: TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ),
@@ -487,7 +490,16 @@ String _friendlyMessage(Object error) {
   return "Couldn't load your devices. Check your connection and try again.";
 }
 /// Device list failures never show raw text; the cause is logged.
-String _loadFailedMessage(Object error) {
+String _loadFailedMessage(Object error, [String? lastAuthError]) {
   debugPrint('Devices error: $error');
+  if (error is HiveApiException &&
+      (error.statusCode == 401 || error.statusCode == 403)) {
+    final String detail = lastAuthError == null ? '' : ' ($lastAuthError)';
+    return 'Your session expired or was rejected by the server. '
+        'Sign in again.$detail';
+  }
+  if (error is HiveApiException && error.statusCode >= 400) {
+    return 'The server returned ${error.statusCode}. Try again later.';
+  }
   return "Couldn't load your devices. Check your connection and try again.";
 }

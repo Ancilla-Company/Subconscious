@@ -40,6 +40,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
           tokenStore: SecureRefreshTokenStore(_storage),
         );
     this.account = accountClient;
+    accountClient.onSessionExpired = _onSessionExpired;
     this.hive =
         hive ??
         HiveClient(
@@ -264,6 +265,19 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
 
   void _busy() {
     status = HiveStatus.busy;
+    notifyListeners();
+  }
+
+  /// The server rejected the session (401): drop it so the UI shows signed
+  /// out with the cause in [error], instead of a dead session.
+  void _onSessionExpired(HiveApiException caught) {
+    unawaited(_viewSubscription?.cancel());
+    _viewSubscription = null;
+    unawaited(hive.stop());
+    nodes = const <NodeView>[];
+    error = caught;
+    status = HiveStatus.signedOut;
+    _restored = false;
     notifyListeners();
   }
 

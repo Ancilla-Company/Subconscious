@@ -42,6 +42,9 @@ final class AccountController extends ChangeNotifier {
   /// The server session when this device uses a remote engine, else null.
   HiveRuntime? get serverRuntime => thinClient ? session : null;
 
+  static const String sessionExpiredMessage =
+      'Your session expired. Sign in again.';
+
   bool get usesServerAccount => thinClient;
 
   AccountStatus status = AccountStatus.initializing;
@@ -186,6 +189,12 @@ final class AccountController extends ChangeNotifier {
       await action();
       await session.adoptSession();
       _applySession();
+      if (!session.isSignedIn) {
+        // The server accepted the login but rejected the session straight
+        // away; do not report success.
+        error = messageFor(session.error ?? StateError('Sign-in failed.'));
+        return false;
+      }
       notice = null;
       if (!thinClient) await _linkEngine(linkEngine);
       isBusy = false;
@@ -241,6 +250,12 @@ final class AccountController extends ChangeNotifier {
     if (isBusy || status == AccountStatus.initializing) return;
     if (session.isSignedIn == isAuthenticated) return;
     _applySession();
+    final Object? cause = session.error;
+    if (!session.isSignedIn &&
+        cause is HiveApiException &&
+        cause.statusCode == 401) {
+      error = sessionExpiredMessage;
+    }
     notifyListeners();
   }
 

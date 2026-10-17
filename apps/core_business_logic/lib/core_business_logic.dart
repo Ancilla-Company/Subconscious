@@ -17,6 +17,7 @@ export 'hive/encoding.dart';
 export 'hive/handshake.dart';
 export 'hive/hive_api.dart';
 export 'hive/hive_client.dart';
+export 'hive/http_debug_log.dart';
 export 'hive/identity.dart';
 export 'hive/peer_connector.dart';
 export 'hive/peer_engine_socket.dart';

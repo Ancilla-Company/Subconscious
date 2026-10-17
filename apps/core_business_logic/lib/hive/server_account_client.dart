@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'encoding.dart';
 import 'hive_api.dart';
+import 'http_debug_log.dart';
 
 /// Persists the refresh token (flutter_secure_storage in the app).
 abstract interface class RefreshTokenStore {
@@ -61,10 +62,11 @@ final class ServerAccountClient {
     required this.tokenStore,
     http.Client? client,
     DateTime Function()? clock,
+    this.onSessionExpired,
   }) : baseUri = baseUri.path.endsWith('/')
            ? baseUri
            : baseUri.replace(path: '${baseUri.path}/'),
-       _client = client ?? http.Client(),
+       _client = client ?? createLoggingClient(),
        _clock = clock ?? DateTime.now;
 
   final Uri baseUri;
@@ -75,6 +77,13 @@ final class ServerAccountClient {
   String? _accessToken;
   DateTime? _accessExpiry;
   ServerUser? user;
+
+  /// Called when the server rejected the session and it was cleared locally.
+  void Function(HiveApiException error)? onSessionExpired;
+
+  /// Last authentication failure, e.g. `401: Invalid or expired refresh token`.
+  /// Never contains tokens or passwords.
+  String? lastAuthError;
   Future<String?>? _refreshing;
 
   bool get isSignedIn => _accessToken != null;
@@ -215,7 +224,13 @@ final class ServerAccountClient {
   Future<void> _loadUser() async {
     final http.Request request = http.Request('GET', baseUri.resolve('auth/me'))
       ..headers['Authorization'] = 'Bearer $_accessToken';
-    final Map<String, dynamic> raw = await _send(request);
+    final Map<String, dynamic> raw;
+    try {
+      raw = await _send(request);
+    } on HiveApiException catch (error) {
+      if (error.statusCode == 401) await expireSession(error.message);
+      rethrow;
+    }
     if (raw['id'] != null && raw['email'] != null) {
       user = ServerUser(
         id: '${raw['id']}',
@@ -240,6 +255,20 @@ final class ServerAccountClient {
   Future<void> forceRefresh() async {
     _accessExpiry = null;
     await _refresh();
+  }
+
+  /// Drops the local session after the server rejected it (401), so the app
+  /// shows signed-out instead of a dead session.
+  Future<void> expireSession(String reason, [int statusCode = 401]) async {
+    final bool wasSignedIn = user != null || _accessToken != null;
+    _accessToken = null;
+    _accessExpiry = null;
+    user = null;
+    lastAuthError = '$statusCode: $reason';
+    await tokenStore.delete();
+    if (wasSignedIn) {
+      onSessionExpired?.call(HiveApiException(reason, statusCode));
+    }
   }
 
   Future<void> logout() async {
@@ -272,8 +301,7 @@ final class ServerAccountClient {
       });
     } on HiveApiException catch (error) {
       if (error.statusCode == 401) {
-        _accessToken = null;
-        await tokenStore.delete();
+        await expireSession(error.message);
         return null;
       }
       rethrow;
