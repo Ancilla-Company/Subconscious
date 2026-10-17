@@ -114,10 +114,10 @@ void main() {
     expect(out.length, lessThan(2048 + 300));
   });
 
-  test('non-JSON text has bearer values removed; binary is not printed', () {
+  test('non-JSON text is never printed, only type and length', () {
     expect(
       redactBody('oops Bearer $_bearer end', 'text/plain'),
-      isNot(contains(_bearer)),
+      allOf(isNot(contains(_bearer)), isNot(contains('oops'))),
     );
     expect(redactBody('RAWBYTES', 'audio/wav'), isNot(contains('RAWBYTES')));
   });

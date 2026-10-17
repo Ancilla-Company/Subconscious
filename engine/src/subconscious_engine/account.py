@@ -7,11 +7,13 @@ import logging
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+import time
 import httpx
 import keyring
 from keyring.errors import PasswordDeleteError
 
 from subconscious_engine.configuration import EncryptedModelConfigurationStore
+from subconscious_engine.http_log import format_body, safe_url, verbose_enabled
 from subconscious_engine.configuration.key_provider import (
     SERVICE_NAME as _ENCRYPTION_KEYRING_SERVICE,
 )
@@ -257,11 +259,17 @@ class AccountServerClient:
         headers = {"Accept": "application/json"}
         if access_token:
             headers["Authorization"] = f"Bearer {access_token}"
+        url = safe_url(self._base_url + path)
+        started = time.monotonic()
         try:
             response = await self._client.request(
                 method, path, json=body, headers=headers
             )
         except httpx.HTTPError as error:
+            _LOG.warning(
+                "account.request method=%s url=%s failed elapsed_ms=%d reason=%s",
+                method, url, int((time.monotonic() - started) * 1000), type(error).__name__,
+            )
             _LOGGER.debug(
                 "Account server request failed: method=%s path=%s reason=%s",
                 method,
@@ -270,8 +278,18 @@ class AccountServerClient:
                 exc_info=True,
             )
             raise AccountError("Could not reach the account server.") from error
+        _LOG.info(
+            "account.request method=%s url=%s status=%s elapsed_ms=%d",
+            method, url, response.status_code, int((time.monotonic() - started) * 1000),
+        )
+        if verbose_enabled() and body is not None:
+            _LOG.info("account.request body=%s", format_body(body))
         if response.is_error:
             message = _error_message(response)
+            _LOG.warning(
+                "account.request rejected method=%s url=%s status=%s detail=%s",
+                method, url, response.status_code, message,
+            )
             _LOGGER.debug(
                 "Account server rejected request: method=%s path=%s status=%s reason=%s",
                 method,

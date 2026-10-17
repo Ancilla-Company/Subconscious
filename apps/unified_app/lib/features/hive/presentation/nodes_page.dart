@@ -191,7 +191,7 @@ final class _NodeList extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    _loadFailedMessage(
+                    devicesLoadFailedMessage(
                       error,
                       runtime.account.lastAuthError,
                     ),
@@ -490,7 +490,8 @@ String _friendlyMessage(Object error) {
   return "Couldn't load your devices. Check your connection and try again.";
 }
 /// Device list failures never show raw text; the cause is logged.
-String _loadFailedMessage(Object error, [String? lastAuthError]) {
+@visibleForTesting
+String devicesLoadFailedMessage(Object error, [String? lastAuthError]) {
   debugPrint('Devices error: $error');
   if (error is HiveApiException &&
       (error.statusCode == 401 || error.statusCode == 403)) {

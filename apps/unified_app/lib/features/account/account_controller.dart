@@ -222,8 +222,19 @@ final class AccountController extends ChangeNotifier {
         return;
       }
       await link(client);
+    } on EngineApiException catch (caughtError) {
+      final String message = caughtError.engineMessage ?? 'no details';
+      debugPrint(
+        'Could not sign the local engine in: '
+        '${caughtError.statusCode} $message',
+      );
+      notice =
+          'Signed in to the server, but the local engine was refused '
+          '(${caughtError.statusCode}): $message';
     } on Object catch (caughtError) {
-      debugPrint('Could not sign the local engine in: $caughtError');
+      debugPrint(
+        'Could not sign the local engine in: ${caughtError.runtimeType}',
+      );
       notice =
           'Signed in, but the local engine could not be linked to your '
           'account. Try signing out and in again.';

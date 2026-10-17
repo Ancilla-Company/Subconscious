@@ -105,7 +105,6 @@ String redactUrl(Uri uri) {
   return uri.replace(queryParameters: query).toString();
 }
 
-final RegExp _bearer = RegExp(r'Bearer\s+\S+', caseSensitive: false);
 
 /// Body text safe to print and truncated to [limit] characters. JSON bodies
 /// have secret keys redacted at any depth; other content is not printed.
@@ -119,10 +118,8 @@ String redactBody(String body, String? contentType, {int limit = httpLogBodyLimi
   try {
     text = jsonEncode(_redactValue(null, jsonDecode(body)));
   } on FormatException {
-    if (type.isNotEmpty && !type.contains('json') && !type.contains('text')) {
-      return '<${type.split(';').first} ${body.length} bytes>';
-    }
-    text = body.replaceAll(_bearer, 'Bearer <redacted>');
+    final String label = type.isEmpty ? 'unknown' : type.split(';').first;
+    return '<$label ${body.length} bytes>';
   }
   if (text.length <= limit) return text;
   return '${text.substring(0, limit)}...(truncated ${text.length - limit} chars)';

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:unified_app/features/account/account_controller.dart';
 import 'package:unified_app/features/hive/hive_runtime.dart';
+import 'package:unified_app/features/hive/presentation/nodes_page.dart';
 
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues(<String, String>{}));
@@ -55,4 +56,26 @@ void main() {
     expect(runtime.account.lastAuthError, '401: Invalid or expired refresh token');
     expect(controller.error, isNot(contains('r-1')));
   });
-}
+
+  test('devices message distinguishes session, server and connection errors', () {
+    final String session = devicesLoadFailedMessage(
+      HiveApiException('Sign in to use the hive.', 401),
+      '401: Invalid or expired refresh token',
+    );
+    final String server = devicesLoadFailedMessage(
+      HiveApiException('boom', 503),
+    );
+    final String offline = devicesLoadFailedMessage(
+      HiveApiException('Could not reach the server.', 0),
+    );
+    expect(session, contains('session expired'));
+    expect(session, contains('401: Invalid or expired refresh token'));
+    expect(session, isNot(contains('Check your connection')));
+    expect(server, contains('503'));
+    expect(server, isNot(contains('Check your connection')));
+    expect(offline, contains('Check your connection'));
+    for (final String s in <String>[session, server, offline]) {
+      expect(s, isNot(contains('Bearer')));
+      expect(s, isNot(contains('r-1')));
+    }
+  });}
