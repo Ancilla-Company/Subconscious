@@ -1,6 +1,6 @@
 # Subconscious Chromium extension
 
-This unpacked Manifest V3 extension follows the compact mobile flyout layout: 40 px icon rail, contextual pane, compact settings, and engine connection status. It keeps the endpoint and bearer token only in `chrome.storage.local`; it has no content scripts and no broad host permission granted until the user connects.
+This unpacked Manifest V3 extension follows the compact mobile flyout layout: top navigation menu with the Workspaces, Threads and Files buttons, contextual pane, compact settings, and engine connection status. It keeps the endpoint and bearer token only in `chrome.storage.local`; it has no content scripts and no broad host permission granted until the user connects.
 
 ## Load locally
 

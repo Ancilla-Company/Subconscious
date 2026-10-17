@@ -164,57 +164,101 @@ final class _MobileFlyout extends StatelessWidget {
     controller.openAccountShortcut();
   }
 
+  Widget _menuButton({
+    required IconData icon,
+    required IconData selectedIcon,
+    required String label,
+    required DashboardSection section,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: FlyoutNavButton(
+      icon: icon,
+      selectedIcon: selectedIcon,
+      label: label,
+      selected: controller.selectedSection == section,
+      onPressed: () => _selectSection(section),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return Row(
-      children: <Widget>[
-        ColoredBox(
-          color: colors.surface,
-          child: SizedBox(
-            width: 40,
-            child: Column(
-              children: <Widget>[
-                Tooltip(
-                  message: 'Subconscious',
-                  child: SizedBox.square(
-                    dimension: 40,
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: SvgPicture.asset(
-                        'windows/runner/resources/icon_title.svg',
-                        semanticsLabel: 'Subconscious logo',
-                      ),
+    final Divider divider = Divider(
+      height: 1,
+      thickness: 1,
+      color: colors.outlineVariant,
+    );
+    return ColoredBox(
+      color: colors.surface,
+      child: Column(
+        children: <Widget>[
+          SizedBox(
+            height: 48,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: <Widget>[
+                  SvgPicture.asset(
+                    'windows/runner/resources/icon_title.svg',
+                    height: 24,
+                    width: 24,
+                    colorFilter: ColorFilter.mode(
+                      colors.onSurface,
+                      BlendMode.srcIn,
+                    ),
+                    semanticsLabel: 'Subconscious logo',
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Subconscious',
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
-                ),
-                _MobileSidebarButton(
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+            child: Column(
+              children: <Widget>[
+                _menuButton(
                   icon: FluentIcons.apps_24_regular,
                   selectedIcon: FluentIcons.apps_24_filled,
-                  tooltip: 'Workspaces',
-                  selected:
-                      controller.selectedSection == DashboardSection.workspaces,
-                  onPressed: () => _selectSection(DashboardSection.workspaces),
+                  label: 'Workspaces',
+                  section: DashboardSection.workspaces,
                 ),
-                _MobileSidebarButton(
+                _menuButton(
                   icon: FluentIcons.chat_24_regular,
                   selectedIcon: FluentIcons.chat_24_filled,
-                  tooltip: 'Threads',
-                  selected:
-                      controller.selectedSection == DashboardSection.threads,
-                  onPressed: () => _selectSection(DashboardSection.threads),
+                  label: 'Threads',
+                  section: DashboardSection.threads,
                 ),
-                _MobileSidebarButton(
+                _menuButton(
                   icon: FluentIcons.document_copy_24_regular,
                   selectedIcon: FluentIcons.document_copy_24_filled,
-                  tooltip: 'Files',
-                  selected:
-                      controller.selectedSection == DashboardSection.files,
-                  onPressed: () => _selectSection(DashboardSection.files),
+                  label: 'Files',
+                  section: DashboardSection.files,
                 ),
-                const Spacer(),
-                Divider(height: 1, thickness: 1, color: colors.outlineVariant),
-                _MobileSidebarButton(
+              ],
+            ),
+          ),
+          divider,
+          Expanded(
+            child: ContextPanel(
+              screen: controller.selectedSection,
+              controller: controller,
+              onSelection: () => Navigator.of(context).pop(),
+            ),
+          ),
+          divider,
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: <Widget>[
+                SidebarButton(
                   icon: FluentIcons.settings_24_regular,
                   selectedIcon: FluentIcons.settings_24_filled,
                   tooltip: 'Settings',
@@ -222,85 +266,34 @@ final class _MobileFlyout extends StatelessWidget {
                       controller.selectedSection == DashboardSection.settings &&
                       !controller.accountShortcutSelected,
                   onPressed: () => _selectSection(DashboardSection.settings),
+                  dimension: 40,
+                  borderRadius: 6,
                 ),
-                AnimatedBuilder(
-                  animation: accountController,
-                  builder: (BuildContext context, Widget? child) =>
-                      _MobileSidebarButton(
-                        icon: FluentIcons.person_24_regular,
-                        selectedIcon: FluentIcons.person_24_filled,
-                        tooltip: accountController.sidebarTooltip,
-                        selected:
-                            controller.selectedSection ==
-                                DashboardSection.settings &&
-                            controller.accountShortcutSelected,
-                        onPressed: _selectAccount,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        SizedBox(width: 1, child: ColoredBox(color: colors.outlineVariant)),
-        Expanded(
-          child: ColoredBox(
-            color: colors.surface,
-            child: Column(
-              children: <Widget>[
-                SizedBox(
-                  height: 48,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Subconscious',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                  ),
-                ),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: ContextPanel(
-                    screen: controller.selectedSection,
-                    controller: controller,
-                    onSelection: () => Navigator.of(context).pop(),
+                  child: AnimatedBuilder(
+                    animation: accountController,
+                    builder: (BuildContext context, Widget? child) =>
+                        FlyoutNavButton(
+                          icon: FluentIcons.person_24_regular,
+                          selectedIcon: FluentIcons.person_24_filled,
+                          label: accountController.sidebarTooltip,
+                          height: 40,
+                          selected:
+                              controller.selectedSection ==
+                                  DashboardSection.settings &&
+                              controller.accountShortcutSelected,
+                          onPressed: _selectAccount,
+                        ),
                   ),
                 ),
               ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
-}
-
-final class _MobileSidebarButton extends StatelessWidget {
-  const _MobileSidebarButton({
-    required this.icon,
-    required this.selectedIcon,
-    required this.tooltip,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final IconData selectedIcon;
-  final String tooltip;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => SidebarButton(
-    icon: icon,
-    selectedIcon: selectedIcon,
-    tooltip: tooltip,
-    selected: selected,
-    onPressed: onPressed,
-    dimension: 40,
-    borderRadius: 0,
-  );
 }
 
 final class _MobileConnectionStatus extends StatelessWidget {
