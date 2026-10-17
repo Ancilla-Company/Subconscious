@@ -49,7 +49,7 @@ def test_client_registry_rejects_duplicates_notifies_snapshots_and_releases_idem
         unsubscribe = registry.subscribe(snapshots.append)
         assert snapshots == [()]
         assert await registry.acquire("desktop", label="Desktop App") == "desktop"
-        assert registry.snapshot() == ("Desktop App",)
+        assert [c.display_name for c in registry.snapshot()] == ["Desktop App"]
         assert await registry.acquire("desktop") is None
         with patch(
             "subconscious_engine.api.websocket.uuid4",
@@ -57,14 +57,14 @@ def test_client_registry_rejects_duplicates_notifies_snapshots_and_releases_idem
         ):
             assert await registry.acquire(None, label="Android") == "generated"
             assert await registry.acquire(None) is None
-        assert registry.snapshot() == ("Android", "Desktop App")
+        assert [c.display_name for c in registry.snapshot()] == ["Android", "Desktop App"]
         await registry.release("desktop")
         await registry.release("desktop")
         await registry.release(None)
-        assert snapshots[-1] == ("Android",)
+        assert [c.display_name for c in snapshots[-1]] == ["Android"]
         unsubscribe()
         assert await registry.acquire("desktop") == "desktop"
-        assert snapshots[-1] == ("Android",)
+        assert [c.display_name for c in snapshots[-1]] == ["Android"]
     run(scenario())
 
 

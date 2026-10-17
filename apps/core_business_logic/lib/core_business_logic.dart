@@ -3,6 +3,7 @@ export 'api/engine_exception.dart';
 export 'api/engine_socket.dart';
 export 'api/rest_engine_client.dart';
 export 'api/task_socket_mixin.dart';
+export 'api/client_identity.dart';
 export 'api/web_socket_engine_client.dart';
 export 'connection/engine_discovery.dart';
 export 'engine/echo_model_provider.dart';

@@ -178,7 +178,7 @@ async def _run_turn(
     timeout: float,
     error_output: TextIO,
 ) -> ChatResult:
-    query = urlencode({"token": runtime.token})
+    query = urlencode({"token": runtime.token, "client_type": "cli", "client_name": "CLI"})
     endpoint = f"ws://{runtime.host}:{runtime.port}/api/v1/events?{query}"
     turn_id = f"cli-{uuid4().hex}"
     client_id = f"cli-{uuid4().hex}"
@@ -260,7 +260,7 @@ async def _run_notification(
     *,
     timeout: float,
 ) -> NotificationResult:
-    query = urlencode({"token": runtime.token})
+    query = urlencode({"token": runtime.token, "client_type": "cli", "client_name": "CLI"})
     endpoint = f"ws://{runtime.host}:{runtime.port}/api/v1/events?{query}"
     notification_id = f"cli-{uuid4().hex}"
     client_id = f"cli-{uuid4().hex}"

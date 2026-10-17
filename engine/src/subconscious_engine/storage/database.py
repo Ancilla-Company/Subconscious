@@ -46,6 +46,7 @@ class Database:
                 await connection.run_sync(migrations.stamp_fresh)
             else:
                 await connection.run_sync(migrations.migrate)
+            await connection.run_sync(migrations.log_schema_drift)
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:

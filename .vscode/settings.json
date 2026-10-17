@@ -27,4 +27,9 @@
   },
   "peacock.color": "#ffffff",
   "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "python.defaultInterpreterPath": "${env:USERPROFILE}\\miniconda3\\envs\\subconscious\\python.exe",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.cwd": "${workspaceFolder}",
+  "python.testing.pytestArgs": ["tests", "engine/tests"],
 }

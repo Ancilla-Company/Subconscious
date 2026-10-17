@@ -3,12 +3,19 @@ import 'dart:async';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/engine_models.dart';
+import 'client_identity.dart';
 import 'engine_socket.dart';
 import 'task_socket_mixin.dart';
 
 final class WebSocketEngineClient with TaskSocketMixin implements EngineSocket {
-  WebSocketEngineClient({required this.endpoint});
+  WebSocketEngineClient({
+    required this.endpoint,
+    this.identity,
+    WebSocketChannel Function(Uri uri)? channelFactory,
+  }) : _channelFactory = channelFactory ?? WebSocketChannel.connect;
   final Uri endpoint;
+  final ClientIdentity? identity;
+  final WebSocketChannel Function(Uri uri) _channelFactory;
   final StreamController<WireFrame> _frames =
       StreamController<WireFrame>.broadcast();
   WebSocketChannel? _channel;
@@ -25,7 +32,7 @@ final class WebSocketEngineClient with TaskSocketMixin implements EngineSocket {
   @override
   Future<void> connect() async {
     if (isConnected) return;
-    final WebSocketChannel channel = WebSocketChannel.connect(endpoint);
+    final WebSocketChannel channel = _channelFactory(identity?.withQuery(endpoint) ?? endpoint);
     _channel = channel;
     _hello = Completer<void>();
     _closing = false;
@@ -36,7 +43,10 @@ final class WebSocketEngineClient with TaskSocketMixin implements EngineSocket {
         onError: _onError,
         onDone: _onDone,
       );
-      send(type: 'client.hello', data: <String, dynamic>{});
+      send(
+        type: 'client.hello',
+        data: identity?.helloData() ?? <String, dynamic>{},
+      );
       await _hello!.future.timeout(const Duration(seconds: 10));
     } on Object {
       await _disconnect();
@@ -150,7 +160,11 @@ final class WebSocketEngineClient with TaskSocketMixin implements EngineSocket {
     await subscription?.cancel();
     final WebSocketChannel? channel = _channel;
     _channel = null;
-    await channel?.sink.close();
+    // The engine outlives this client: never wait on a close handshake from a
+    // dead or slow server.
+    if (channel != null) {
+      unawaited(channel.sink.close(1000).timeout(const Duration(milliseconds: 500), onTimeout: () {}).catchError((Object _) {}));
+    }
     _hello = null;
   }
 

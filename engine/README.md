@@ -57,6 +57,18 @@ workspace and starts a new thread. Responses go to stdout; a newly created
 thread ID is written to stderr. The `tui`, `desktop`, `web`, and `extension`
 client launch commands are currently reserved stubs.
 
+## Client identification
+
+The tray's Connected Clients menu shows readable labels such as `Desktop (local)`, `TUI (local)` or `Desktop (remote, 192.168.1.5)`. Clients identify themselves on the WebSocket (`/api/v1/events`) with query parameters, or with the matching `client.hello` data fields as a fallback (the only channel for hive peers):
+
+| Query parameter | Hello field | Notes |
+| --- | --- | --- |
+| `client_type` | `clientType` | One of `desktop`, `mobile`, `tui`, `browser_extension`, `cli`, `web`. Anything else is shown as `Unknown`. |
+| `client_name` | `clientName` | Free text, max 64 characters, control characters stripped. |
+| `client_version` | `clientVersion` | Max 32 characters. |
+
+Local vs remote is decided by the engine from the peer address (loopback or one of this machine's own addresses is local); `X-Forwarded-For` is ignored and hive/WebRTC peers are always remote. The existing `client=flutter` settings-scope parameter is unrelated and unchanged. No browser extension exists in this repository yet; a future one should connect with `client_type=browser_extension`.
+
 ## Selenium web smoke check
 
 Install the pinned E2E extra with `python -m pip install -e ".[e2e]"`. Launch the connected Flutter web app, set its URL, and run the Selenium smoke harness; it waits for the web shell and saves a screenshot in pytest's temporary artifacts:

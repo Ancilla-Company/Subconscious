@@ -29,7 +29,7 @@ dependencies:
   url_launcher: 6.3.2
   window_manager: 0.5.2
   file_selector: 1.1.0
-  record: 6.1.1
+  record: 7.1.2
   audioplayers: 6.4.0
 
 dev_dependencies:

@@ -33,6 +33,9 @@ from subconscious_engine.tools import (
     merge_tool_config,
 )
 import logging
+from ..client_identity import (
+    ClientIdentity, ClientInfo, build_client_info, is_local_address, parse_identity,
+)
 from ..logging_setup import logged_suppress, spawn_logged
 _LOG = logging.getLogger(__name__)
 
@@ -173,24 +176,35 @@ def _prompt_with_file_context(content: str, context: ToolContext) -> str:
 
 class ClientRegistry:
     def __init__(self) -> None:
-        self._clients: dict[str, str] = {}
+        self._clients: dict[str, ClientInfo] = {}
         self._sessions: dict[str, Any] = {}
-        self._listeners: set[Callable[[tuple[str, ...]], None]] = set()
+        self._listeners: set[Callable[[tuple[ClientInfo, ...]], None]] = set()
         self._lock = RLock()
-
     async def acquire(
-        self, requested: str | None, *, label: str | None = None
+        self,
+        requested: str | None,
+        *,
+        label: str | None = None,
+        identity: ClientIdentity | None = None,
+        address: str | None = None,
+        is_local: bool | None = None,
+        node_name: str | None = None,
     ) -> str | None:
         with self._lock:
             identifier = requested or uuid4().hex
             if identifier in self._clients:
                 return None
-            display_name = label.strip() if isinstance(label, str) else ""
-            self._clients[identifier] = display_name or identifier
+            self._clients[identifier] = build_client_info(
+                identifier,
+                identity or ClientIdentity(),
+                label=label,
+                address=address,
+                is_local=address is None if is_local is None else is_local,
+                node_name=node_name,
+            )
             snapshot = self._snapshot_locked()
         self._notify(snapshot)
         return identifier
-
     async def release(self, identifier: str | None) -> None:
         if identifier is None:
             return
@@ -242,39 +256,35 @@ class ClientRegistry:
         return delivered
 
     def subscribe(
-        self, listener: Callable[[tuple[str, ...]], None]
+        self, listener: Callable[[tuple[ClientInfo, ...]], None]
     ) -> Callable[[], None]:
         with self._lock:
             self._listeners.add(listener)
             snapshot = self._snapshot_locked()
         self._notify_listener(listener, snapshot)
-
         def unsubscribe() -> None:
             with self._lock:
                 self._listeners.discard(listener)
-
         return unsubscribe
-
-    def snapshot(self) -> tuple[str, ...]:
+    def snapshot(self) -> tuple[ClientInfo, ...]:
         with self._lock:
             return self._snapshot_locked()
-
-    def _snapshot_locked(self) -> tuple[str, ...]:
-        return tuple(sorted(self._clients.values(), key=str.casefold))
-
-    def _notify(self, snapshot: tuple[str, ...]) -> None:
+    def _snapshot_locked(self) -> tuple[ClientInfo, ...]:
+        return tuple(sorted(
+            self._clients.values(),
+            key=lambda client: (client.display_name.casefold(), client.connected_at),
+        ))
+    def _notify(self, snapshot: tuple[ClientInfo, ...]) -> None:
         with self._lock:
             listeners = tuple(self._listeners)
         for listener in listeners:
             self._notify_listener(listener, snapshot)
-
     @staticmethod
     def _notify_listener(
-        listener: Callable[[tuple[str, ...]], None], snapshot: tuple[str, ...]
+        listener: Callable[[tuple[ClientInfo, ...]], None], snapshot: tuple[ClientInfo, ...]
     ) -> None:
         with logged_suppress(Exception):
             listener(snapshot)
-
 
 class SessionTransport(Protocol):
     """What a chat session needs from its transport.
@@ -409,8 +419,17 @@ class WebSocketSession:
             if isinstance(peer_host, str) and isinstance(peer_port, int)
             else peer_host if isinstance(peer_host, str) else None
         )
+        # Identity comes from the connection itself, never from X-Forwarded-For.
+        identity = parse_identity(getattr(self.socket, "query_params", None), data)
+        is_peer = getattr(self.socket, "link", None) is not None
+        host = peer_host if isinstance(peer_host, str) else None
         identifier = await self.app.state.client_registry.acquire(
-            requested, label=client_name or requested or peer_label
+            requested,
+            label=client_name or requested or peer_label,
+            identity=identity,
+            address=None if is_peer else host,
+            is_local=False if is_peer else is_local_address(host),
+            node_name=(getattr(self.socket, "display_name", "") or client_name) if is_peer else None,
         )
         if identifier is None:
             await self._send("client.hello.reject", {"reason": "Client_ID already in use by an active connection."})

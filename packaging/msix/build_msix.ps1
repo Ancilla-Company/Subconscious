@@ -15,7 +15,9 @@ param(
   [string] $Version = '0.1.0.0',
   [string] $Python = 'python',
   [string] $CertPath,
-  [string] $CertPassword
+  [string] $CertPassword,
+  # Omit the TUI (skips its exe and its manifest Application entry).
+  [switch] $SkipTui
 )
 $ErrorActionPreference = 'Stop'
 $Engine = 'pyinstaller'
@@ -31,7 +33,9 @@ $tuiExe = Join-Path $build 'tui\subconscious-tui.exe'
 $desktopExe = 'subconscious-desktop.exe'
 $cliExe = 'subconscious.exe'
 
-foreach ($required in @($engineDir, $guiDir, $tuiExe, (Join-Path $engineDir $cliExe), (Join-Path $engineDir $desktopExe))) {
+$requiredPaths = @($engineDir, $guiDir, (Join-Path $engineDir $cliExe), (Join-Path $engineDir $desktopExe))
+if (-not $SkipTui) { $requiredPaths += $tuiExe }
+foreach ($required in $requiredPaths) {
   if (-not (Test-Path $required)) { throw "Missing build output: $required" }
 }
 
@@ -49,8 +53,10 @@ if (Test-Path $layout) { Remove-Item -Recurse -Force $layout }
 New-Item -ItemType Directory -Force $layout | Out-Null
 Copy-Item -Recurse $guiDir (Join-Path $layout 'gui')
 Copy-Item -Recurse $engineDir (Join-Path $layout 'engine')
-New-Item -ItemType Directory -Force (Join-Path $layout 'tui') | Out-Null
-Copy-Item $tuiExe (Join-Path $layout 'tui\tui.exe')
+if (-not $SkipTui) {
+  New-Item -ItemType Directory -Force (Join-Path $layout 'tui') | Out-Null
+  Copy-Item $tuiExe (Join-Path $layout 'tui\tui.exe')
+}
 
 # Package-internal exe names are decoupled from the build outputs
 # (Flutter's BINARY_NAME stays unified_app so `flutter run` keeps working).
@@ -81,6 +87,10 @@ $manifest = $manifest.
   Replace('{{VERSION}}', $Version).
   Replace('{{ENGINE_TRAY_EXE}}', $desktopExe).
   Replace('{{ENGINE_CLI_EXE}}', $cliExe)
+if ($SkipTui) {
+  $manifest = [regex]::Replace($manifest, '(?s)[ \t]*<!-- Terminal only: `subconscious-tui`.*?</Application>\s*', '')
+  if ($manifest -match 'tui\\tui.exe') { throw 'Failed to strip TUI from manifest' }
+}
 Set-Content -Path (Join-Path $layout 'AppxManifest.xml') -Value $manifest -Encoding UTF8
 
 # resources.pri lets Windows resolve the qualified (targetsize/unplated) logos.

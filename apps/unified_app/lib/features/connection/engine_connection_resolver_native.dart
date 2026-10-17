@@ -107,8 +107,17 @@ Future<bool> _isReachable(EngineRuntimeInfo runtime) async {
 EngineRepository _repositoryFromRuntime(EngineRuntimeInfo runtime) =>
     EngineRepository(
       rest: RestEngineClient(baseUri: runtime.httpUri, token: runtime.token),
-      socket: WebSocketEngineClient(endpoint: runtime.webSocketUri),
+      socket: WebSocketEngineClient(
+        endpoint: runtime.webSocketUri,
+        identity: _clientIdentity(),
+      ),
     );
+
+ClientIdentity _clientIdentity() => ClientIdentity(
+  type: Platform.isAndroid || Platform.isIOS
+      ? ClientType.mobile
+      : ClientType.desktop,
+);
 
 EngineRepository? _repositoryFromExplicit(Uri? endpoint, String token) {
   if (endpoint == null || endpoint.host.isEmpty || token.isEmpty) return null;
@@ -121,6 +130,7 @@ EngineRepository? _repositoryFromExplicit(Uri? endpoint, String token) {
       token: token,
     ),
     socket: WebSocketEngineClient(
+      identity: _clientIdentity(),
       endpoint: endpoint.replace(
         scheme: endpoint.scheme == 'https' ? 'wss' : 'ws',
         path: '/api/v1/events',

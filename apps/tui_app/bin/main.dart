@@ -20,7 +20,10 @@ EngineRepository? _createRepository() {
       baseUri: httpUri.replace(path: '/api/v1/'),
       token: token,
     ),
-    socket: WebSocketEngineClient(endpoint: wsUri),
+    socket: WebSocketEngineClient(
+      endpoint: wsUri,
+      identity: const ClientIdentity(type: ClientType.tui),
+    ),
   );
 }
 

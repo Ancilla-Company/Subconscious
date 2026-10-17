@@ -41,6 +41,31 @@
       }
     },
     {
+      "label": "Flutter: Build Android App Bundle (AAB)",
+      "type": "shell",
+      "command": "flutter",
+      "args": [
+        "build",
+        "appbundle",
+        "--release",
+        "--build-name=${input:androidVersionName}",
+        "--build-number=${input:androidVersionCode}",
+        "--dart-define=SUBCONSCIOUS_SERVER_URL=https://api.subconscious.chat",
+        "--dart-define=SUBCONSCIOUS_ENGINE_DEV=false"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/apps/unified_app"
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Builds build/app/outputs/bundle/release/app-release.aab for Play Console. Prompts for version name and version code.",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": false
+      }
+    },
+    {
       "label": "Package: Engine (PyInstaller)",
       "type": "shell",
       "command": "${command:python.interpreterPath}",
@@ -82,7 +107,7 @@
       "dependsOn": [
         "Package: Engine (PyInstaller)",
         "Package: Flutter Windows GUI",
-        "Package: TUI (Dart exe)"
+        // "Package: TUI (Dart exe)"
       ],
       "dependsOrder": "sequence",
       "problemMatcher": [],
@@ -147,6 +172,18 @@
       "type": "promptString",
       "description": "MSIX version (4 parts; Store requires last part 0)",
       "default": "0.1.0.0"
+    },
+    {
+      "id": "androidVersionName",
+      "type": "promptString",
+      "description": "Android version name (e.g. 0.1.0)",
+      "default": "0.1.0"
+    },
+    {
+      "id": "androidVersionCode",
+      "type": "promptString",
+      "description": "Android version code (integer; must increase on every Play upload)",
+      "default": "1"
     },
     {
       "id": "androidEmulator",

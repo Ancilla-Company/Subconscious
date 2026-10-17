@@ -11,6 +11,7 @@ import warnings
 import webbrowser
 
 from . import __version__
+from .client_identity import ClientInfo, client_menu_labels
 from .desktop_launcher import launch_desktop_app
 
 LaunchAction = Callable[[str, str], None]
@@ -24,7 +25,7 @@ ISSUES_URL = "https://github.com/Ancilla-Company/Subconscious/issues"
 class BackgroundStatusIndicator(Protocol):
     def start(self, on_quit: Callable[[], None], token: str) -> None: ...
 
-    def set_clients(self, clients: tuple[str, ...]) -> None: ...
+    def set_clients(self, clients: tuple[ClientInfo, ...]) -> None: ...
 
     def stop(self) -> None: ...
 
@@ -104,7 +105,7 @@ class SystemTrayStatusIndicator:
         self._open_browser = open_browser or _browser_stub
         self._open_web_ui = open_web_ui or _web_ui_stub
         self._open_url = open_url or webbrowser.open
-        self._clients: tuple[str, ...] = ()
+        self._clients: tuple[ClientInfo, ...] = ()
         self._lock = RLock()
         self._icon = None
 
@@ -133,17 +134,10 @@ class SystemTrayStatusIndicator:
             def connected_clients():
                 with self._lock:
                     clients = self._clients
-                if not clients:
-                    return (
-                        pystray.MenuItem(
-                            "No connected clients", None, enabled=False
-                        ),
-                    )
                 return tuple(
-                    pystray.MenuItem(client, None, enabled=False)
-                    for client in clients
+                    pystray.MenuItem(label, None, enabled=False)
+                    for label in client_menu_labels(clients)
                 )
-
             def link_item(label: str, url: str):
                 return pystray.MenuItem(
                     label,
@@ -255,7 +249,7 @@ class SystemTrayStatusIndicator:
                 self._icon = None
             warnings.warn(f"System tray icon could not be started: {error}", RuntimeWarning)
 
-    def set_clients(self, clients: tuple[str, ...]) -> None:
+    def set_clients(self, clients: tuple[ClientInfo, ...]) -> None:
         normalized = tuple(clients)
         with self._lock:
             if normalized == self._clients:

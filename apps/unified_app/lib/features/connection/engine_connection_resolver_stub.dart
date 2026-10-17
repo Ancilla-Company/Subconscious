@@ -24,7 +24,10 @@ Future<EngineRepository?> resolveEngineRepository({
   );
   return EngineRepository(
     rest: RestEngineClient(baseUri: baseUri, token: explicitToken),
-    socket: WebSocketEngineClient(endpoint: webSocketUri),
+    socket: WebSocketEngineClient(
+      endpoint: webSocketUri,
+      identity: const ClientIdentity(type: ClientType.web),
+    ),
   );
 }
 

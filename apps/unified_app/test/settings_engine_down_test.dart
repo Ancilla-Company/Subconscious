@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:unified_app/features/account/account_controller.dart';
 import 'package:unified_app/features/dashboard/controller/dashboard_controller.dart';
+import 'package:unified_app/features/hive/hive_runtime.dart';
 import 'package:unified_app/features/settings/controller/settings_controller.dart';
 import 'package:unified_app/features/settings/presentation/settings_main_panel.dart';
 
@@ -27,7 +28,16 @@ void main() {
     final DashboardController dashboard = DashboardController(_noEngine)
       ..connectionStatus = EngineConnectionStatus.disconnected;
     addTearDown(dashboard.dispose);
+    final HiveRuntime session = HiveRuntime(
+      account: ServerAccountClient(
+        baseUri: Uri.parse('https://api.test'),
+        tokenStore: MemoryRefreshTokenStore(),
+        client: MockClient((http.Request _) async => http.Response('{}', 401)),
+      ),
+    );
+    addTearDown(session.dispose);
     final AccountController account = AccountController(
+      session: session,
       clientProvider: () => null,
     );
     addTearDown(account.dispose);

@@ -37,7 +37,7 @@ void main() {
     expect((await SecurePinStore('u2').load()).keys, isEmpty);
   });
 
-  testWidgets('devices screen asks to sign in when signed out', (
+  testWidgets('devices screen points to the Account page when signed out', (
     WidgetTester tester,
   ) async {
     final HiveRuntime runtime = HiveRuntime(
@@ -57,12 +57,11 @@ void main() {
       MaterialApp(home: NodesPage(runtime: runtime)),
     );
     await tester.pump();
-    expect(find.text('Sign in'), findsOneWidget);
-    expect(find.text('Email'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextField, 'Email'), 'a@b.c');
-    await tester.enterText(find.widgetWithText(TextField, 'Password'), 'bad');
-    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
-    await tester.pumpAndSettle();
-    expect(find.text('Invalid email or password'), findsOneWidget);
+    expect(
+      find.text('Sign in from the Account page to see your devices.'),
+      findsOneWidget,
+    );
+    expect(find.byType(TextField), findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Sign in'), findsNothing);
   });
 }

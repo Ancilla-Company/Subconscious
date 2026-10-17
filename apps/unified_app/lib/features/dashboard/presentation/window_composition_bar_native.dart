@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../controller/dashboard_controller.dart';
+import '../controller/shutdown_coordinator.dart';
 import 'window_caption_widgets.dart';
 
 const MethodChannel _windowFrameChannel = MethodChannel(
@@ -133,15 +134,35 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
     // lose the text.
     final bool draftsStored = await widget.controller.documents
         .flushDrafts()
-        .timeout(const Duration(seconds: 6), onTimeout: () => false);
+        .timeout(const Duration(milliseconds: 600), onTimeout: () => false);
     if (!draftsStored &&
         widget.controller.documents.hasUnsavedChanges &&
         !await _confirmQuitWithUnstoredChanges()) {
       return;
     }
     _isClosing = true;
-    await widget.controller.flushAppState();
-    await windowManager.destroy();
+    // Backstop: whatever hangs, the process is gone within two seconds.
+    Timer(const Duration(seconds: 2), () => exit(0));
+    // Hide first so closing feels instant; cleanup then runs under a hard
+    // deadline. The engine keeps running: only this window's own timers and
+    // sockets are torn down.
+    await windowManager.hide();
+    await ShutdownCoordinator(
+      onFailure: (String name, Object error) =>
+          debugPrint('Shutdown task $name did not finish cleanly: $error'),
+    ).run(<ShutdownTask>[
+      ShutdownTask(
+        'appState',
+        widget.controller.flushAppState,
+        timeout: const Duration(milliseconds: 800),
+      ),
+      ShutdownTask(
+        'sockets',
+        widget.controller.shutdownConnections,
+        timeout: const Duration(milliseconds: 500),
+      ),
+    ]);
+    exit(0);
   }
 
   Future<bool> _confirmQuitWithUnstoredChanges() async {

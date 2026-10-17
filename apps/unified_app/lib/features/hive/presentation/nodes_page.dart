@@ -1,10 +1,12 @@
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 
+import '../../account/account_controller.dart';
 import '../executor_selection.dart';
 import '../hive_runtime.dart';
 
-/// Node list (name, kind, online, tier) plus sign-in and enrol/approve flows.
+/// Node list (name, kind, online, tier) plus enrol/approve flows. Signing in
+/// happens only on the Account page.
 final class NodesPage extends StatefulWidget {
   const NodesPage({required this.runtime, super.key});
 
@@ -45,12 +47,12 @@ final class _NodesPageState extends State<NodesPage> {
         ),
         body: runtime.isSignedIn
             ? _NodeList(runtime: runtime, embedded: false)
-            : Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 420),
-                    child: _SignInForm(runtime: runtime),
+            : const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'Sign in from the Account page to see your devices.',
+                    textAlign: TextAlign.center,
                   ),
                 ),
               ),
@@ -60,116 +62,33 @@ final class _NodesPageState extends State<NodesPage> {
 }
 
 /// Device management without a Scaffold, for embedding in the Account page.
-/// Fetches only once mounted, so callers show it only for an account context.
+///
+/// The account controller's server session is the only source of truth for
+/// whether the user is signed in: nothing renders (and nothing is fetched)
+/// unless it is signed in, and this widget never asks for credentials.
 /// Failures render as a short message with Retry, never a raw error.
-final class DevicesSection extends StatefulWidget {
-  const DevicesSection({required this.runtime, super.key});
+final class DevicesSection extends StatelessWidget {
+  const DevicesSection({required this.account, super.key});
 
-  final HiveRuntime runtime;
-
-  @override
-  State<DevicesSection> createState() => _DevicesSectionState();
-}
-
-final class _DevicesSectionState extends State<DevicesSection> {
-  @override
-  void initState() {
-    super.initState();
-    widget.runtime.restore();
-  }
+  final AccountController account;
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.runtime,
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge(<Listenable>[account, account.session]),
     builder: (BuildContext context, Widget? child) {
-      final HiveRuntime runtime = widget.runtime;
+      final HiveRuntime runtime = account.session;
+      if (!account.isAuthenticated) return const SizedBox.shrink();
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (runtime.status == HiveStatus.busy) const LinearProgressIndicator(),
-          if (runtime.isSignedIn)
-            _NodeList(runtime: runtime, embedded: true)
-          else
-            _SignInForm(runtime: runtime),
+          _NodeList(runtime: runtime, embedded: true),
         ],
       );
     },
   );
 }
 
-final class _SignInForm extends StatefulWidget {
-  const _SignInForm({required this.runtime});
-  final HiveRuntime runtime;
-
-  @override
-  State<_SignInForm> createState() => _SignInFormState();
-}
-
-final class _SignInFormState extends State<_SignInForm> {
-  final TextEditingController _email = TextEditingController();
-  final TextEditingController _password = TextEditingController();
-
-  @override
-  void dispose() {
-    _email.dispose();
-    _password.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final HiveRuntime runtime = widget.runtime;
-    final bool busy = runtime.status == HiveStatus.busy;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Text(
-          'Sign in to see your devices and reach your engines from here.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _email,
-          keyboardType: TextInputType.emailAddress,
-          autofillHints: const <String>[AutofillHints.email],
-          decoration: const InputDecoration(labelText: 'Email'),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _password,
-          obscureText: true,
-          autofillHints: const <String>[AutofillHints.password],
-          decoration: const InputDecoration(labelText: 'Password'),
-          onSubmitted: (_) => _submit(),
-        ),
-        if (runtime.error case final Object error) ...<Widget>[
-          const SizedBox(height: 12),
-          Text(
-            _friendlyMessage(error),
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        ],
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: busy ? null : _submit,
-          child: busy
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Sign in'),
-        ),
-      ],
-    );
-  }
-
-  void _submit() {
-    widget.runtime.signIn(
-      email: _email.text.trim(),
-      password: _password.text,
-    );
-  }
-}
 final class _NodeList extends StatelessWidget {
   const _NodeList({required this.runtime, required this.embedded});
   final HiveRuntime runtime;
@@ -478,14 +397,6 @@ final class _ApproveNodeDialogState extends State<ApproveNodeDialog> {
 String _message(Object error) =>
     error is HiveApiException ? error.message : '$error';
 
-/// Message safe to show in the UI: server-provided text for API errors (for
-/// example "Invalid email or password"), otherwise a short generic sentence.
-/// The raw error is logged.
-String _friendlyMessage(Object error) {
-  if (error is HiveApiException && error.statusCode < 500) return error.message;
-  debugPrint('Devices error: $error');
-  return "Couldn't load your devices. Check your connection and try again.";
-}
 /// Device list failures never show raw text; the cause is logged.
 String _loadFailedMessage(Object error) {
   debugPrint('Devices error: $error');

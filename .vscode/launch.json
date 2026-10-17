@@ -16,14 +16,16 @@
         "50505"
       ],
       "env": {
+        // "PYTHONPATH": "${workspaceFolder}/engine/src",
         "SUBCONSCIOUS_SERVER_URL": "http://127.0.0.1:5050/",
+        // "SUBCONSCIOUS_SERVER_URL" :"https://api.subconscious.chat/",
         "PYTHONPATH": "${workspaceFolder}/engine/src"
       },
       "justMyCode": true,
       "console": "internalConsole"
     },
     {
-      "name": "Unified Flutter App (Connected)",
+      "name": "GUI (Desktop)",
       "type": "dart",
       "request": "launch",
       "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
@@ -33,15 +35,15 @@
         "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
         "--dart-define=SUBCONSCIOUS_ENGINE_PORT=50505",
         "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
-        "--dart-define=SUBCONSCIOUS_SERVER_URL=https://api.subconscious.chat/",
-        // "--dart-define=SUBCONSCIOUS_SERVER_URL=http://127.0.0.1:5050/",
+        // "--dart-define=SUBCONSCIOUS_SERVER_URL=https://api.subconscious.chat/",
+        "--dart-define=SUBCONSCIOUS_SERVER_URL=http://127.0.0.1:5050/",
         "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token",
       ],
       "flutterMode": "debug",
       "console": "terminal"
     },
     {
-      "name": "Unified Flutter App (Web, fixed port)",
+      "name": "GUI (Web)",
       "type": "dart",
       "request": "launch",
       "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
@@ -60,7 +62,7 @@
       "console": "terminal"
     },
     {
-      "name": "Unified Flutter App (Android Emulator)",
+      "name": "GUI (Android)",
       "type": "dart",
       "request": "launch",
       "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",

@@ -1,4 +1,4 @@
-package company.ancilla.unified_app
+package company.ancilla.subconscious
 
 import io.flutter.embedding.android.FlutterActivity
 

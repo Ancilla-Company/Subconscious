@@ -269,7 +269,8 @@ class HiveService:
         self.state, self.detail = "running", ""
 
     # --- callbacks -------------------------------------------------------------
-    def _on_local_clients(self, clients: tuple[str, ...]) -> None:
+    def _on_local_clients(self, infos: tuple[Any, ...]) -> None:
+        clients = tuple(info.display_name for info in infos if info.is_local)
         self._clients = clients
         signaling = self.signaling
         if signaling is not None:

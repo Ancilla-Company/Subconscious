@@ -63,10 +63,12 @@ Future<void> main() async {
     ),
   );
   final AccountController accountController = AccountController(
+    // One server session is the source of truth for being signed in on every
+    // platform. Devices with a local engine also sign that engine in; phones,
+    // tablets and the web have none and reach a home engine over WebRTC.
+    session: HiveRuntime.shared,
     clientProvider: () => controller.repository?.rest,
-    // Phones, tablets and the web have no local engine: sign in directly
-    // against the server and reach a home engine over WebRTC.
-    serverRuntime: _hasLocalEngine ? null : HiveRuntime.shared,
+    thinClient: !_hasLocalEngine,
     onSessionChanged: controller.reconnectNow,
   );
   unawaited(_loadEngineAndRestoreAccount(controller, accountController));

@@ -10,6 +10,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "single_instance.h"
 #include "windows_firewall.h"
 
 namespace {
@@ -229,6 +230,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       }
     }
     delete completion;
+    return 0;
+  }
+
+  // A second launch asks this window to show itself instead of opening one.
+  if (message == single_instance::ShowWindowMessage()) {
+    single_instance::BringToFront(hwnd);
     return 0;
   }
 

@@ -138,7 +138,7 @@ def test_host_starts_tray_after_readiness_and_tray_quit_stops_server(tmp_path):
         assert indicator.on_quit is not None
 
         await host.app.state.client_registry.acquire("desktop", label="Desktop App")
-        assert indicator.client_updates[-1] == ("Desktop App",)
+        assert [c.display_name for c in indicator.client_updates[-1]] == ["Desktop App"]
         indicator.on_quit()
         await asyncio.wait_for(task, 10)
         assert indicator.stop_calls == 1

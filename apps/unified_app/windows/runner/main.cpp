@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "single_instance.h"
 #include "utils.h"
 #include "windows_firewall.h"
 
@@ -25,6 +26,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       ::CoUninitialize();
     }
     return *helper_result;
+  }
+
+  // One desktop window per Windows session: a second launch (for example the
+  // engine tray's "Open Desktop") brings the running window to the front and
+  // exits. This is after the firewall helper above, which is the same exe
+  // started elevated with its own arguments.
+  if (!single_instance::AcquireSingleInstance()) {
+    if (SUCCEEDED(com_result)) {
+      ::CoUninitialize();
+    }
+    return EXIT_SUCCESS;
   }
 
   flutter::DartProject project(L"data");

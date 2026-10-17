@@ -104,9 +104,43 @@ def _migration_2_remote_tool_audit(connection: Connection) -> None:
         ))
 
 
+def _unique_column_sets(connection: Connection, table: str) -> set[tuple[str, ...]]:
+    found: set[tuple[str, ...]] = set()
+    for row in connection.execute(text(f'PRAGMA index_list("{table}")')):
+        if row[2]:  # unique
+            cols = tuple(r[2] for r in connection.execute(text(f'PRAGMA index_info("{row[1]}")')))
+            found.add(cols)
+    return found
+
+
+def _migration_3_app_state_client_scope(connection: Connection) -> None:
+    """Legacy ``app_state`` had no ``client`` column; scope is now (key, tag, client)."""
+    table = Base.metadata.tables["app_state"]
+    if "app_state" not in inspect(connection).get_table_names():
+        table.create(connection)
+        return
+    if "client" in _columns(connection, "app_state") and ("key", "tag", "client") in _unique_column_sets(
+        connection, "app_state"
+    ):
+        return
+    # SQLite cannot alter constraints in place: rebuild the table, preserving rows.
+    connection.execute(text("DROP TABLE IF EXISTS app_state_old"))
+    connection.execute(text("ALTER TABLE app_state RENAME TO app_state_old"))
+    # Index names are global in SQLite; drop any left over from the old table.
+    for row in connection.execute(text("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='app_state_old' AND sql IS NOT NULL")).all():
+        connection.execute(text(f'DROP INDEX IF EXISTS "{row[0]}"'))
+    table.create(connection)
+    old_cols = _columns(connection, "app_state_old")
+    keep = [c for c in ("id", "key", "value", "tag", "client") if c in old_cols]
+    cols = ", ".join(f'"{c}"' for c in keep)
+    connection.execute(text(f"INSERT INTO app_state ({cols}) SELECT {cols} FROM app_state_old"))
+    connection.execute(text("DROP TABLE app_state_old"))
+
+
 MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (1, "hive_sync", _migration_1_hive_sync),
     (2, "remote_tool_audit", _migration_2_remote_tool_audit),
+    (3, "app_state_client_scope", _migration_3_app_state_client_scope),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 
@@ -166,6 +200,31 @@ def migrate(connection: Connection) -> list[int]:
         applied.append(version)
     Base.metadata.create_all(connection)  # any table a future model adds
     return applied
+
+
+def schema_drift(connection: Connection) -> list[str]:
+    """Model tables/columns missing from the live database (empty when current)."""
+    live = set(inspect(connection).get_table_names())
+    drift: list[str] = []
+    for name, table in Base.metadata.tables.items():
+        if name not in live:
+            drift.append(f"{name} (table missing)")
+            continue
+        missing = sorted({c.name for c in table.columns} - _columns(connection, name))
+        drift.extend(f"{name}.{column}" for column in missing)
+    return drift
+
+
+def log_schema_drift(connection: Connection) -> list[str]:
+    """Startup self-check: log an ERROR listing any drift. Never raises on drift."""
+    try:
+        drift = schema_drift(connection)
+    except Exception:
+        _LOGGER.exception("Database schema self-check failed")
+        return []
+    if drift:
+        _LOGGER.error("Database schema drift detected, missing: %s", ", ".join(drift))
+    return drift
 
 
 def backup_database(path: Path) -> Path | None:

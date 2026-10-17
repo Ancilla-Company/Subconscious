@@ -1,9 +1,11 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
 from subconscious_engine import __version__
+from subconscious_engine.client_identity import ClientInfo
 from subconscious_engine.background import (
     DOCUMENTATION_URL,
     ISSUES_URL,
@@ -147,13 +149,18 @@ def test_tray_exposes_status_top_level_actions_and_separate_help_about_menus():
     copy_text.assert_called_once_with(build_join_command(address, token))
     assert connected_clients.text == "Connected Clients"
     empty_client, = menu_items(connected_clients.action)
-    assert empty_client.text == "No connected clients"
+    assert empty_client.text == "No clients connected"
     assert empty_client.enabled is False
 
-    indicator.set_clients(("Android", "Desktop App"))
+    indicator.set_clients((
+        ClientInfo("a", "mobile", "Mobile", "", "192.168.1.5", datetime.now(timezone.utc), False),
+        ClientInfo("d", "desktop", "Desktop", "", "127.0.0.1", datetime.now(timezone.utc), True),
+    ))
     assert icon.update_menu_calls == 1
     client_items = menu_items(connected_clients.action)
-    assert [item.text for item in client_items] == ["Android", "Desktop App"]
+    assert [item.text for item in client_items] == [
+        "Desktop (local)", "Mobile (remote, 192.168.1.5)"
+    ]
     assert all(item.enabled is False for item in client_items)
 
     assert open_item.text == "Open"

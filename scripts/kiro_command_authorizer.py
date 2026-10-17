@@ -36,6 +36,7 @@ def _notify_subconscious(hook_input: str) -> None:
                 "-",
                 *target,
                 "--notification",
+                "--dev",
                 "--timeout",
                 str(TIMEOUT_SECONDS),
             ],

@@ -2466,6 +2466,27 @@ final class DashboardController extends ChangeNotifier {
   String _directoryKey(int rootIndex, String path) =>
       '$rootIndex:${path.replaceAll('\\', '/')}';
 
+  /// Stops this window's timers and closes its own sockets without waiting on
+  /// a close handshake. The engine outlives the GUI and is never asked to
+  /// stop here.
+  Future<void> shutdownConnections() async {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _appStateSaveTimer?.cancel();
+    _appStateSaveTimer = null;
+    final StreamSubscription<WireFrame>? subscription =
+        _engineEventSubscription;
+    _engineEventSubscription = null;
+    unawaited(subscription?.cancel() ?? Future<void>.value());
+    final EngineRepository? current = repository;
+    if (current != null) {
+      await Future.wait(<Future<void>>[
+        current.socket.close(),
+        current.rest.close(),
+      ]);
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
