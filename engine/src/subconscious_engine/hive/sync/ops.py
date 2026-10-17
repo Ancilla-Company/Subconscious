@@ -8,6 +8,8 @@ from typing import Any
 
 from ..identity import NodeIdentity, sha256_hex, verify_signature, b64u_decode, IdentityError
 from .hlc import InvalidStamp, parse_stamp
+import logging
+_LOG = logging.getLogger(__name__)
 
 ENTITIES = ("workspace", "thread", "message", "task")
 OPS = ("create", "update", "delete")
@@ -111,5 +113,6 @@ def verify_op(op: SyncOp, public_key: bytes) -> bool:
     try:
         b64u_decode(op.sig)
     except IdentityError:
+        _LOG.warning("hive.sync.ops.verify_op: handled IdentityError; continuing with fallback", exc_info=True)
         return False
     return verify_signature(public_key, op.sig, op.message())

@@ -17,9 +17,13 @@ from uuid import uuid4
 from cryptography.fernet import Fernet, InvalidToken
 from pydantic import ValidationError
 
+from subconscious_engine.capabilities import ModelCapabilities
+
 from .errors import ModelConfigurationStoreError
 from .key_provider import FernetKeyProvider, PlatformFernetKeyProvider
 from .models import ModelConfig, ModelConfigurationDto, UpsertModelConfigurationRequest
+import logging
+_LOG = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -318,6 +322,7 @@ class EncryptedModelConfigurationStore:
                 try:
                     os.close(descriptor)
                 except OSError:
+                    _LOG.warning("configuration.store.EncryptedModelConfigurationStore._write_unlocked: handled OSError; continuing with fallback", exc_info=True)
                     pass
                 raise
             os.replace(temporary_path, self.data_file_path)
@@ -335,6 +340,7 @@ class EncryptedModelConfigurationStore:
                 try:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
+                    _LOG.warning("configuration.store.EncryptedModelConfigurationStore._write_unlocked: handled OSError; continuing with fallback", exc_info=True)
                     pass
 
     def _fernet(self) -> Fernet:
@@ -401,6 +407,13 @@ def _apply(
     elif is_new:
         model["api_key"] = ""
 
+    if request.capabilities is not None:
+        flags = ModelCapabilities.from_override(request.capabilities).known()
+        if flags:
+            model["capabilities"] = flags
+        else:
+            model.pop("capabilities", None)
+
     credentials = {
         "aws_access_key_id": request.aws_access_key_id,
         "aws_secret_access_key": request.aws_secret_access_key,
@@ -424,6 +437,7 @@ def _redacted(identifier: str, model: dict[str, Any]) -> ModelConfigurationDto:
         region=_string(model, "region"),
         contextWindow=_integer(model, "context_window"),
         hasApiKey=bool(api_key and api_key.strip()),
+        capabilities=ModelCapabilities.from_override(model.get("capabilities")).known() or None,
     )
 
 
@@ -465,6 +479,7 @@ def _integer(source: dict[str, Any], key: str) -> int | None:
         try:
             return int(value)
         except ValueError:
+            _LOG.warning("configuration.store._integer: handled ValueError; continuing with fallback", exc_info=True)
             return None
     return None
 
@@ -479,5 +494,6 @@ def _number(source: dict[str, Any], key: str) -> float | None:
         try:
             return float(value)
         except ValueError:
+            _LOG.warning("configuration.store._number: handled ValueError; continuing with fallback", exc_info=True)
             return None
     return None

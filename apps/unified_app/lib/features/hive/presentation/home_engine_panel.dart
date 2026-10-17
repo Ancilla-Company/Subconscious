@@ -29,7 +29,7 @@ final class HomeEnginePanel extends StatelessWidget {
           ? 'Waiting for approval'
           : 'No engine reachable';
       final String body = pending
-          ? 'Approve this device from Devices on a computer that is already '
+          ? 'Approve this device from Account > Devices on a computer that is already '
                 'signed in to Subconscious. Both screens must show the same '
                 'code.'
           : 'None of your engines is online. Start Subconscious on your '

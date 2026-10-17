@@ -27,6 +27,7 @@ from subconscious_engine.configuration import EncryptedModelConfigurationStore
 from subconscious_engine.configuration.key_provider import (
     SERVICE_NAME as _ENCRYPTION_KEYRING_SERVICE,
 )
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 KEYRING_SERVICE = "subconscious.node.identity.v1"
@@ -104,6 +105,7 @@ def verify_signature(public_key: bytes, signature_b64u: str, message: bytes) -> 
             b64u_decode(signature_b64u), message
         )
     except (InvalidSignature, ValueError, IdentityError):
+        _LOG.warning("hive.identity.verify_signature: handled (InvalidSignature, ValueError, IdentityError); continuing with fallback", exc_info=True)
         return False
     return True
 
@@ -175,6 +177,7 @@ class KeyringIdentitySeedStore:
         try:
             keyring.delete_password(KEYRING_SERVICE, _KEYRING_USER)
         except PasswordDeleteError:
+            _LOG.warning("hive.identity.KeyringIdentitySeedStore.delete: handled PasswordDeleteError; continuing with fallback", exc_info=True)
             pass
         except Exception as error:
             raise IdentityError("The node identity could not be cleared.") from error
@@ -216,23 +219,27 @@ class ResilientIdentitySeedStore:
         try:
             seed = self._fallback.read()
         except IdentityError:
+            _LOG.warning("hive.identity.ResilientIdentitySeedStore.read: handled IdentityError; continuing with fallback", exc_info=True)
             seed = None
         if seed:
             return seed
         try:
             return self._primary.read()
         except IdentityError:
+            _LOG.warning("hive.identity.ResilientIdentitySeedStore.read: handled IdentityError; continuing with fallback", exc_info=True)
             return None
 
     def write(self, seed: str) -> None:
         try:
             self._primary.write(seed)
         except IdentityError:
+            _LOG.warning("hive.identity.ResilientIdentitySeedStore.write: handled IdentityError; continuing with fallback", exc_info=True)
             self._fallback.write(seed)
         else:
             try:
                 self._fallback.delete()
             except IdentityError:
+                _LOG.warning("hive.identity.ResilientIdentitySeedStore.write: handled IdentityError; continuing with fallback", exc_info=True)
                 pass
 
     def delete(self) -> None:
@@ -241,6 +248,7 @@ class ResilientIdentitySeedStore:
             try:
                 store.delete()
             except IdentityError as error:
+                _LOG.warning("hive.identity.ResilientIdentitySeedStore.delete: handled IdentityError; continuing with fallback", exc_info=True)
                 errors.append(error)
         if len(errors) == 2:
             raise errors[0]

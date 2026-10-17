@@ -10,13 +10,13 @@ import json
 import logging
 import random
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from typing import Any, Protocol
 from urllib.parse import urlsplit, urlunsplit
 
 from . import PROTOCOL_VERSION
 from .directory import HiveApi, HiveApiError
 from .identity import NodeIdentity, signal_auth_message
+from ..logging_setup import logged_suppress, spawn_logged
 
 _LOGGER = logging.getLogger("uvicorn.error")
 MAX_FRAME_BYTES = 64 * 1024
@@ -108,13 +108,13 @@ class SignalingClient:
 
     def start(self) -> None:
         if self._task is None:
-            self._task = asyncio.create_task(self._run(), name="hive-signaling")
+            self._task = spawn_logged(self._run(), name="hive-signaling")
 
     async def stop(self) -> None:
         task, self._task = self._task, None
         if task is not None:
             task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await task
         await self._close_socket()
 
@@ -185,8 +185,8 @@ class SignalingClient:
         self._connected.set()
         await self.send("presence.set", self._presence)
         background = [
-            asyncio.create_task(self._refresh_loop()),
-            asyncio.create_task(self._heartbeat_loop()),
+            spawn_logged(self._refresh_loop()),
+            spawn_logged(self._heartbeat_loop()),
         ]
         try:
             while True:
@@ -196,7 +196,7 @@ class SignalingClient:
             for task in background:
                 task.cancel()
             for task in background:
-                with suppress(asyncio.CancelledError, Exception):
+                with logged_suppress(asyncio.CancelledError, Exception):
                     await task
 
     async def _send_auth(
@@ -270,5 +270,5 @@ class SignalingClient:
     async def _close_socket(self) -> None:
         socket, self._socket = self._socket, None
         if socket is not None:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await socket.close()

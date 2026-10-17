@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from subconscious_engine.capabilities import ModelCapabilities
+
 
 class _ApiModel(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -21,6 +23,8 @@ class ModelConfigurationDto(_ApiModel):
     region: str | None = None
     context_window: int | None = Field(default=None, alias="contextWindow")
     has_api_key: bool = Field(alias="hasApiKey")
+    # The user's explicit capability flags (a subset); the rest is inferred.
+    capabilities: dict[str, bool] | None = None
 
 
 class UpsertModelConfigurationRequest(_ApiModel):
@@ -37,6 +41,8 @@ class UpsertModelConfigurationRequest(_ApiModel):
     aws_secret_access_key: str | None = Field(default=None, alias="awsSecretAccessKey")
     aws_session_token: str | None = Field(default=None, alias="awsSessionToken")
     clear_api_key: bool = Field(default=False, alias="clearApiKey")
+    # Explicit capability flags. Omit to keep what is stored; send {} to clear them.
+    capabilities: dict[str, bool] | None = None
 
 
 class ModelDto(_ApiModel):
@@ -44,6 +50,7 @@ class ModelDto(_ApiModel):
     name: str
     provider: str
     description: str | None = None
+    capabilities: ModelCapabilities | None = None
 
 
 @dataclass(frozen=True, slots=True)

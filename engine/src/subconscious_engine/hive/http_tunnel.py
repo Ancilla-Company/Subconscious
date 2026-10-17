@@ -28,6 +28,7 @@ from subconscious_engine.auth import PEER_STATE_KEY, PeerPrincipal
 
 from .authz import authorize_http, normalise_path
 from .channels import Envelope
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024
@@ -95,6 +96,7 @@ class HttpTunnel:
             body = self._decode_body(data.get("body"))
             query = self._query(data.get("query"))
         except ValueError as problem:
+            _LOG.warning("hive.http_tunnel.HttpTunnel.handle: handled ValueError; continuing with fallback", exc_info=True)
             return _error(identifier, 400, str(problem))
         if self._in_flight >= MAX_IN_FLIGHT:
             return _error(identifier, 429, "Too many requests.")

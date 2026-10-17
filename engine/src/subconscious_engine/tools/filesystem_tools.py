@@ -10,6 +10,8 @@ from collections.abc import Sequence
 from typing import Any, Callable
 
 from subconscious_engine.tools.document_files import SUPPORTED, read_document, write_document
+import logging
+_LOG = logging.getLogger(__name__)
 
 ToolFactory = Callable[[Any], Any]
 ToolEntry = tuple[str, str, str, ToolFactory]
@@ -97,6 +99,7 @@ def filesystem_tool_entries(resolve: Callable[[str], Path] = _path) -> list[Tool
                     return {"status": "success", **await asyncio.to_thread(read_document, file)}
                 content = await asyncio.to_thread(file.read_text, encoding=encoding)
             except (UnicodeError, LookupError) as error:
+                _LOG.warning("tools.filesystem_tools.filesystem_tool_entries.read_filesystem_file.read_file: handled (UnicodeError, LookupError); continuing with fallback", exc_info=True)
                 return {
                     "status": "error",
                     "path": str(file),
@@ -107,6 +110,7 @@ def filesystem_tool_entries(resolve: Callable[[str], Path] = _path) -> list[Tool
                     ),
                 }
             except Exception as error:
+                _LOG.exception("tools.filesystem_tools.filesystem_tool_entries.read_filesystem_file.read_file: handled Exception; continuing with fallback")
                 return {"status": "error", "path": str(file), "error": str(error)}
             return {"status": "success", "path": str(file), "format": "text",
                     "encoding": encoding, "content": content}
@@ -130,6 +134,7 @@ def filesystem_tool_entries(resolve: Callable[[str], Path] = _path) -> list[Tool
                     file.write_text(content, encoding=encoding)
                 await asyncio.to_thread(write)
             except Exception as error:
+                _LOG.exception("tools.filesystem_tools.filesystem_tool_entries.write_filesystem_file.write_file: handled Exception; continuing with fallback")
                 return {"status": "error", "path": str(file), "error": str(error)}
             return {"status": "written", "path": str(file), "format": "text",
                     "characters": len(content)}

@@ -4,12 +4,21 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../hive/hive_runtime.dart';
+import '../../hive/presentation/nodes_page.dart';
 import '../account_controller.dart';
 
 final class AccountPanel extends StatelessWidget {
-  const AccountPanel({required this.controller, super.key});
+  const AccountPanel({
+    required this.controller,
+    this.devicesRuntime,
+    super.key,
+  });
 
   final AccountController controller;
+
+  /// Runtime backing the Devices section; defaults to [HiveRuntime.shared].
+  final HiveRuntime? devicesRuntime;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -19,7 +28,10 @@ final class AccountPanel extends StatelessWidget {
         AccountStatus.initializing => const Center(
           child: CircularProgressIndicator(),
         ),
-        AccountStatus.authenticated => _SignedInAccount(controller: controller),
+        AccountStatus.authenticated => _SignedInAccount(
+          controller: controller,
+          devicesRuntime: devicesRuntime ?? HiveRuntime.shared,
+        ),
         AccountStatus.anonymous => _AnonymousAccount(controller: controller),
       };
       final ThemeData theme = Theme.of(context);
@@ -94,9 +106,13 @@ ButtonStyle _rectangularControlStyle(ButtonStyle? inherited) =>
     );
 
 final class _SignedInAccount extends StatelessWidget {
-  const _SignedInAccount({required this.controller});
+  const _SignedInAccount({
+    required this.controller,
+    required this.devicesRuntime,
+  });
 
   final AccountController controller;
+  final HiveRuntime devicesRuntime;
 
   @override
   Widget build(BuildContext context) {
@@ -178,6 +194,9 @@ final class _SignedInAccount extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 24),
+        Text('Devices', style: theme.textTheme.titleMedium),
+        DevicesSection(runtime: devicesRuntime),
       ],
     );
   }

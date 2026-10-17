@@ -11,6 +11,7 @@ import warnings
 import webbrowser
 
 from . import __version__
+from .desktop_launcher import launch_desktop_app
 
 LaunchAction = Callable[[str, str], None]
 
@@ -99,7 +100,7 @@ class SystemTrayStatusIndicator:
         self.lan_enabled = lan_enabled
         self.dev = dev
         self._copy_text = copy_text or _copy_to_clipboard
-        self._open_desktop = open_desktop or _desktop_stub
+        self._open_desktop = open_desktop or launch_desktop_app
         self._open_browser = open_browser or _browser_stub
         self._open_web_ui = open_web_ui or _web_ui_stub
         self._open_url = open_url or webbrowser.open

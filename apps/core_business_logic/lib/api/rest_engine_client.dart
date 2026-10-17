@@ -229,6 +229,74 @@ final class RestEngineClient {
   Future<List<ModelInfo>> listModels() async =>
       _getList('models', ModelInfo.fromJson);
 
+  /// Transcribes a recording with a speech-to-text model.
+  Future<String> transcribeAudio({
+    required String modelId,
+    required Uint8List audio,
+    required String mediaType,
+    String? language,
+  }) async {
+    final Uri uri = _baseUri
+        .resolve('audio/transcriptions')
+        .replace(
+          queryParameters: <String, String>{
+            'modelId': modelId,
+            if (language != null) 'language': language,
+          },
+        );
+    final http.Request request = http.Request('POST', uri)
+      ..headers['Accept'] = 'application/json'
+      ..headers['Content-Type'] = mediaType
+      ..bodyBytes = audio;
+    if (token.isNotEmpty) request.headers['Authorization'] = 'Bearer $token';
+    final http.StreamedResponse response = await _client.send(request);
+    final String text = await response.stream.bytesToString();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw apiException(request, response, text);
+    }
+    final dynamic decoded = jsonDecode(text);
+    final Object? transcript = decoded is Map ? decoded['text'] : null;
+    if (transcript is! String) {
+      throw const FormatException('The engine returned no transcript.');
+    }
+    return transcript;
+  }
+
+  /// Synthesizes speech with a text-to-speech model.
+  Future<SpeechAudio> synthesizeSpeech({
+    required String modelId,
+    required String text,
+    String? voice,
+    String format = 'mp3',
+  }) async {
+    final http.Request request =
+        http.Request('POST', _baseUri.resolve('audio/speech'))
+          ..headers['Content-Type'] = 'application/json'
+          ..body = jsonEncode(<String, dynamic>{
+            'modelId': modelId,
+            'input': text,
+            'format': format,
+            if (voice != null) 'voice': voice,
+          });
+    if (token.isNotEmpty) request.headers['Authorization'] = 'Bearer $token';
+    final http.StreamedResponse response = await _client.send(request);
+    final Uint8List bytes = await _readBounded(
+      response.stream,
+      32 * 1024 * 1024,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw apiException(
+        request,
+        response,
+        utf8.decode(bytes, allowMalformed: true),
+      );
+    }
+    return SpeechAudio(
+      bytes,
+      response.headers['content-type'] ?? 'audio/mpeg',
+    );
+  }
+
   Future<List<WorkspaceFileMatch>> searchFiles({
     required String workspaceUuid,
     required String query,
@@ -631,6 +699,14 @@ final class RestEngineClient {
     if (text.trim().isEmpty) return null;
     return jsonDecode(text);
   }
+}
+
+/// Spoken audio returned by the engine.
+final class SpeechAudio {
+  const SpeechAudio(this.bytes, this.mediaType);
+
+  final Uint8List bytes;
+  final String mediaType;
 }
 
 final class _BinaryResponse {

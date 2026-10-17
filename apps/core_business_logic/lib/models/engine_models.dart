@@ -201,23 +201,102 @@ final class ChatMessage {
   };
 }
 
+/// What a model can do. `null` means unknown, which is not the same as false.
+///
+/// The engine decides these from the user's override, a capability service
+/// and built-in heuristics, so the app only reads them.
+final class ModelCapabilities {
+  const ModelCapabilities({
+    this.chat,
+    this.toolCalling,
+    this.vision,
+    this.audioInput,
+    this.audioOutput,
+    this.speechToText,
+    this.textToSpeech,
+    this.realtime,
+    this.sources = const <String>[],
+  });
+
+  /// Flags the user may set, as sent to the engine.
+  static const List<String> flags = <String>[
+    'chat',
+    'tool_calling',
+    'vision',
+    'audio_input',
+    'audio_output',
+    'speech_to_text',
+    'text_to_speech',
+    'realtime',
+  ];
+
+  final bool? chat;
+  final bool? toolCalling;
+  final bool? vision;
+  final bool? audioInput;
+  final bool? audioOutput;
+  final bool? speechToText;
+  final bool? textToSpeech;
+  final bool? realtime;
+  final List<String> sources;
+
+  /// False only when the engine says this is not a chat model (for example a
+  /// transcription model), so it stays out of the chat model picker.
+  bool get isChatModel => chat != false;
+  bool get canTranscribe => speechToText == true;
+  bool get canSpeak => textToSpeech == true;
+  bool get canRealtime => realtime == true;
+
+  factory ModelCapabilities.fromJson(Map<String, dynamic> json) {
+    bool? flag(String snake, String camel) {
+      final Object? value = json[camel] ?? json[snake];
+      return value is bool ? value : null;
+    }
+
+    final Object? sources = json['sources'];
+    return ModelCapabilities(
+      chat: flag('chat', 'chat'),
+      toolCalling: flag('tool_calling', 'toolCalling'),
+      vision: flag('vision', 'vision'),
+      audioInput: flag('audio_input', 'audioInput'),
+      audioOutput: flag('audio_output', 'audioOutput'),
+      speechToText: flag('speech_to_text', 'speechToText'),
+      textToSpeech: flag('text_to_speech', 'textToSpeech'),
+      realtime: flag('realtime', 'realtime'),
+      sources: sources is List
+          ? sources.whereType<String>().toList(growable: false)
+          : const <String>[],
+    );
+  }
+}
+
 final class ModelInfo {
   const ModelInfo({
     required this.id,
     required this.name,
     required this.provider,
     this.description,
+    this.capabilities,
   });
   final String id;
   final String name;
   final String provider;
   final String? description;
+  final ModelCapabilities? capabilities;
+
+  /// Older engines send no capabilities; treat those as plain chat models.
+  bool get isChatModel => capabilities?.isChatModel ?? true;
 
   factory ModelInfo.fromJson(Map<String, dynamic> json) => ModelInfo(
     id: json['id'] as String,
     name: json['name'] as String,
     provider: json['provider'] as String,
     description: json['description'] as String?,
+    capabilities: json['capabilities'] is Map
+        ? ModelCapabilities.fromJson(
+            (json['capabilities'] as Map).cast<String, dynamic>(),
+          )
+        : null,
   );
 }
 
@@ -497,6 +576,7 @@ final class ModelConfiguration {
     this.baseUrl,
     this.contextWindow,
     this.hasApiKey = false,
+    this.capabilities,
   });
   final String id;
   final String provider;
@@ -505,6 +585,9 @@ final class ModelConfiguration {
   final String? baseUrl;
   final int? contextWindow;
   final bool hasApiKey;
+
+  /// The user's explicit capability flags only (snake_case keys).
+  final Map<String, bool>? capabilities;
 
   factory ModelConfiguration.fromJson(
     Map<String, dynamic> json,
@@ -524,6 +607,14 @@ final class ModelConfiguration {
     baseUrl: _stringValue(json, 'baseUrl', 'base_url'),
     contextWindow: _intValue(json, 'contextWindow', 'context_window'),
     hasApiKey: _jsonValue(json, 'hasApiKey', 'has_api_key') as bool? ?? false,
+    capabilities: json['capabilities'] is Map
+        ? <String, bool>{
+            for (final MapEntry<dynamic, dynamic> entry
+                in (json['capabilities'] as Map).entries)
+              if (entry.key is String && entry.value is bool)
+                entry.key as String: entry.value as bool,
+          }
+        : null,
   );
 }
 
@@ -536,6 +627,7 @@ final class ModelConfigurationRequest {
     this.contextWindow,
     this.apiKey,
     this.clearApiKey = false,
+    this.capabilities,
   });
   final String provider;
   final String model;
@@ -545,6 +637,9 @@ final class ModelConfigurationRequest {
   final String? apiKey;
   final bool clearApiKey;
 
+  /// Explicit flags to store; null keeps what is stored, `{}` clears them.
+  final Map<String, bool>? capabilities;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'provider': provider,
     'model': model,
@@ -553,6 +648,7 @@ final class ModelConfigurationRequest {
     if (contextWindow != null) 'contextWindow': contextWindow,
     if (apiKey != null) 'apiKey': apiKey,
     if (clearApiKey) 'clearApiKey': true,
+    if (capabilities != null) 'capabilities': capabilities,
   };
 }
 

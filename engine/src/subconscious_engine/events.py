@@ -5,6 +5,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
+import logging
+_LOG = logging.getLogger(__name__)
 
 
 class EventBus:
@@ -22,6 +24,7 @@ class EventBus:
                 try:
                     queue.get_nowait()
                 except asyncio.QueueEmpty:
+                    _LOG.debug("events.EventBus.publish: handled asyncio.QueueEmpty; continuing with fallback", exc_info=True)
                     pass
             queue.put_nowait(event)
 

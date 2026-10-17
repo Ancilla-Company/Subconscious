@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 import json
+import logging
+_LOG = logging.getLogger(__name__)
 
 CREATE = "create"
 READ = "read"
@@ -71,6 +73,7 @@ class ApprovalConfig:
         try:
             value = json.loads(raw) if raw else {}
         except (TypeError, json.JSONDecodeError):
+            _LOG.warning("approval.ApprovalConfig.from_json: handled (TypeError, json.JSONDecodeError); continuing with fallback", exc_info=True)
             return cls()
         if not isinstance(value, dict):
             return cls()

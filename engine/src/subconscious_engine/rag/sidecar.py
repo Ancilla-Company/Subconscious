@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from .embeddings import cosine_similarity
+import logging
+_LOG = logging.getLogger(__name__)
 
 SIDECAR_DIRNAME = ".subconscious"
 SIDECAR_FILENAME = "sidecar.db"
@@ -145,6 +147,7 @@ class SidecarStore:
         try:
             return cls(root, create=False, readonly=True)
         except (FileNotFoundError, sqlite3.OperationalError):
+            _LOG.debug("rag.sidecar.SidecarStore.open_readonly: handled (FileNotFoundError, sqlite3.OperationalError); continuing with fallback", exc_info=True)
             return None
 
     def close(self) -> None:

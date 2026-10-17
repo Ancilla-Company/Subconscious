@@ -15,6 +15,9 @@ from subconscious_engine.configuration import (
     UpsertModelConfigurationRequest,
     build_model_catalog,
 )
+from subconscious_engine.configuration.catalog import build_model_catalog_with_capabilities
+import logging
+_LOG = logging.getLogger(__name__)
 
 
 def _json_model(value: Any, status_code: int = 200, headers: dict[str, str] | None = None) -> JSONResponse:
@@ -42,6 +45,7 @@ async def _parse_upsert(request: Request) -> UpsertModelConfigurationRequest | R
     try:
         return UpsertModelConfigurationRequest.model_validate(await request.json())
     except (ValidationError, ValueError, UnicodeDecodeError):
+        _LOG.warning("api.model_routes._parse_upsert: handled (ValidationError, ValueError, UnicodeDecodeError); continuing with fallback", exc_info=True)
         return JSONResponse({"error": "Invalid request body."}, status_code=400)
 
 
@@ -56,6 +60,7 @@ async def list_model_configurations(request: Request) -> Response:
     try:
         return _json_model(await _request_store(request).list())
     except ModelConfigurationStoreError as error:
+        _LOG.warning("api.model_routes.list_model_configurations: handled ModelConfigurationStoreError; continuing with fallback", exc_info=True)
         return _storage_problem(error)
 
 
@@ -68,8 +73,10 @@ async def create_model_configuration(request: Request) -> Response:
         location = f"/api/v1/model-configurations/{quote(created.id, safe='')}"
         return _json_model(created, status_code=201, headers={"Location": location})
     except ValueError as error:
+        _LOG.warning("api.model_routes.create_model_configuration: handled ValueError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": str(error)}, status_code=400)
     except ModelConfigurationStoreError as error:
+        _LOG.warning("api.model_routes.create_model_configuration: handled ModelConfigurationStoreError; continuing with fallback", exc_info=True)
         return _storage_problem(error)
 
 
@@ -81,8 +88,10 @@ async def update_model_configuration(request: Request) -> Response:
         updated = await _request_store(request).update(request.path_params["id"], body)
         return Response(status_code=404) if updated is None else _json_model(updated)
     except ValueError as error:
+        _LOG.warning("api.model_routes.update_model_configuration: handled ValueError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": str(error)}, status_code=400)
     except ModelConfigurationStoreError as error:
+        _LOG.warning("api.model_routes.update_model_configuration: handled ModelConfigurationStoreError; continuing with fallback", exc_info=True)
         return _storage_problem(error)
 
 
@@ -91,14 +100,19 @@ async def delete_model_configuration(request: Request) -> Response:
         deleted = await _request_store(request).delete(request.path_params["id"])
         return Response(status_code=204 if deleted else 404)
     except ModelConfigurationStoreError as error:
+        _LOG.warning("api.model_routes.delete_model_configuration: handled ModelConfigurationStoreError; continuing with fallback", exc_info=True)
         return _storage_problem(error)
 
 
 async def list_models(request: Request) -> Response:
     try:
         configurations = await _request_store(request).list()
-        return _json_model(build_model_catalog(configurations))
+        resolver = getattr(request.app.state, "capability_resolver", None)
+        if resolver is None:
+            return _json_model(build_model_catalog(configurations))
+        return _json_model(await build_model_catalog_with_capabilities(configurations, resolver))
     except ModelConfigurationStoreError as error:
+        _LOG.warning("api.model_routes.list_models: handled ModelConfigurationStoreError; continuing with fallback", exc_info=True)
         return _storage_problem(error)
 
 
@@ -131,6 +145,7 @@ def model_routes(
                     try:
                         delattr(request.app.state, "model_configuration_store")
                     except AttributeError:
+                        _LOG.warning("api.model_routes.model_routes.endpoint.with_store: handled AttributeError; continuing with fallback", exc_info=True)
                         pass
                 else:
                     request.app.state.model_configuration_store = previous

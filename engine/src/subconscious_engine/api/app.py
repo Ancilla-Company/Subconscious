@@ -1,7 +1,7 @@
 """Starlette application exposing the engine REST, SSE, and WebSocket surfaces."""
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 import asyncio
 
 from starlette.applications import Starlette
@@ -18,6 +18,8 @@ from subconscious_engine.account import (
     DEFAULT_ACCOUNT_SERVER_URL,
 )
 from subconscious_engine.agents import AgentManager
+from subconscious_engine.audio import AudioServices, audio_routes
+from subconscious_engine.capabilities import CapabilityResolver
 from subconscious_engine.auth import BearerAuthMiddleware, EngineAuthToken
 from subconscious_engine.configuration import EncryptedModelConfigurationStore
 from subconscious_engine.events import EventBus
@@ -57,6 +59,7 @@ from .workspace_routes import (
     list_workspaces,
     update_workspace,
 )
+from ..logging_setup import logged_suppress, spawn_logged
 
 
 async def health(_: Request) -> JSONResponse:
@@ -81,6 +84,8 @@ def create_app(
     subconscious_worker: SubconsciousWorker | None = None,
     account_session_service: AccountSessionService | None = None,
     remote_tools_config: RemoteToolsConfig | None = None,
+    capability_resolver: CapabilityResolver | None = None,
+    audio_services: AudioServices | None = None,
 ) -> Starlette:
     store = model_configuration_store or EncryptedModelConfigurationStore(
         database.path.parent
@@ -100,17 +105,17 @@ def create_app(
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         await database.initialize()
         # Work that was running when the engine last stopped did not finish.
-        with suppress(Exception):
+        with logged_suppress(Exception):
             await app.state.task_manager.recover()
         if graph_engine is not None:
             await graph_engine.telemetry.initialize()
         scheduler = (
-            asyncio.create_task(rag.run_daily_indexing(database))
+            spawn_logged(rag.run_daily_indexing(database))
             if isinstance(rag, WorkspaceRagService)
             else None
         )
         reflection_task = (
-            asyncio.create_task(subconscious_worker.run())
+            spawn_logged(subconscious_worker.run())
             if subconscious_worker is not None
             else None
         )
@@ -120,7 +125,7 @@ def create_app(
             for task in (reflection_task, scheduler):
                 if task is not None:
                     task.cancel()
-                    with suppress(asyncio.CancelledError):
+                    with logged_suppress(asyncio.CancelledError):
                         await task
             if graph_engine is not None:
                 await graph_engine.telemetry.close()
@@ -147,6 +152,7 @@ def create_app(
         *file_routes(),
         *settings_routes(),
         *model_routes(),
+        *audio_routes(),
         *tool_routes(),
         *rag_routes(),
         *event_routes(),
@@ -169,6 +175,8 @@ def create_app(
         {
             "database": database,
             "model_configuration_store": store,
+            "capability_resolver": capability_resolver or CapabilityResolver(),
+            "audio_services": audio_services or AudioServices(),
             "event_bus": bus,
             "tool_registry": builtins,
             "rag_service": rag,

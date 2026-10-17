@@ -17,7 +17,6 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -33,6 +32,8 @@ from subconscious_engine.storage.models import TaskRecord, utc_now
 
 from .authz import HIVE_PEER, THIN_CLIENT
 from .channels import Envelope
+from ..logging_setup import logged_suppress, spawn_logged
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 DEFAULT_TTL_SECONDS = 600.0
@@ -198,22 +199,22 @@ class TaskManager:
     def start(self) -> None:
         self._stopping = False
         if self._sweeper is None or self._sweeper.done():
-            self._sweeper = asyncio.ensure_future(self._sweep_loop())
+            self._sweeper = spawn_logged(self._sweep_loop())
 
     async def stop(self) -> None:
         self._stopping = True  # running tasks stay "running" so the next start marks them interrupted
         sweeper, self._sweeper = self._sweeper, None
         if sweeper is not None:
             sweeper.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await sweeper
         for run in list(self.runs.values()):
             run.cancel()
         for run in list(self.runs.values()):
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await run
         for finisher in list(self._finishers):
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await finisher
         self.runs.clear()
 
@@ -241,6 +242,7 @@ class TaskManager:
         try:
             await self._submit(session, data, frame_id)
         except TaskError as error:
+            _LOG.warning("hive.tasks.TaskManager.submit: handled TaskError; continuing with fallback", exc_info=True)
             await _send(session, "task.error", {
                 "error": str(error), "client_msg_uuid": data.get("client_msg_uuid")}, frame_id)
         except Exception:
@@ -322,6 +324,7 @@ class TaskManager:
         try:
             return await self._take_local_once(task_id, request, requester, thread_uuid, workspace_uuid)
         except IntegrityError:
+            _LOG.warning("hive.tasks.TaskManager._take_local: handled IntegrityError; continuing with fallback", exc_info=True)
             return await self._take_local_once(task_id, request, requester, thread_uuid, workspace_uuid)
 
     async def _take_local_once(
@@ -396,6 +399,7 @@ class TaskManager:
             try:
                 await link.send("control", Envelope("task.submit", frame, row.task_id))
             except Exception:
+                _LOG.exception("hive.tasks.TaskManager._deliver: handled Exception; continuing with fallback")
                 return
             self._delivered[task_id] = marker
         finally:
@@ -411,7 +415,7 @@ class TaskManager:
             await self._deliver(task_id)
         if link.role == HIVE_PEER:
             for thread_uuid in list(self._upstream):
-                with suppress(Exception):
+                with logged_suppress(Exception):
                     await link.send("control", Envelope("thread.subscribe", {"thread_uuid": thread_uuid}))
 
     def on_link_closed(self, node_id: str) -> None:
@@ -430,11 +434,11 @@ class TaskManager:
             turn_data["workspace_uuid"] = workspace_uuid
         else:
             turn_data["thread_uuid"] = thread_uuid
-        turn = asyncio.ensure_future(session._run_turn(
+        turn = spawn_logged(session._run_turn(
             task_id, turn_data, client_msg_uuid=request.client_msg_uuid,
             thread_uuid_hint=thread_uuid if workspace_uuid is not None else None))
         self.runs[task_id] = turn
-        finisher = asyncio.ensure_future(self._finish(task_id, turn))
+        finisher = spawn_logged(self._finish(task_id, turn))
         self._finishers.add(finisher)
         finisher.add_done_callback(self._finishers.discard)
 
@@ -443,15 +447,17 @@ class TaskManager:
         try:
             outcome, error = await turn
         except asyncio.CancelledError:
+            _LOG.debug("hive.tasks.TaskManager._finish: handled asyncio.CancelledError; continuing with fallback", exc_info=True)
             outcome, error = "cancelled", None
         except Exception as failure:
+            _LOG.exception("hive.tasks.TaskManager._finish: handled Exception; continuing with fallback")
             outcome, error = "failed", str(failure) or failure.__class__.__name__
         finally:
             self.runs.pop(task_id, None)
         # On shutdown the task stays "running" so the next start marks it interrupted.
         if not (self._stopping and outcome == "cancelled"):
             final = {"done": "done", "cancelled": "cancelled"}.get(outcome, "failed")
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 row = await self.set_status(task_id, final, error=error)
                 if row is not None:
                     await self._emit_status(row)
@@ -504,7 +510,7 @@ class TaskManager:
     async def _sweep_loop(self) -> None:
         while True:
             await asyncio.sleep(self.sweep_interval)
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await self.sweep()
 
     async def sweep(self) -> int:
@@ -558,7 +564,7 @@ class TaskManager:
             return
         link = self.context.link(row.executor_node_id)
         if link is not None:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await link.send("control", Envelope("task.cancel", {"task_id": task_id}, task_id))
         elif row.status == "queued":
             updated = await self.set_status(task_id, "cancelled", as_creator=True)
@@ -608,12 +614,12 @@ class TaskManager:
         frame_type = "thread.subscribe" if first else "thread.unsubscribe"
         for link in self.context.links().values():
             if getattr(link, "role", None) == HIVE_PEER:
-                with suppress(Exception):
+                with logged_suppress(Exception):
                     await link.send("control", Envelope(frame_type, {"thread_uuid": thread_uuid}))
 
     def session_closed(self, session: Any) -> None:
         for thread_uuid in list(self._sessions_threads.get(session, ())):
-            asyncio.ensure_future(self._drop_subscription(session, thread_uuid))
+            spawn_logged(self._drop_subscription(session, thread_uuid))
         self._sessions_threads.pop(session, None)
         for task_id, relay in list(self.relays.items()):
             if relay.session is session:
@@ -682,7 +688,7 @@ class TaskManager:
             return await future
         finally:
             self.approvals.pop(approval_id, None)
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 row = await self.set_status(task_id, "running")
                 if row is not None:
                     await self._emit_status(row)
@@ -696,7 +702,7 @@ class TaskManager:
                 return False
             link = self.context.link(relay.executor)
             if link is not None:
-                with suppress(Exception):
+                with logged_suppress(Exception):
                     await link.send("control", Envelope(
                         "tool.approval.response", {"approval_id": approval_id, "decision": decision}, frame_id))
             return True
@@ -794,5 +800,5 @@ def _is_hive_peer_session(session: Any) -> bool:
 
 
 async def _send(session: Any, frame_type: str, data: Any, identifier: str | None) -> None:
-    with suppress(Exception):
+    with logged_suppress(Exception):
         await session._send(frame_type, data, identifier)

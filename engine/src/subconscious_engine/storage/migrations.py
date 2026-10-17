@@ -19,6 +19,7 @@ from uuid import uuid4
 from sqlalchemy import Connection, inspect, text
 
 from .models import Base
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 MIGRATIONS_TABLE = "schema_migrations"
@@ -45,6 +46,7 @@ def hlc_from_datetime(value: object, counter: int = 0) -> str:
         try:
             moment = datetime.fromisoformat(value)
         except ValueError:
+            _LOG.warning("storage.migrations.hlc_from_datetime: handled ValueError; continuing with fallback", exc_info=True)
             moment = None
     if moment is None:
         moment = datetime.fromtimestamp(0, timezone.utc)

@@ -9,9 +9,9 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../account/account_controller.dart';
 import '../../account/presentation/account_panel.dart';
+import '../../connection/engine_bootstrap.dart';
 import '../../connection/engine_connection_resolver.dart';
 import '../../dashboard/controller/dashboard_controller.dart';
-import '../../hive/presentation/nodes_page.dart';
 import '../controller/settings_controller.dart';
 
 final class SettingsMainPanel extends StatelessWidget {
@@ -101,18 +101,54 @@ final class _GeneralSettingsPage extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) => _SettingsBody(
-    children: <Widget>[
-      const _SectionHeading(title: 'General Settings'),
-      if (_supportsRemoteEngineConnection) ...<Widget>[
-        const _FieldLabel('Engine Connection'),
-        _RemoteEngineConnectionForm(controller: dashboardController),
-      ],
-      const _FieldLabel('Devices'),
-      const HiveDevicesEntry(),
-      if (controller.isLoadingGeneral) const LinearProgressIndicator(),
-      if (controller.generalError case final Object error)
-        _SettingsError(error: error),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: dashboardController,
+    builder: (BuildContext context, Widget? child) {
+      final bool engineAway =
+          dashboardController.connectionStatus ==
+          EngineConnectionStatus.disconnected;
+      return _SettingsBody(
+        children: <Widget>[
+          const _SectionHeading(title: 'General Settings'),
+          if (_supportsRemoteEngineConnection) ...<Widget>[
+            const _FieldLabel('Engine Connection'),
+            _RemoteEngineConnectionForm(controller: dashboardController),
+          ],
+          // Fixed height so the form does not jump while a load runs.
+          SizedBox(
+            height: 4,
+            child: controller.isLoadingGeneral && !engineAway
+                ? const LinearProgressIndicator()
+                : null,
+          ),
+          if (engineAway)
+            _EngineStatusBanner(
+              message: 'Engine not connected.',
+              detail: _engineProblemText(dashboardController.error),
+              onRetry: dashboardController.retryEngineStart,
+            )
+          else if (controller.generalError case final Object error)
+            _EngineStatusBanner(
+              message: 'Settings could not be loaded.',
+              detail: _engineProblemText(error),
+              onRetry: controller.retryGeneral,
+            ),
+          if (controller.hasPendingGeneral)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'Changes are applied here and will be saved when the engine '
+                'connects.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ..._fields(),
+        ],
+      );
+    },
+  );
+
+  List<Widget> _fields() => <Widget>[
       _LabeledDropdown(
         label: 'Mode',
         value: controller.modeValue,
@@ -156,7 +192,61 @@ final class _GeneralSettingsPage extends StatelessWidget {
         _JoiningTokenField(token: controller.joiningToken),
         if (_supportsWindowsFirewall) const _WindowsFirewallSettings(),
       ],
-    ],
+  ];
+}
+
+/// Plain-language text for an engine problem; the raw error goes to the log.
+String _engineProblemText(Object? error) {
+  if (error == null) {
+    return 'The Subconscious engine is not running. Press Retry to start it.';
+  }
+  debugPrint('Engine problem: $error');
+  if (error is EngineStartException) return error.message;
+  if (error is StateError) return error.message;
+  if (error is TimeoutException) return 'The engine did not respond in time.';
+  if (error is EngineApiException) {
+    return 'The engine refused the request (status ${error.statusCode}).';
+  }
+  return 'The engine could not be reached.';
+}
+
+final class _EngineStatusBanner extends StatelessWidget {
+  const _EngineStatusBanner({
+    required this.message,
+    required this.detail,
+    required this.onRetry,
+  });
+
+  final String message;
+  final String detail;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    child: Row(
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(message, style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                detail,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        OutlinedButton(
+          onPressed: () => unawaited(onRetry()),
+          child: const Text('Retry'),
+        ),
+      ],
+    ),
   );
 }
 
@@ -668,6 +758,14 @@ final class _ModelEditor extends StatefulWidget {
   State<_ModelEditor> createState() => _ModelEditorState();
 }
 
+const List<(String, String)> _capabilityChoices = <(String, String)>[
+  ('chat', 'Chat model'),
+  ('speech_to_text', 'Speech to text (dictation)'),
+  ('text_to_speech', 'Text to speech (read aloud)'),
+  ('realtime', 'Realtime voice'),
+  ('audio_input', 'Accepts audio input'),
+];
+
 final class _ModelEditorState extends State<_ModelEditor> {
   late final TextEditingController _alias;
   late final TextEditingController _model;
@@ -675,6 +773,10 @@ final class _ModelEditorState extends State<_ModelEditor> {
   late final TextEditingController _baseUrl;
   late final TextEditingController _contextWindow;
   late String _provider;
+
+  /// What the user says this model can do. A flag that is absent is left to
+  /// the engine to infer (the 'Auto' choice).
+  late Map<String, bool> _capabilities;
   String? _error;
   bool _isSubmitting = false;
 
@@ -682,6 +784,7 @@ final class _ModelEditorState extends State<_ModelEditor> {
   void initState() {
     super.initState();
     final ModelConfiguration? existing = widget.existing;
+    _capabilities = <String, bool>{...?existing?.capabilities};
     _alias = TextEditingController(text: existing?.alias);
     _model = TextEditingController(text: existing?.model);
     _apiKey = TextEditingController();
@@ -729,6 +832,7 @@ final class _ModelEditorState extends State<_ModelEditor> {
         contextWindow: parsedContext,
         apiKey: _nullIfEmpty(_apiKey.text),
         clearApiKey: false,
+        capabilities: Map<String, bool>.unmodifiable(_capabilities),
       ),
     );
     if (!mounted) return;
@@ -810,6 +914,30 @@ final class _ModelEditorState extends State<_ModelEditor> {
         keyboardType: TextInputType.number,
         decoration: const InputDecoration(hintText: 'Optional token limit'),
       ),
+      const _FieldLabel('Capabilities'),
+      const Text(
+        'Auto lets the engine decide from what it knows about the model. '
+        'Set a value only to correct it. Features such as dictation, read '
+        'aloud and realtime voice appear when a model supports them.',
+      ),
+      for (final (String flag, String label) in _capabilityChoices)
+        _LabeledDropdown(
+          label: label,
+          value: switch (_capabilities[flag]) {
+            true => 'Yes',
+            false => 'No',
+            null => 'Auto',
+          },
+          options: const <String>['Auto', 'Yes', 'No'],
+          enabled: !_isSubmitting,
+          onChanged: (String value) => setState(() {
+            if (value == 'Auto') {
+              _capabilities.remove(flag);
+            } else {
+              _capabilities[flag] = value == 'Yes';
+            }
+          }),
+        ),
       if (_error != null) _SettingsError(error: _error!),
       const SizedBox(height: 18),
       Wrap(

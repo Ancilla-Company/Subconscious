@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from . import PROTOCOL_VERSION
+import logging
+_LOG = logging.getLogger(__name__)
 
 # Negotiated channels with fixed ids so both sides agree without in-band setup.
 CHANNEL_IDS: dict[str, int] = {"control": 0, "rpc": 1, "sync": 2, "events": 3}
@@ -253,6 +255,7 @@ class ChannelEndpoint:
         try:
             envelope = decode_message(self._reassembler, message)
         except ChannelError as error:
+            _LOG.warning("hive.channels.ChannelEndpoint._handle_message: handled ChannelError; continuing with fallback", exc_info=True)
             if self._on_error is not None:
                 self._on_error(self.name, error)
             return

@@ -70,6 +70,7 @@ final class DashboardController extends ChangeNotifier {
     Uri? initialEndpoint,
     String? initialToken,
     this.executors,
+    this.engineStartup,
   }) : _explicitEndpoint = initialEndpoint,
        _explicitToken = initialToken {
     settings = DashboardSettingsController(
@@ -95,6 +96,13 @@ final class DashboardController extends ChangeNotifier {
   static const String navigationTag = 'navigation';
 
   final EngineRepositoryResolver _repositoryResolver;
+
+  /// Starts the local engine before the first connection attempt (production
+  /// desktop only); null leaves starting the engine to the user.
+  final Future<void> Function()? engineStartup;
+
+  /// Why the engine could not be started, shown until a connection succeeds.
+  Object? _engineStartupError;
 
   /// Executor choices for the composer picker (the hive runtime in the app);
   /// null hides the picker.
@@ -161,6 +169,46 @@ final class DashboardController extends ChangeNotifier {
   }
 
   EngineLlmProvider? chatProvider;
+
+  /// Providers whose turn is still running after the user opened another
+  /// thread. They keep working in the background and are reused when the user
+  /// returns to the thread.
+  final Map<String, EngineLlmProvider> _runningProviders =
+      <String, EngineLlmProvider>{};
+
+  /// Releases [provider] unless it is mid-turn, in which case it keeps
+  /// running and is disposed once the turn ends and nobody is viewing it.
+  void _retireProvider(EngineLlmProvider? provider) {
+    if (provider == null) return;
+    final String? thread = provider.threadUuid;
+    if (!provider.isBusy || thread == null) {
+      if (thread != null && identical(_runningProviders[thread], provider)) {
+        _runningProviders.remove(thread);
+      }
+      provider.dispose();
+      return;
+    }
+    _runningProviders[thread] = provider;
+    if (_releaseListeners.containsKey(provider)) return;
+    void release() {
+      if (provider.isBusy) return;
+      provider.removeListener(release);
+      _releaseListeners.remove(provider);
+      // Only providers nobody is viewing are disposed; the viewed one is
+      // disposed when the user leaves it.
+      if (identical(_runningProviders[thread], provider)) {
+        _runningProviders.remove(thread);
+        // Not inside notifyListeners: disposing there asserts.
+        scheduleMicrotask(provider.dispose);
+      }
+    }
+
+    _releaseListeners[provider] = release;
+    provider.addListener(release);
+  }
+
+  final Map<EngineLlmProvider, VoidCallback> _releaseListeners =
+      <EngineLlmProvider, VoidCallback>{};
   EngineConnectionStatus connectionStatus = EngineConnectionStatus.connecting;
   DashboardSection selectedSection = DashboardSection.threads;
   bool accountShortcutSelected = false;
@@ -220,6 +268,7 @@ final class DashboardController extends ChangeNotifier {
   StreamSubscription<WireFrame>? _engineEventSubscription;
   EngineRepository? _engineEventRepository;
   bool _connectionCheckInProgress = false;
+  bool _tokenRejected = false;
   bool _isRestoringNavigation = false;
   Future<void>? _appStateWriteFuture;
   bool _disposed = false;
@@ -804,20 +853,66 @@ final class DashboardController extends ChangeNotifier {
       reconnectInterval,
       (_) => unawaited(_checkConnection()),
     );
+    // Startup runs at most once per session; only retryEngineStart repeats it.
+    if (!_engineStartAttempted) await _runEngineStartup();
+    if (_disposed) return;
     await _checkConnection();
+  }
+
+  bool _engineStartAttempted = false;
+
+  Future<void> _runEngineStartup() async {
+    final Future<void> Function()? startEngine = engineStartup;
+    if (startEngine == null) return;
+    _engineStartAttempted = true;
+    _engineStartupError = null;
+    try {
+      await startEngine();
+    } on Object catch (caughtError) {
+      _engineStartupError = caughtError;
+    }
+  }
+
+  /// User-initiated retry: starts the engine once more, then reconnects.
+  Future<void> retryEngineStart() async {
+    _engineStartAttempted = false;
+    await _runEngineStartup();
+    if (_disposed) return;
+    await reconnectNow();
   }
 
   Future<void> reconnectNow() => _checkConnection(forceConnectingState: true);
 
+  /// Updates the connection state and notifies only when it actually changed,
+  /// so background retries while the engine is away do not rebuild the UI.
+  void _setConnection(EngineConnectionStatus status, {Object? failure}) {
+    final bool changed =
+        connectionStatus != status ||
+        (error == null) != (failure == null) ||
+        error.toString() != failure.toString();
+    connectionStatus = status;
+    error = failure;
+    if (changed) notifyListeners();
+  }
+
   Future<void> _checkConnection({bool forceConnectingState = false}) async {
     if (_connectionCheckInProgress || _disposed) return;
+    // A rejected token is only re-probed on an explicit Retry.
+    if (forceConnectingState) {
+      _tokenRejected = false;
+    } else if (_tokenRejected) {
+      return;
+    }
     _connectionCheckInProgress = true;
     final EngineRepository? currentRepository = _repository;
     final bool canReuseCurrent =
         !forceConnectingState && currentRepository != null && isConnected;
-    if (!canReuseCurrent || !currentRepository.socket.isConnected) {
-      connectionStatus = EngineConnectionStatus.connecting;
-      notifyListeners();
+    // Background ticks keep "disconnected" (or the initial "connecting") as is;
+    // only an explicit retry or a dropped live connection shows "connecting".
+    if (forceConnectingState ||
+        (isConnected &&
+            (!canReuseCurrent || !currentRepository.socket.isConnected))) {
+      _setConnection(EngineConnectionStatus.connecting, failure: error);
     }
 
     try {
@@ -828,11 +923,12 @@ final class DashboardController extends ChangeNotifier {
             await currentRepository.connect().timeout(requestTimeout);
           }
           await _listenToEngineEvents(currentRepository);
-          connectionStatus = EngineConnectionStatus.connected;
-          error = null;
-          notifyListeners();
-          if (!settings.hasLoadedGeneralSettings) {
-            await settings.loadGeneralSettings();
+          _engineStartupError = null;
+          _setConnection(EngineConnectionStatus.connected);
+          // A failed load is not retried on every tick; Retry reloads it.
+          if (!settings.hasLoadedGeneralSettings &&
+              settings.generalError == null) {
+            await settings.loadGeneralSettings(silent: true);
           }
           if (!hasLoadedNavigationState) await _loadNavigationState();
           if (workspaces.isEmpty) {
@@ -861,11 +957,26 @@ final class DashboardController extends ChangeNotifier {
       await discoveredRepository.connect().timeout(requestTimeout);
       await _listenToEngineEvents(discoveredRepository);
       chatProvider?.replaceRepository(discoveredRepository);
-      await settings.loadGeneralSettings(force: true);
+      for (final EngineLlmProvider provider in _runningProviders.values) {
+        provider.replaceRepository(discoveredRepository);
+      }
+      await settings.loadGeneralSettings(
+        force: true,
+        silent: !forceConnectingState,
+      );
+      final Object? settingsFailure = settings.generalError;
+      if (settingsFailure is EngineApiException &&
+          settingsFailure.statusCode == 401) {
+        _tokenRejected = true;
+        throw StateError(
+          'The engine on port ${settingsFailure.uri.port} rejected this '
+          "app's token. Another Subconscious engine may be running; close "
+          'it and press Retry.',
+        );
+      }
       await _loadNavigationState();
-      connectionStatus = EngineConnectionStatus.connected;
-      error = null;
-      notifyListeners();
+      _engineStartupError = null;
+      _setConnection(EngineConnectionStatus.connected);
       await loadWorkspaces();
       // Tabs that could not be read while the engine was away come back now,
       // and files edited in the meantime are compared with the disk.
@@ -875,9 +986,10 @@ final class DashboardController extends ChangeNotifier {
     } on Object catch (caughtError) {
       final EngineRepository? failedRepository = _repository;
       if (failedRepository != null) await _closeRepository(failedRepository);
-      connectionStatus = EngineConnectionStatus.disconnected;
-      error = caughtError;
-      notifyListeners();
+      _setConnection(
+        EngineConnectionStatus.disconnected,
+        failure: _engineStartupError ?? caughtError,
+      );
     } finally {
       _connectionCheckInProgress = false;
     }
@@ -1610,7 +1722,7 @@ final class DashboardController extends ChangeNotifier {
     _threadsWorkspaceUuid = workspaceUuid;
     _setRememberedThread(workspaceUuid, thread.uuid);
     if (remember) _markNavigationChanged();
-    chatProvider?.dispose();
+    _retireProvider(chatProvider);
     chatProvider = null;
     chatError = null;
     isLoadingChat = true;
@@ -1631,11 +1743,15 @@ final class DashboardController extends ChangeNotifier {
           selectedThread?.uuid != thread.uuid) {
         return;
       }
-      final EngineLlmProvider provider = EngineLlmProvider(
-        repository: currentRepository,
-        threadUuid: thread.uuid,
-        modelId: thread.defaultModelId ?? threadsWorkspace?.defaultModelId,
-      );
+      // A turn started earlier may still be running for this thread.
+      final EngineLlmProvider provider =
+          _runningProviders.remove(thread.uuid) ??
+          EngineLlmProvider(
+            repository: currentRepository,
+            threadUuid: thread.uuid,
+            modelId: thread.defaultModelId ?? threadsWorkspace?.defaultModelId,
+          );
+      provider.replaceRepository(currentRepository);
       provider.replaceEngineHistory(messages);
       chatProvider = provider;
       _watchThread(currentRepository, thread.uuid);
@@ -2317,7 +2433,7 @@ final class DashboardController extends ChangeNotifier {
     String? modelId,
   }) {
     _chatRequestVersion++;
-    chatProvider?.dispose();
+    _retireProvider(chatProvider);
     chatError = null;
     isLoadingChat = false;
     final EngineRepository? currentRepository = repository;
@@ -2361,6 +2477,10 @@ final class DashboardController extends ChangeNotifier {
     _engineEventSubscription = null;
     unawaited(subscription?.cancel() ?? Future<void>.value());
     chatProvider?.dispose();
+    for (final EngineLlmProvider provider in _runningProviders.values) {
+      if (!identical(provider, chatProvider)) provider.dispose();
+    }
+    _runningProviders.clear();
     documents.dispose();
     settings.dispose();
     unawaited(repository?.socket.dispose());

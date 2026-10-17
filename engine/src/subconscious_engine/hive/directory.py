@@ -32,6 +32,7 @@ from .identity import (
     node_ids_equal,
     verify_signature,
 )
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 _MAX_CHAIN_DEPTH = 8
@@ -99,6 +100,7 @@ class DirectoryNode:
                 online=raw.get("online") is True,
             )
         except (KeyError, IdentityError, TypeError):
+            _LOG.warning("hive.directory.DirectoryNode.parse: handled (KeyError, IdentityError, TypeError); continuing with fallback", exc_info=True)
             return None
 
 
@@ -337,6 +339,7 @@ def _error_text(response: httpx.Response) -> str:
     try:
         value = response.json()
     except ValueError:
+        _LOG.warning("hive.directory._error_text: handled ValueError; continuing with fallback", exc_info=True)
         value = None
     if isinstance(value, dict):
         for key in ("message", "error", "detail"):

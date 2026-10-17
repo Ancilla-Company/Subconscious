@@ -145,7 +145,7 @@ final class _MarkdownPreviewState extends State<MarkdownPreview> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    if (_tooLarge && widget.embedded) return SelectableText(widget.text);
+    if (_tooLarge && widget.embedded) return Text(widget.text);
     if (_tooLarge) {
       return Center(
         child: Padding(
@@ -164,12 +164,11 @@ final class _MarkdownPreviewState extends State<MarkdownPreview> {
     final _Renderer renderer = _Renderer(styles, _recognizerFor);
     final List<Widget> blocks = renderer.blocks(_nodes);
     if (widget.embedded) {
-      return SelectionArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: blocks,
-        ),
+      // The host provides the SelectionArea so selection can span messages.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: blocks,
       );
     }
     return SelectionArea(

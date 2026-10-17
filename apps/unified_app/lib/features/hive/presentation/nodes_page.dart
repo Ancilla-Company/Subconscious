@@ -4,28 +4,6 @@ import 'package:flutter/material.dart';
 import '../executor_selection.dart';
 import '../hive_runtime.dart';
 
-/// Button for the settings page that opens the devices screen.
-final class HiveDevicesEntry extends StatelessWidget {
-  const HiveDevicesEntry({this.runtime, super.key});
-
-  final HiveRuntime? runtime;
-
-  @override
-  Widget build(BuildContext context) => Align(
-    alignment: Alignment.centerLeft,
-    child: OutlinedButton.icon(
-      icon: const Icon(Icons.devices_other_outlined),
-      label: const Text('Manage devices'),
-      onPressed: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (BuildContext context) =>
-              NodesPage(runtime: runtime ?? HiveRuntime.shared),
-        ),
-      ),
-    ),
-  );
-}
-
 /// Node list (name, kind, online, tier) plus sign-in and enrol/approve flows.
 final class NodesPage extends StatefulWidget {
   const NodesPage({required this.runtime, super.key});
@@ -66,8 +44,54 @@ final class _NodesPageState extends State<NodesPage> {
           ],
         ),
         body: runtime.isSignedIn
-            ? _NodeList(runtime: runtime)
-            : _SignInForm(runtime: runtime),
+            ? _NodeList(runtime: runtime, embedded: false)
+            : Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: _SignInForm(runtime: runtime),
+                  ),
+                ),
+              ),
+      );
+    },
+  );
+}
+
+/// Device management without a Scaffold, for embedding in the Account page.
+/// Fetches only once mounted, so callers show it only for an account context.
+/// Failures render as a short message with Retry, never a raw error.
+final class DevicesSection extends StatefulWidget {
+  const DevicesSection({required this.runtime, super.key});
+
+  final HiveRuntime runtime;
+
+  @override
+  State<DevicesSection> createState() => _DevicesSectionState();
+}
+
+final class _DevicesSectionState extends State<DevicesSection> {
+  @override
+  void initState() {
+    super.initState();
+    widget.runtime.restore();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.runtime,
+    builder: (BuildContext context, Widget? child) {
+      final HiveRuntime runtime = widget.runtime;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (runtime.status == HiveStatus.busy) const LinearProgressIndicator(),
+          if (runtime.isSignedIn)
+            _NodeList(runtime: runtime, embedded: true)
+          else
+            _SignInForm(runtime: runtime),
+        ],
       );
     },
   );
@@ -96,52 +120,46 @@ final class _SignInFormState extends State<_SignInForm> {
   Widget build(BuildContext context) {
     final HiveRuntime runtime = widget.runtime;
     final bool busy = runtime.status == HiveStatus.busy;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          shrinkWrap: true,
-          children: <Widget>[
-            Text(
-              'Sign in to see your devices and reach your engines from here.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _email,
-              keyboardType: TextInputType.emailAddress,
-              autofillHints: const <String>[AutofillHints.email],
-              decoration: const InputDecoration(labelText: 'Email'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _password,
-              obscureText: true,
-              autofillHints: const <String>[AutofillHints.password],
-              decoration: const InputDecoration(labelText: 'Password'),
-              onSubmitted: (_) => _submit(),
-            ),
-            if (runtime.error case final Object error) ...<Widget>[
-              const SizedBox(height: 12),
-              Text(
-                _message(error),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: busy ? null : _submit,
-              child: busy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Sign in'),
-            ),
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'Sign in to see your devices and reach your engines from here.',
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
-      ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _email,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const <String>[AutofillHints.email],
+          decoration: const InputDecoration(labelText: 'Email'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _password,
+          obscureText: true,
+          autofillHints: const <String>[AutofillHints.password],
+          decoration: const InputDecoration(labelText: 'Password'),
+          onSubmitted: (_) => _submit(),
+        ),
+        if (runtime.error case final Object error) ...<Widget>[
+          const SizedBox(height: 12),
+          Text(
+            _friendlyMessage(error),
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: busy ? null : _submit,
+          child: busy
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Sign in'),
+        ),
+      ],
     );
   }
 
@@ -152,24 +170,38 @@ final class _SignInFormState extends State<_SignInForm> {
     );
   }
 }
-
 final class _NodeList extends StatelessWidget {
-  const _NodeList({required this.runtime});
+  const _NodeList({required this.runtime, required this.embedded});
   final HiveRuntime runtime;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
     final List<NodeView> nodes = runtime.nodes;
     final NodeView? local = runtime.localNode;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      shrinkWrap: embedded,
+      physics: embedded ? const NeverScrollableScrollPhysics() : null,
+      padding: embedded ? const EdgeInsets.only(top: 12) : const EdgeInsets.all(16),
       children: <Widget>[
         if (runtime.error case final Object error)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
-              _message(error),
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    _loadFailedMessage(error),
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => runtime.hive.started
+                      ? runtime.refresh()
+                      : runtime.adoptSession(),
+                  child: const Text('Retry'),
+                ),
+              ],
             ),
           ),
         if (local != null && local.node.status == 'pending')
@@ -181,7 +213,7 @@ final class _NodeList extends StatelessWidget {
               'This device cannot approve other devices.',
             ),
           ),
-        if (nodes.isEmpty) const Text('No devices yet.'),
+        if (nodes.isEmpty && runtime.error == null) const Text('No devices yet.'),
         for (final NodeView view in nodes)
           _NodeTile(runtime: runtime, view: view),
         if (runtime.executorCandidates.isNotEmpty) _ExecutorSection(runtime: runtime),
@@ -303,7 +335,7 @@ final class _PendingBanner extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'On an approved device, open Devices and approve this one. '
+              'On an approved device, open Account > Devices and approve this one. '
               'Both screens must show the same code.',
             ),
             for (final NodeView approver in approvers)
@@ -445,3 +477,17 @@ final class _ApproveNodeDialogState extends State<ApproveNodeDialog> {
 
 String _message(Object error) =>
     error is HiveApiException ? error.message : '$error';
+
+/// Message safe to show in the UI: server-provided text for API errors (for
+/// example "Invalid email or password"), otherwise a short generic sentence.
+/// The raw error is logged.
+String _friendlyMessage(Object error) {
+  if (error is HiveApiException && error.statusCode < 500) return error.message;
+  debugPrint('Devices error: $error');
+  return "Couldn't load your devices. Check your connection and try again.";
+}
+/// Device list failures never show raw text; the cause is logged.
+String _loadFailedMessage(Object error) {
+  debugPrint('Devices error: $error');
+  return "Couldn't load your devices. Check your connection and try again.";
+}

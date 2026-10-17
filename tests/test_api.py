@@ -138,7 +138,7 @@ def test_response_helpers_serialize_aliases_and_standardize_not_found():
         "items": [{
             "id": "m1", "provider": "openai", "model": "gpt", "alias": None,
             "baseUrl": None, "region": None, "contextWindow": 4096,
-            "hasApiKey": False,
+            "hasApiKey": False, "capabilities": None,
         }]
     }
     assert response.headers["x-test"] == "yes"

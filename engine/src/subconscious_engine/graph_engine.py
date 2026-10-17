@@ -24,6 +24,8 @@ from .telemetry import (
     TelemetryStore, ToolInvocation,
 )
 from .tool_registry import PortableToolRegistry
+import logging
+_LOG = logging.getLogger(__name__)
 
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
@@ -40,6 +42,8 @@ class ForegroundResult:
     run_id: str
     text: str
     tool_records: list[dict[str, Any]]
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class GraphEngine:
@@ -116,7 +120,11 @@ class GraphEngine:
             )
             telemetry.final_status = RunStatus.SUCCESS
             await event_sink({"type": "run.completed", "run_id": run_id})
-            return ForegroundResult(run_id, text, records)
+            return ForegroundResult(
+                run_id, text, records,
+                prompt_tokens=sum(t.prompt_tokens for t in telemetry.node_traces),
+                completion_tokens=sum(t.completion_tokens for t in telemetry.node_traces),
+            )
         except asyncio.CancelledError:
             telemetry.final_status = RunStatus.ABORTED
             telemetry.friction_signals.append(FrictionSignal(kind="interrupt"))
@@ -230,6 +238,7 @@ class GraphEngine:
         try:
             return path.read_text(encoding="utf-8") if path.is_file() else ""
         except OSError:
+            _LOG.warning("graph_engine.GraphEngine._user_context: handled OSError; continuing with fallback", exc_info=True)
             return ""
 
     @staticmethod

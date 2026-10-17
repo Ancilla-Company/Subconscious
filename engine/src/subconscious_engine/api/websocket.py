@@ -4,9 +4,10 @@ import asyncio
 import base64
 import binascii
 from collections.abc import Callable
-from contextlib import suppress
+from dataclasses import dataclass, field
 import json
 from threading import RLock
+import time
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -16,6 +17,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from subconscious_engine.agents import steering_source
+from subconscious_engine.audio.realtime import (
+    ASK_AGENT_TOOL, DEFAULT_TRANSCRIPTION_MODEL, RealtimeBridge, WebsocketsUpstream,
+    realtime_url,
+)
+from subconscious_engine.audio.routes import capabilities_for
 from subconscious_engine.approval import ApprovalConfig, classify_operation
 from subconscious_engine.configuration.models import ModelConfig
 from subconscious_engine.storage.models import ConversationThread, Message, Workspace, utc_now
@@ -25,6 +32,9 @@ from subconscious_engine.tools import (
     ToolContext,
     merge_tool_config,
 )
+import logging
+from ..logging_setup import logged_suppress, spawn_logged
+_LOG = logging.getLogger(__name__)
 
 
 _MAX_CONTEXT_FILES = 20
@@ -210,7 +220,7 @@ class ClientRegistry:
                 if identifier != exclude_client_id
             )
         for session in recipients:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await session._send(frame_type, data)
 
     async def broadcast_local(self, frame_type: str, data: dict[str, Any]) -> int:
@@ -226,7 +236,7 @@ class ClientRegistry:
             )
         delivered = 0
         for session in recipients:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await session._send(frame_type, data)
                 delivered += 1
         return delivered
@@ -262,7 +272,7 @@ class ClientRegistry:
     def _notify_listener(
         listener: Callable[[tuple[str, ...]], None], snapshot: tuple[str, ...]
     ) -> None:
-        with suppress(Exception):
+        with logged_suppress(Exception):
             listener(snapshot)
 
 
@@ -281,13 +291,36 @@ class SessionTransport(Protocol):
     async def send_json(self, data: Any) -> None: ...
 
 
+@dataclass(eq=False)
+class _Turn:
+    """One running agent turn. Several run at once, at most one per thread."""
+
+    turn_id: str
+    thread_uuid: str | None = None
+    task: "asyncio.Task[None] | None" = None
+    # Messages sent mid-turn: (frame id, message uuid, text), consumed by the agent.
+    steering: list[tuple[str, str, str]] = field(default_factory=list)
+
+
+@dataclass(eq=False)
+class _RealtimeState:
+    """A live realtime voice session and the thread its agent calls land in."""
+
+    bridge: "RealtimeBridge"
+    frame_id: str
+    thread_uuid: str | None
+    workspace_uuid: str | None
+    agent_model_id: str | None
+
+
 class WebSocketSession:
     def __init__(self, socket: SessionTransport) -> None:
         self.socket = socket
         self.app = socket.app
         self.client_id: str | None = None
-        self.active_turn: asyncio.Task[None] | None = None
-        self.active_turn_id: str | None = None
+        # Every running chat turn on this connection; threads run independently.
+        self.turns: list[_Turn] = []
+        self.realtime: _RealtimeState | None = None
         self.pending: dict[str, tuple[str, asyncio.Future[bool]]] = {}
         self.pending_client_tools: dict[
             str, tuple[str, asyncio.Future[dict[str, Any]]]
@@ -302,8 +335,10 @@ class WebSocketSession:
                 frame = await self.socket.receive_json()
                 await self._handle(frame)
         except (WebSocketDisconnect, json.JSONDecodeError, ValueError):
+            _LOG.warning("api.websocket.WebSocketSession.run: handled (WebSocketDisconnect, json.JSONDecodeError, ValueError); continuing with fallback", exc_info=True)
             pass
         finally:
+            await self._stop_realtime()
             await self._stop_active_turn()
             for _, future in self.pending.values():
                 future.cancel()
@@ -328,10 +363,20 @@ class WebSocketSession:
             await self._send("pong", None)
         elif frame_type == "chat.send":
             await self._start_turn(turn_id or uuid4().hex, data)
+        elif frame_type == "realtime.start":
+            await self._realtime_start(turn_id or uuid4().hex, data)
+        elif frame_type == "realtime.audio":
+            if self.realtime is not None and isinstance(data.get("audio"), str):
+                await self.realtime.bridge.send_audio(data["audio"])
+        elif frame_type == "realtime.interrupt":
+            if self.realtime is not None:
+                await self.realtime.bridge.interrupt()
+        elif frame_type == "realtime.stop":
+            await self._stop_realtime()
         elif frame_type == "chat.notification":
             await self._create_notification(turn_id or uuid4().hex, data)
         elif frame_type == "chat.cancel":
-            await self._cancel(turn_id or data.get("turn_id"))
+            await self._cancel(turn_id or data.get("turn_id"), data.get("thread_uuid"))
         elif frame_type == "tool.approval.response":
             await self._approval(turn_id, data)
         elif frame_type == "tool.register":
@@ -375,33 +420,245 @@ class WebSocketSession:
         await self.app.state.client_registry.register_session(identifier, self)
         await self._send("client.hello.ack", {"clientId": identifier})
 
-    async def _start_turn(self, turn_id: str, data: dict[str, Any]) -> None:
-        if self.active_turn is not None and not self.active_turn.done():
-            await self._error("Only one chat turn may run on a connection at a time.")
-            return
-        self.active_turn_id = turn_id
-        self.active_turn = asyncio.create_task(self._run_turn(turn_id, data))
+    @property
+    def active_turn(self) -> "asyncio.Task[None] | None":
+        """Most recently started turn that is still running (compatibility view)."""
+        running = [t for t in self.turns if t.task is not None and not t.task.done()]
+        return running[-1].task if running else None
 
-    async def _cancel(self, turn_id: Any) -> None:
-        if isinstance(turn_id, str) and turn_id == self.active_turn_id:
-            await self._stop_active_turn()
+    @property
+    def active_turn_id(self) -> str | None:
+        running = [t for t in self.turns if t.task is not None and not t.task.done()]
+        return running[-1].turn_id if running else None
+
+    def _turn_for_id(self, turn_id: str) -> "_Turn | None":
+        return next((t for t in self.turns if t.turn_id == turn_id), None)
+
+    def _turn_for_thread(self, thread_uuid: str) -> "_Turn | None":
+        return next((t for t in self.turns if t.thread_uuid == thread_uuid
+                     and t.task is not None and not t.task.done()), None)
+
+    async def _start_turn(self, turn_id: str, data: dict[str, Any]) -> None:
+        thread = data.get("thread_uuid")
+        content = data.get("content")
+        if self._turn_for_id(turn_id) is not None:
+            await self._error("A chat turn with this id is already running.")
+            return
+        if isinstance(thread, str):
+            running = self._turn_for_thread(thread)
+            if running is not None:
+                # The thread is busy: guide the running agent instead of starting another.
+                if isinstance(content, str) and content.strip():
+                    await self._steer(running, turn_id, thread, content)
+                else:
+                    await self._error("chat.send requires content")
+                return
+        turn = _Turn(turn_id, thread if isinstance(thread, str) else None)
+        self.turns.append(turn)
+        turn.task = spawn_logged(self._turn_loop(turn, data))
+
+    async def _steer(self, turn: _Turn, frame_id: str, thread_uuid: str, content: str) -> None:
+        """Accept a message while the agent is working: store it and queue it for the run."""
+        async with self.app.state.database.session() as session:
+            thread = await session.scalar(select(ConversationThread).where(
+                ConversationThread.uuid == thread_uuid, ConversationThread.deleted_at.is_(None)))
+            if thread is None:
+                await self._send("chat.error", {"thread_uuid": thread_uuid,
+                                                "error": f"Thread '{thread_uuid}' not found."}, frame_id)
+                return
+            message = Message(uuid=str(uuid4()), thread_id=thread.id, role="user", content=content)
+            thread.updated_at = utc_now()
+            session.add(message)
+            await session.commit()
+        await self._publish_message(message, thread_uuid)
+        turn.steering.append((frame_id, message.uuid, content))
+        await self._send("chat.steered", {"thread_uuid": thread_uuid, "message_uuid": message.uuid}, frame_id)
+
+    async def _drain_steering(self, turn: _Turn) -> list[str]:
+        """Called before each model request; each consumed message gets its terminal frame."""
+        taken, turn.steering = turn.steering, []
+        for frame_id, _, _ in taken:
+            await self._send("chat.done", {"thread_uuid": turn.thread_uuid, "steered": True}, frame_id)
+        return [text for _, _, text in taken]
+
+    async def _turn_loop(self, turn: _Turn, data: dict[str, Any]) -> None:
+        """Run a turn, then a follow-up turn for messages that arrived too late to steer it."""
+        token = steering_source.set(lambda: self._drain_steering(turn))
+        message_uuid: str | None = None
+        try:
+            while True:
+                extra = {"client_msg_uuid": message_uuid} if message_uuid else {}
+                outcome, error = await self._run_turn(turn.turn_id, data, **extra)
+                leftovers, turn.steering = turn.steering, []
+                if not leftovers:
+                    return
+                thread_uuid = turn.thread_uuid
+                if outcome != "done":
+                    for frame_id, _, _ in leftovers:
+                        if outcome == "cancelled":
+                            await self._send("chat.cancelled", {"thread_uuid": thread_uuid}, frame_id)
+                        else:
+                            await self._send("chat.error", {"thread_uuid": thread_uuid,
+                                                            "error": error or "Turn failed."}, frame_id)
+                    return
+                for frame_id, _, _ in leftovers[:-1]:
+                    await self._send("chat.done", {"thread_uuid": thread_uuid, "steered": True}, frame_id)
+                turn.turn_id, message_uuid, text = leftovers[-1]
+                data = {k: v for k, v in data.items() if k not in {"workspace_uuid", "file_context"}}
+                data.update(thread_uuid=thread_uuid, content=text)
+        finally:
+            steering_source.reset(token)
+            if turn in self.turns:
+                self.turns.remove(turn)
+
+    async def _cancel(self, turn_id: Any, thread_uuid: Any = None) -> None:
+        turn = self._turn_for_id(turn_id) if isinstance(turn_id, str) else None
+        if turn is None and isinstance(thread_uuid, str):
+            turn = self._turn_for_thread(thread_uuid)
+        if turn is not None:
+            await self._stop_turn(turn)
         elif isinstance(turn_id, str) and self._tasks() is not None:
             await self._tasks().handle_frame(self, "task.cancel", {"task_id": turn_id}, turn_id)
 
     def _tasks(self) -> Any:
         return getattr(self.app.state, "task_manager", None)
 
-    async def _stop_active_turn(self) -> None:
-        task = self.active_turn
-        if task is None:
+    async def _realtime_start(self, frame_id: str, data: dict[str, Any]) -> None:
+        """Open a realtime voice session whose agent calls run through the normal graph."""
+        await self._stop_realtime()
+        model_id = data.get("model_id")
+        thread = data.get("thread_uuid") if isinstance(data.get("thread_uuid"), str) else None
+        workspace = data.get("workspace_uuid") if isinstance(data.get("workspace_uuid"), str) else None
+        agent_model = data.get("agent_model_id") if isinstance(data.get("agent_model_id"), str) else None
+
+        async def fail(message: str) -> None:
+            await self._send("realtime.error", {"error": message}, frame_id)
+
+        if not isinstance(model_id, str) or (thread is None) == (workspace is None):
+            await fail("realtime.start requires model_id and exactly one of thread_uuid or workspace_uuid")
             return
-        if not task.done():
-            task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
-            await task
-        if self.active_turn is task:
-            self.active_turn = None
-            self.active_turn_id = None
+        store = self.app.state.model_configuration_store
+        config = await store.resolve(model_id)
+        if config is None:
+            await fail(f"Model configuration '{model_id}' was not found.")
+            return
+        if not (await capabilities_for(self.app, config)).supports("realtime"):
+            await fail(f"Model '{model_id}' is not marked as supporting realtime speech.")
+            return
+        if config.provider.casefold().replace("_", "-") not in {"openai", "openai-compatible", "azure-openai"}:
+            await fail(f"Realtime speech is not available for the '{config.provider}' provider yet.")
+            return
+        connector = getattr(self.app.state, "realtime_connector", None)
+        try:
+            if connector is not None:
+                upstream = await connector(config)
+            else:
+                upstream = await WebsocketsUpstream.connect(
+                    realtime_url(config.base_url, config.model), config.api_key
+                )
+        except Exception as error:
+            _LOG.exception("api.websocket.WebSocketSession._realtime_start: handled Exception; continuing with fallback")
+            await fail(f"Could not connect to the realtime service: {error}")
+            return
+        extra = config.extra or {}
+        voice = extra.get("voice") if isinstance(extra.get("voice"), str) else "marin"
+        configured_transcription = extra.get("transcription_model")
+        # User transcripts need a transcription model; only assume one on OpenAI itself.
+        transcription_model: str | None = (
+            configured_transcription if isinstance(configured_transcription, str) and configured_transcription
+            else DEFAULT_TRANSCRIPTION_MODEL
+            if not config.base_url or "api.openai.com" in config.base_url
+            else None
+        )
+
+        async def emit(frame_type: str, payload: dict[str, Any]) -> None:
+            await self._send(frame_type, payload, frame_id)
+            if frame_type == "realtime.stopped" and self.realtime is not None \
+                    and self.realtime.frame_id == frame_id:
+                self.realtime = None
+
+        state = _RealtimeState(None, frame_id, thread, workspace, agent_model)  # type: ignore[arg-type]
+
+        async def call_function(name: str, arguments: dict[str, Any]) -> str:
+            if name != ASK_AGENT_TOOL["name"]:
+                raise ValueError(f"Unknown function '{name}'.")
+            request = arguments.get("request")
+            if not isinstance(request, str) or not request.strip():
+                raise ValueError("ask_agent needs a request.")
+            return await self._realtime_ask_agent(state, request.strip())
+
+        state.bridge = RealtimeBridge(
+            upstream, emit, call_function, model=config.model, voice=voice,
+            transcription_model=transcription_model,
+        )
+        self.realtime = state
+        await state.bridge.start()
+        await self._send("realtime.started", {
+            "model": config.model, "thread_uuid": thread, "sample_rate": 24000,
+        }, frame_id)
+
+    async def _realtime_ask_agent(self, state: _RealtimeState, request: str) -> str:
+        """Run one agent turn for the voice session and return the answer text."""
+        if state.thread_uuid is not None:
+            running = self._turn_for_thread(state.thread_uuid)
+            if running is not None:
+                await self._steer(running, uuid4().hex, state.thread_uuid, request)
+                return "I passed that to the agent, which is already working on this."
+        turn = _Turn(uuid4().hex, state.thread_uuid, asyncio.current_task())
+        self.turns.append(turn)
+        payload: dict[str, Any] = {"content": request}
+        if state.thread_uuid is not None:
+            payload["thread_uuid"] = state.thread_uuid
+        else:
+            payload["workspace_uuid"] = state.workspace_uuid
+        if state.agent_model_id is not None:
+            payload["model_id"] = state.agent_model_id
+        token = steering_source.set(lambda: self._drain_steering(turn))
+        try:
+            outcome, error = await self._run_turn(turn.turn_id, payload)
+        finally:
+            steering_source.reset(token)
+            if turn in self.turns:
+                self.turns.remove(turn)
+        if outcome != "done":
+            raise RuntimeError(error or "The agent could not finish that request.")
+        if state.thread_uuid is None and turn.thread_uuid is not None:
+            state.thread_uuid = turn.thread_uuid
+            await self._send("realtime.thread", {"thread_uuid": turn.thread_uuid}, state.frame_id)
+        return await self._last_assistant_text(state.thread_uuid) or "Done."
+
+    async def _last_assistant_text(self, thread_uuid: str | None) -> str:
+        if thread_uuid is None:
+            return ""
+        async with self.app.state.database.session() as session:
+            thread = await session.scalar(
+                select(ConversationThread).where(ConversationThread.uuid == thread_uuid))
+            if thread is None:
+                return ""
+            message = await session.scalar(select(Message).where(
+                Message.thread_id == thread.id, Message.role == "assistant",
+                Message.deleted_at.is_(None),
+            ).order_by(Message.hlc.desc(), Message.created_at.desc()).limit(1))
+            return message.content if message is not None else ""
+
+    async def _stop_realtime(self) -> None:
+        state, self.realtime = self.realtime, None
+        if state is not None:
+            await state.bridge.stop()
+
+    async def _stop_turn(self, turn: _Turn) -> None:
+        task = turn.task
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            with logged_suppress(asyncio.CancelledError, Exception):
+                await task
+        if turn in self.turns:
+            self.turns.remove(turn)
+
+    async def _stop_active_turn(self) -> None:
+        for turn in list(self.turns):
+            await self._stop_turn(turn)
 
     async def _create_notification(
         self, notification_id: str, data: dict[str, Any]
@@ -450,6 +707,7 @@ class WebSocketSession:
                 notification_id,
             )
         except Exception as error:
+            _LOG.exception("api.websocket.WebSocketSession._create_notification: handled Exception; continuing with fallback")
             await self._send(
                 "chat.notification.error", {"error": str(error)}, notification_id
             )
@@ -678,6 +936,9 @@ class WebSocketSession:
                         await session.flush()
                         created_thread = True
                 thread_uuid = thread.uuid
+                running = self._turn_for_id(turn_id)
+                if running is not None:
+                    running.thread_uuid = thread_uuid
                 selected_model = model_id if isinstance(model_id, str) else (
                     thread.default_model_id or workspace.default_model_id or "echo")
                 config = ModelConfig(id="echo", provider="subconscious", model="echo") if selected_model.casefold() == "echo" \
@@ -754,6 +1015,7 @@ class WebSocketSession:
                     agent_content = [context_prompt, *binary_parts] \
                         if binary_parts else context_prompt
                 streamed: list[str] = []
+                turn_started = time.perf_counter()
 
                 async def stream_delta(delta: Any) -> None:
                     # Real per-token streaming: model.delta -> chat.delta, in arrival order.
@@ -816,12 +1078,24 @@ class WebSocketSession:
                 elif result.text.startswith(already):
                     await self._send("chat.delta", {"thread_uuid": thread_uuid,
                                                     "delta": result.text[len(already):]}, turn_id)
-            await self._send("chat.done", {"thread_uuid": thread_uuid}, turn_id)
+            prompt_tokens = int(getattr(result, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(result, "completion_tokens", 0) or 0)
+            await self._send("chat.done", {
+                "thread_uuid": thread_uuid,
+                "elapsed_ms": int((time.perf_counter() - turn_started) * 1000),
+                "usage": {
+                    "input_tokens": prompt_tokens,
+                    "output_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
+            }, turn_id)
             return "done", None
         except asyncio.CancelledError:
+            _LOG.debug("api.websocket.WebSocketSession._run_turn: handled asyncio.CancelledError; continuing with fallback", exc_info=True)
             await self._send("chat.cancelled", {"thread_uuid": thread_uuid}, turn_id)
             return "cancelled", None
         except Exception as error:
+            _LOG.exception("api.websocket.WebSocketSession._run_turn: handled Exception; continuing with fallback")
             await self._send("chat.error", {"thread_uuid": thread_uuid, "error": str(error)}, turn_id)
             return "failed", str(error) or error.__class__.__name__
         finally:
@@ -837,12 +1111,6 @@ class WebSocketSession:
                     self.pending_client_tools.pop(request_id, None)
                     if not future.done():
                         future.cancel()
-            current_task = asyncio.current_task()
-            if self.active_turn is None:
-                self.active_turn_id = None
-            elif self.active_turn is current_task:
-                self.active_turn = None
-                self.active_turn_id = None
 
     async def _request_approval(self, turn_id: str, thread_uuid: str, call: ToolCallPart) -> bool:
         approval_id = uuid4().hex

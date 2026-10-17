@@ -1,7 +1,7 @@
 # PyInstaller spec: builds one folder containing two executables that share
 # the same runtime:
 #   subconscious.exe       console build, for terminals / CLI use
-#   subconscious-tray.exe  windowed build, for shortcuts (no console flash)
+#   subconscious-desktop.exe  windowed build, for shortcuts (no console flash)
 #
 # Run from the repository root:
 #   python -m PyInstaller packaging/engine/subconscious.spec --noconfirm \
@@ -47,7 +47,7 @@ for package in ("genai_prices", "logfire"):
 for distribution in ("pydantic-ai", "sentence-transformers", "keyring", "uvicorn"):
     datas += copy_metadata(distribution, recursive=True)
 hiddenimports += collect_submodules("uvicorn")
-hiddenimports += ["keyring.backends.Windows", "pystray._win32", "tkinter"]
+hiddenimports += ["keyring.backends.Windows", "logging.handlers", "subconscious_engine.logging_setup", "pystray._win32", "tkinter"]
 
 analysis = Analysis(
     [str(root / "packaging" / "engine" / "entry.py")],
@@ -73,7 +73,7 @@ tray_exe = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="subconscious-tray",
+    name="subconscious-desktop",
     console=False,
     icon=icon,
 )

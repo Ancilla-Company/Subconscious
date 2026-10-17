@@ -1,13 +1,18 @@
 """ Command-line entry point for the Subconscious engine and clients """
 
+import os
 import sys
+import logging
 import asyncio
 import argparse
 import subprocess
 from pathlib import Path
 from collections.abc import Sequence
 
-from .host import EngineHost
+from . import __version__
+from .host import EngineAlreadyRunningError, EngineHost
+from .logging_setup import configure_engine_logging
+from .runtime import RuntimeInfoWriter
 from .config import EngineConfig
 from .configuration_file import (
     ConfigurationFileError,
@@ -19,7 +24,11 @@ from .configuration_file import (
     show_configuration,
     write_template,
 )
+from .logging_setup import run_logged
+_LOG = logging.getLogger(__name__)
 
+
+logger = logging.getLogger(__name__)
 
 LOGO = """
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣶⣶⣦⣠⣤⣤⣤⣄⣀⣠⣤⣤⡀⠀⠀⠀⠀⠀⠀
@@ -177,6 +186,7 @@ def _run_config(args: argparse.Namespace) -> int:
             set_configuration_value(args.config, args.key, args.value)
             print(f"Updated configuration: {args.key}")
     except ConfigurationFileError as error:
+        _LOG.warning("__main__._run_config: handled ConfigurationFileError; continuing with fallback", exc_info=True)
         print(f"subconscious config: {error}", file=sys.stderr)
         return 2
     return 0
@@ -209,6 +219,7 @@ def _run_start(args: argparse.Namespace) -> int:
     try:
         config = _engine_config_from_args(args)
     except ConfigurationFileError as error:
+        _LOG.warning("__main__._run_start: handled ConfigurationFileError; continuing with fallback", exc_info=True)
         print(f"subconscious start: {error}", file=sys.stderr)
         return 2
     args.dev = config.dev
@@ -219,10 +230,33 @@ def _run_start(args: argparse.Namespace) -> int:
     args.no_tray = config.headless
     if args.detached and not args.service_child:
         return _spawn_background_service(args)
+    data_directory = config.resolved_data_directory
+    log_path = configure_engine_logging(data_directory)
+    logger.info(
+        "Engine starting: version=%s frozen=%s executable=%s pid=%s data_dir=%s "
+        "runtime_json=%s port=%s APPDATA=%s log=%s",
+        __version__,
+        getattr(sys, "frozen", False),
+        sys.executable,
+        os.getpid(),
+        data_directory,
+        RuntimeInfoWriter.path_for(data_directory),
+        config.port,
+        os.environ.get("APPDATA"),
+        log_path,
+    )
     try:
-        asyncio.run(EngineHost(config).serve())
+        run_logged(EngineHost(config).serve())
     except KeyboardInterrupt:
+        _LOG.debug("__main__._run_start: handled KeyboardInterrupt; continuing with fallback", exc_info=True)
         pass
+    except EngineAlreadyRunningError as error:
+        logger.error("%s", error)
+        print(f"Another Subconscious engine is already running on port {error.port}.", file=sys.stderr)
+        return 3
+    except Exception:
+        logger.exception("Engine stopped with an unexpected error")
+        return 1
     return 0
 
 
@@ -278,6 +312,7 @@ def _run_chat(args: argparse.Namespace) -> int:
     try:
         configured = load_configuration(args.config)
     except ConfigurationFileError as error:
+        _LOG.warning("__main__._run_chat: handled ConfigurationFileError; continuing with fallback", exc_info=True)
         print(f"subconscious chat: {error}", file=sys.stderr)
         return 2
     prompt = sys.stdin.read() if args.prompt == "-" else args.prompt
@@ -296,7 +331,7 @@ def _run_chat(args: argparse.Namespace) -> int:
         return 2
     try:
         if args.notification:
-            result = asyncio.run(
+            result = run_logged(
                 one_shot_notification(
                     prompt,
                     thread=args.thread,
@@ -306,7 +341,7 @@ def _run_chat(args: argparse.Namespace) -> int:
                 )
             )
         else:
-            result = asyncio.run(
+            result = run_logged(
                 one_shot_chat(
                     prompt,
                     workspace=workspace,
@@ -318,6 +353,7 @@ def _run_chat(args: argparse.Namespace) -> int:
                 )
             )
     except (EngineClientError, KeyboardInterrupt) as error:
+        _LOG.debug("__main__._run_chat: handled (EngineClientError, KeyboardInterrupt); continuing with fallback", exc_info=True)
         message = str(error) if str(error) else "Chat was interrupted."
         print(f"subconscious chat: {message}", file=sys.stderr)
         return 1
@@ -392,8 +428,9 @@ def _run_node(args: argparse.Namespace) -> int:
             print("Node revoked.")
 
     try:
-        asyncio.run(run())
+        run_logged(run())
     except (EngineClientError, KeyboardInterrupt, EOFError) as error:
+        _LOG.debug("__main__._run_node: handled (EngineClientError, KeyboardInterrupt, EOFError); continuing with fallback", exc_info=True)
         print(f"subconscious node: {error or 'interrupted'}", file=sys.stderr)
         return 1
     return 0
@@ -423,8 +460,9 @@ def _run_hive(args: argparse.Namespace) -> int:
             await database.close()
 
     try:
-        asyncio.run(reset())
+        run_logged(reset())
     except Exception as error:
+        _LOG.exception("__main__._run_hive: handled Exception; continuing with fallback")
         print(f"subconscious hive reset-local: {error}", file=sys.stderr)
         return 1
     print("Local hive data was reset. Sign in again to join a hive.")
@@ -444,6 +482,8 @@ def main(argv: Sequence[str] | None = None) -> int:
   parser = build_parser()
   arguments = list(argv) if argv is not None else sys.argv[1:]
   root_help = not arguments or arguments in (["-h"], ["--help"])
+  if not root_help:
+    configure_engine_logging(dev="--dev" in arguments)
   if root_help:
     print(LOGO)
   args = parser.parse_args(arguments)

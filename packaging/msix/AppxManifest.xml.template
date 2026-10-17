@@ -28,7 +28,7 @@
   <Applications>
 
     <!-- Start menu: desktop GUI -->
-    <Application Id="Gui" Executable="gui\unified_app.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Gui" Executable="gui\gui.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="Subconscious" Description="Subconscious desktop app"
         BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
     </Application>
@@ -54,12 +54,12 @@
     </Application>
 
     <!-- Terminal only: `subconscious-tui` command (hidden from Start menu) -->
-    <Application Id="Tui" Executable="tui\subconscious-tui.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Tui" Executable="tui\tui.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="Subconscious TUI" Description="Subconscious terminal UI"
         BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png"
         AppListEntry="none" />
       <Extensions>
-        <uap3:Extension Category="windows.appExecutionAlias" Executable="tui\subconscious-tui.exe" EntryPoint="Windows.FullTrustApplication">
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="tui\tui.exe" EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
             <desktop:ExecutionAlias Alias="subconscious-tui.exe" />
           </uap3:AppExecutionAlias>

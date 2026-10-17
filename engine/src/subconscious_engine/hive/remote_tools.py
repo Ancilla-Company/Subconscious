@@ -27,7 +27,6 @@ import re
 import time
 from collections import Counter
 from collections.abc import Sequence
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,6 +49,8 @@ from subconscious_engine.tools.registry import ToolContext, ToolSpec
 
 from .authz import HIVE_PEER
 from .channels import Envelope
+from ..logging_setup import logged_suppress, spawn_logged
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 
@@ -123,7 +124,7 @@ async def record_audit(
 
 
 async def _send(link: Any, frame_type: str, data: Any, identifier: str | None = None) -> None:
-    with suppress(Exception):
+    with logged_suppress(Exception):
         await link.send("control", Envelope(frame_type, data, identifier))
 
 
@@ -302,7 +303,7 @@ class RemoteToolService:
             await finish("busy", "Too many remote tool calls are running on that node.")
             return
         self._active += 1
-        runner: asyncio.Future[tuple[str, Any]] = asyncio.ensure_future(
+        runner: asyncio.Future[tuple[str, Any]] = spawn_logged(
             self._run(link, name, args, task_id, workspace_uuid)
         )
         self._calls[key] = runner
@@ -338,6 +339,7 @@ class RemoteToolService:
             try:
                 validated = tool.function_schema.validator.validate_python(args)
             except ValidationError as error:  # never echo the supplied values
+                _LOG.warning("hive.remote_tools.RemoteToolService._run: handled ValidationError; continuing with fallback", exc_info=True)
                 problems = "; ".join(
                     f"{'.'.join(str(part) for part in item['loc']) or 'arguments'}: {item['msg']}"
                     for item in error.errors(include_input=False, include_url=False)
@@ -357,10 +359,13 @@ class RemoteToolService:
                     self.config.call_timeout_seconds,
                 )
             except asyncio.TimeoutError:
+                _LOG.warning("hive.remote_tools.RemoteToolService._run: handled asyncio.TimeoutError; continuing with fallback", exc_info=True)
                 return "timeout", "The tool call timed out."
             except OutsideRootsError as error:
+                _LOG.warning("hive.remote_tools.RemoteToolService._run: handled OutsideRootsError; continuing with fallback", exc_info=True)
                 return "denied", str(error)
             except Exception as error:
+                _LOG.exception("hive.remote_tools.RemoteToolService._run: handled Exception; continuing with fallback")
                 return "error", _clip(str(error) or error.__class__.__name__)
             result = to_jsonable_python(value, fallback=str)
             encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
@@ -405,6 +410,7 @@ class RemoteToolService:
                 approved = await asyncio.wait_for(pending.future, self.config.approval_timeout_seconds)
                 decision = "approve" if approved else "deny"
             except asyncio.TimeoutError:
+                _LOG.warning("hive.remote_tools.RemoteToolService._ask: handled asyncio.TimeoutError; continuing with fallback", exc_info=True)
                 decision = "timeout"
             return decision
         finally:
@@ -447,6 +453,7 @@ def remote_nodes_from_config(raw: str | None) -> list[str]:
     try:
         config = json.loads(raw)
     except ValueError:
+        _LOG.warning("hive.remote_tools.remote_nodes_from_config: handled ValueError; continuing with fallback", exc_info=True)
         return []
     remote = config.get("remote") if isinstance(config, dict) else None
     nodes = remote.get("nodes") if isinstance(remote, dict) else None
@@ -498,6 +505,7 @@ def _clean_advertised(value: Any) -> list[dict[str, Any]]:
         try:
             small = isinstance(schema, dict) and len(json.dumps(schema)) <= MAX_SCHEMA_BYTES
         except (TypeError, ValueError):
+            _LOG.warning("hive.remote_tools._clean_advertised: handled (TypeError, ValueError); continuing with fallback", exc_info=True)
             small = False
         if not small or schema.get("type") != "object":
             schema = dict(_EMPTY_SCHEMA)
@@ -622,6 +630,7 @@ class RemoteToolset:
             await link.send("control", Envelope("tool.list", {}, request_id))
             reply = await asyncio.wait_for(future, self.list_timeout)
         except Exception:
+            _LOG.exception("hive.remote_tools.RemoteToolset._advertised: handled Exception; continuing with fallback")
             return []
         finally:
             self._lists.pop(request_id, None)
@@ -657,6 +666,7 @@ class RemoteToolset:
                 try:
                     reply = await asyncio.wait_for(future, self._wait_seconds())
                 except asyncio.TimeoutError:
+                    _LOG.warning("hive.remote_tools.RemoteToolset.invoke: handled asyncio.TimeoutError; continuing with fallback", exc_info=True)
                     await _send(link, "tool.cancel", {"call_id": call_id})
                     outcome, text = "timeout", f"[remote tool error from {alias}: the call timed out]"
                 else:
@@ -667,6 +677,7 @@ class RemoteToolset:
                 await _send(link, "tool.cancel", {"call_id": call_id})
             raise
         except Exception:
+            _LOG.exception("hive.remote_tools.RemoteToolset.invoke: handled Exception; continuing with fallback")
             outcome, text = "error", f"[remote tool error from {alias}: the call could not be sent]"
         finally:
             self._calls.pop(call_id, None)

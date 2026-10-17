@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,6 +15,7 @@ from . import PROTOCOL_VERSION
 from .authz import authorize_frame
 from .channels import ChannelError, Envelope
 from .peers import PeerLink
+from ..logging_setup import logged_suppress, spawn_logged
 
 _LOGGER = logging.getLogger("uvicorn.error")
 INBOX_LIMIT = 256
@@ -77,21 +77,21 @@ class PeerSocket:
 
     def _reject(self, envelope: Envelope) -> None:
         async def notify() -> None:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await self.link.send(
                     "control",
                     Envelope("error", {"error": "Frame not permitted for this node."}, envelope.id),
                 )
 
-        asyncio.ensure_future(notify())
+        spawn_logged(notify())
 
     def close(self) -> None:
-        with suppress(asyncio.QueueFull):
+        with logged_suppress(asyncio.QueueFull):
             self._inbox.put_nowait(_CLOSED)
         if self._inbox.full():  # make room so the close marker is always seen
-            with suppress(asyncio.QueueEmpty):
+            with logged_suppress(asyncio.QueueEmpty):
                 self._inbox.get_nowait()
-            with suppress(asyncio.QueueFull):
+            with logged_suppress(asyncio.QueueFull):
                 self._inbox.put_nowait(_CLOSED)
 
 
@@ -109,7 +109,7 @@ class PeerSession:
 
     def start(self) -> None:
         if self._task is None:
-            self._task = asyncio.ensure_future(self._session.run())
+            self._task = spawn_logged(self._session.run())
 
     def feed(self, envelope: Envelope) -> None:
         self.socket.feed(envelope)
@@ -118,5 +118,5 @@ class PeerSession:
         self.socket.close()
         task, self._task = self._task, None
         if task is not None:
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await asyncio.wait_for(task, 5)

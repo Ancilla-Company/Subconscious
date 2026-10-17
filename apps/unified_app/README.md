@@ -13,6 +13,17 @@ subconscious start --dev
 
 Alternatively, set `engine.account_server_url: http://127.0.0.1:5050/` in the engine YAML configuration. The local engine joining token remains a separate credential used only between Flutter and the engine.
 
+## Starting the engine
+On Windows, a production build starts `engine\subconscious-desktop.exe` (next to the `gui` folder of the installed package) when it finds no healthy engine, then waits up to 45 seconds for it to answer. If it cannot be found or never comes up, the dashboard shows the error instead of a blank connection failure, and the usual reconnect keeps trying.
+
+Nothing is started when `SUBCONSCIOUS_ENGINE_DEV=true`, when an explicit engine endpoint is configured, on mobile or web, or on macOS and Linux. To test an unpackaged release build, point the app at an engine executable:
+
+```powershell
+flutter run -d windows --release --dart-define=SUBCONSCIOUS_ENGINE_EXE=C:\path\to\engine\subconscious-desktop.exe
+```
+
+Two app windows starting together are kept to one launch by an exclusive lock file (`gui-engine-launch.lock` in `%APPDATA%\Subconscious`). Follow-up: the Python engine has no real single-instance guard on Windows (`SO_REUSEADDR` lets a second process bind port 50506 and overwrite `runtime.json`), so starting it by hand while the app launches it can still produce two engines.
+
 ## Devices, executor picker and relay fallback
 
 Signing in to the hive (Settings, Devices) registers this device as a thin node. It lists the other nodes of your account with their connection tier (`direct` or `ws-relay`) and lets you approve pending devices after comparing the six digit code.

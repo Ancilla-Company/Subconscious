@@ -6,6 +6,8 @@ import asyncio
 import random
 
 from .graph_engine import GraphEngine
+import logging
+_LOG = logging.getLogger(__name__)
 
 
 class SubconsciousWorker:
@@ -30,6 +32,7 @@ class SubconsciousWorker:
             try:
                 await asyncio.wait_for(self.engine.reflection_requested.wait(), timeout)
             except TimeoutError:
+                _LOG.warning("subconscious_loop.SubconsciousWorker.run: handled TimeoutError; continuing with fallback", exc_info=True)
                 pass
             try:
                 await self.engine.run_subconscious()
@@ -37,4 +40,5 @@ class SubconsciousWorker:
                 raise
             except Exception:
                 # Claims are released by GraphEngine, allowing a later retry.
+                _LOG.exception("subconscious_loop.SubconsciousWorker.run: handled Exception; continuing with fallback")
                 await asyncio.sleep(min(60, self.interval_seconds))

@@ -50,3 +50,10 @@ def test_delete_is_idempotent_and_suppresses_os_errors(tmp_path):
 def test_runtime_model_allows_optional_node_id():
     value = RuntimeInfo(host="localhost", port=1, token="t", pid=2, version="v")
     assert value.node_id is None
+
+def test_delete_with_expected_pid_only_removes_own_file(tmp_path):
+    RuntimeInfoWriter.write(tmp_path, info())  # pid 42
+    RuntimeInfoWriter.delete(tmp_path, expected_pid=7)
+    assert (tmp_path / "runtime.json").exists()
+    RuntimeInfoWriter.delete(tmp_path, expected_pid=42)
+    assert not (tmp_path / "runtime.json").exists()

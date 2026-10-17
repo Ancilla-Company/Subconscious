@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from subconscious_engine.api.websocket import ClientRegistry, WebSocketSession, websocket_endpoint
+from subconscious_engine.api.websocket import ClientRegistry, WebSocketSession, _Turn, websocket_endpoint
 
 
 def run(coro):
@@ -158,13 +158,11 @@ def test_turn_start_enforces_single_active_task_and_cancel_matches_turn_id():
         task = session.active_turn
         assert task is not None and session.active_turn_id == "turn-1"
         await session._start_turn("turn-2", {"content": "other"})
-        assert socket.sent[-1] == {
-            "v": 1,
-            "type": "error",
-            "data": {"error": "Only one chat turn may run on a connection at a time."},
-        }
+        # A second turn runs alongside the first instead of being rejected.
+        assert not any(frame["type"] == "error" for frame in socket.sent)
+        second = session._turn_for_id("turn-2").task
         await session._cancel("turn-2")
-        assert not task.cancelled()
+        assert second.cancelled() and not task.cancelled()
         await session._cancel("turn-1")
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -236,7 +234,7 @@ def test_run_cleanup_cancels_turn_and_approvals_and_releases_client_on_bad_json(
         socket = FakeSocket(registry, [ValueError("invalid JSON")])
         session = WebSocketSession(socket)
         session.client_id = "desktop"
-        session.active_turn = asyncio.create_task(asyncio.sleep(60))
+        session.turns.append(_Turn("turn", task=asyncio.create_task(asyncio.sleep(60))))
         future = asyncio.get_running_loop().create_future()
         session.pending["approval"] = ("turn", future)
 
@@ -257,7 +255,6 @@ def test_run_turn_validation_emits_correlated_error_and_cleans_turn_approvals():
         session = WebSocketSession(socket)
         future = asyncio.get_running_loop().create_future()
         session.pending["approval"] = ("turn-1", future)
-        session.active_turn_id = "turn-1"
 
         await session._run_turn("turn-1", {"content": "hello"})
         assert socket.sent == [{

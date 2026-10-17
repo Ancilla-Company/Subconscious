@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform as platform_module
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +32,8 @@ from .identity import (
 from .node import HiveNode
 from .peers import DEFAULT_DIRECT_TIMEOUT, PeerManager
 from .signaling import SignalingClient
+from ..logging_setup import logged_suppress, spawn_logged
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 DIRECTORY_POLL_SECONDS = 15.0
@@ -99,10 +100,10 @@ class HiveService:
         """Try to resume an existing account session; failures are not fatal."""
         if not self._enabled:
             return
-        with suppress(AccountError):
+        with logged_suppress(AccountError):
             await self._account.restore()
         if self._pending_apply is not None:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await self._pending_apply
         user = self._account.current_account_user
         if user is not None and self.state == "stopped":
@@ -114,14 +115,14 @@ class HiveService:
             self._unsubscribe = None
         if self._pending_apply is not None:
             self._pending_apply.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await self._pending_apply
         await self.stop()
 
     def _on_account_changed(self, user: AccountUser | None) -> None:
         if not self._enabled:
             return
-        self._pending_apply = asyncio.ensure_future(self._apply(user))
+        self._pending_apply = spawn_logged(self._apply(user))
 
     async def _apply(self, user: AccountUser | None) -> None:
         async with self._lock:
@@ -138,6 +139,7 @@ class HiveService:
         try:
             self.identity = load_or_create_identity(self._identity_store)
         except IdentityError as error:
+            _LOG.warning("hive.service.HiveService._start_locked: handled IdentityError; continuing with fallback", exc_info=True)
             self.state, self.detail = "error", str(error)
             return
         base = self._server_url or self._account.server_base_url
@@ -147,17 +149,17 @@ class HiveService:
         pins = PinStore(self._data_directory / "hive" / f"pins-{user.id}.json")
         self.directory = Directory(user.id, self.identity.node_id, pins)
         self.state, self.detail = "starting", ""
-        self._main = asyncio.ensure_future(self._run())
+        self._main = spawn_logged(self._run())
 
     async def _stop_locked(self) -> None:
         main, self._main = self._main, None
         if main is not None:
             main.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await main
         await self._teardown_network()
         if self.api is not None and self._api_override is None:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await self.api.close()
         self.api = None
         self.directory = None
@@ -173,7 +175,7 @@ class HiveService:
         refresh, self._refresh_task = self._refresh_task, None
         if refresh is not None:
             refresh.cancel()
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await refresh
         if self.signaling is not None:
             await self.signaling.stop()
@@ -271,7 +273,7 @@ class HiveService:
         self._clients = clients
         signaling = self.signaling
         if signaling is not None:
-            asyncio.ensure_future(self._publish_presence(signaling, clients))
+            spawn_logged(self._publish_presence(signaling, clients))
 
     async def capabilities(self) -> dict[str, Any]:
         """What this node advertises: it can run agents, and which model names it has.
@@ -281,13 +283,13 @@ class HiveService:
         models: list[dict[str, str]] = []
         store = getattr(getattr(self.app, "state", None), "model_configuration_store", None)
         if store is not None:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 for item in await store.list():
                     models.append({"id": item.id, "name": item.alias or item.model})
         return {"agents": True, "can_run_agents": True, "models": models, "protocol": PROTOCOL_VERSION}
 
     async def _publish_presence(self, signaling: SignalingClient, clients: tuple[str, ...]) -> None:
-        with suppress(Exception):
+        with logged_suppress(Exception):
             await signaling.set_presence(list(clients), await self.capabilities())
 
     async def _on_presence(self, data: dict[str, Any]) -> None:
@@ -308,13 +310,14 @@ class HiveService:
 
     def _schedule_refresh(self) -> None:
         if self._refresh_task is None or self._refresh_task.done():
-            self._refresh_task = asyncio.ensure_future(self._debounced_refresh())
+            self._refresh_task = spawn_logged(self._debounced_refresh())
 
     async def _debounced_refresh(self) -> None:
         await asyncio.sleep(REFRESH_DEBOUNCE_SECONDS)
         try:
             await self._refresh_directory()
         except (HiveApiError, AccountError):
+            _LOG.warning("hive.service.HiveService._debounced_refresh: handled (HiveApiError, AccountError); continuing with fallback", exc_info=True)
             return
         peers, directory = self.peers, self.directory
         if peers is None or directory is None:
@@ -351,7 +354,7 @@ class HiveService:
         """
         if self.api is None or self.directory is None:
             return
-        with suppress(HiveApiError, AccountError):
+        with logged_suppress(HiveApiError, AccountError):
             await self._refresh_directory()
 
     async def enroll(self, invite_code: str | None) -> dict[str, Any]:

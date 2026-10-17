@@ -25,7 +25,6 @@ import logging
 import secrets
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -58,6 +57,8 @@ from .identity import (
     verify_signature,
 )
 from .switchable import RELAY_TIER
+from ..logging_setup import logged_suppress, spawn_logged
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 
@@ -146,6 +147,7 @@ def open_record(key: bytes, record: bytes, aad: bytes) -> bytes | None:
     try:
         return ChaCha20Poly1305(key).decrypt(b"\x00\x00\x00\x00" + record[1:9], record[9:], aad)
     except InvalidTag:
+        _LOG.warning("hive.relay.open_record: handled InvalidTag; continuing with fallback", exc_info=True)
         return None
 
 
@@ -388,7 +390,7 @@ class RelaySession:
 
     # --- sending ------------------------------------------------------------
     def _spawn(self, coro: Awaitable[Any]) -> None:
-        task = asyncio.ensure_future(coro)
+        task = spawn_logged(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -397,6 +399,7 @@ class RelaySession:
             async with self._send_lock:
                 await self._send_preamble()
         except Exception:
+            _LOG.exception("hive.relay.RelaySession._flush_preamble: handled Exception; continuing with fallback")
             await self.close()
 
     async def _send_preamble(self) -> None:
@@ -495,6 +498,7 @@ class RelaySession:
                 json.dumps(decoded.get("env"), separators=(",", ":"), ensure_ascii=False),
             )
         except (ValueError, ChannelError):
+            _LOG.warning("hive.relay.RelaySession._deliver: handled (ValueError, ChannelError); continuing with fallback", exc_info=True)
             return  # authenticated but malformed content is dropped
         if envelope is None:
             return
@@ -518,7 +522,7 @@ class RelaySession:
         self._finish()
         if not can_send:
             return
-        with suppress(Exception):
+        with logged_suppress(Exception):
             async with self._send_lock:
                 record = self._seal(b"", MSG_CLOSE)
                 await asyncio.wait_for(self._transmit(record), CLOSE_SEND_TIMEOUT_SECONDS)
@@ -529,7 +533,7 @@ class RelaySession:
         self.closed.set()
         for hook in (self._manager_closed, self.on_closed):
             if hook is not None:
-                with suppress(Exception):
+                with logged_suppress(Exception):
                     hook(self)
 
 
@@ -647,12 +651,12 @@ class RelayManager:
         for task in list(self._tasks):
             task.cancel()
         for task in list(self._tasks):
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await task
 
     # --- internals --------------------------------------------------------------
     def _spawn(self, coro: Awaitable[Any]) -> None:
-        task = asyncio.ensure_future(coro)
+        task = spawn_logged(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -708,6 +712,7 @@ class RelayManager:
         try:
             await self._transmit(remote.id, sid, initiator.start())
         except Exception:
+            _LOG.exception("hive.relay.RelayManager._start_initiator: handled Exception; continuing with fallback")
             self._drop(key)
             self._fail_connecting(key[0], RelayError("The relay handshake could not start."))
 
@@ -727,6 +732,7 @@ class RelayManager:
         try:
             raw = b64u_decode(payload)
         except IdentityError:
+            _LOG.warning("hive.relay.RelayManager._handle: handled IdentityError; continuing with fallback", exc_info=True)
             return
         if not raw or len(raw) > RAW_LIMIT:
             return
@@ -772,6 +778,7 @@ class RelayManager:
         try:
             m2 = responder.receive_m1(m1)
         except RelayError:
+            _LOG.warning("hive.relay.RelayManager._start_responder: handled RelayError; continuing with fallback", exc_info=True)
             return
         self._arm(_Handshake(remote.id, sid, responder=responder))
         self._spawn(self._send_m2(peer, remote.id, sid, m2))
@@ -780,6 +787,7 @@ class RelayManager:
         try:
             await self._transmit(node_id, sid, m2)
         except Exception:
+            _LOG.exception("hive.relay.RelayManager._send_m2: handled Exception; continuing with fallback")
             self._drop((peer, sid))
             self._fail_connecting(peer, RelayError("The relay handshake failed."), only_if_abandoned=True)
 
@@ -789,6 +797,7 @@ class RelayManager:
         try:
             m3, keys = handshake.initiator.receive_m2(m2)
         except RelayError:
+            _LOG.warning("hive.relay.RelayManager._finish_initiator: handled RelayError; continuing with fallback", exc_info=True)
             self._drop(key)  # a bad or forged M2 drops the attempt silently
             self._fail_connecting(key[0], RelayError("The relay handshake failed."))
             return
@@ -804,6 +813,7 @@ class RelayManager:
         try:
             keys = handshake.responder.receive_m3(m3)
         except RelayError:
+            _LOG.warning("hive.relay.RelayManager._finish_responder: handled RelayError; continuing with fallback", exc_info=True)
             self._drop(key)
             self._fail_connecting(key[0], RelayError("The relay handshake failed."), only_if_abandoned=True)
             return

@@ -2,11 +2,12 @@
 
 import asyncio
 from collections.abc import Callable
-from contextlib import suppress
+import errno
 import ipaddress
 import logging
 import os
 import socket
+import sys
 
 import uvicorn
 
@@ -15,6 +16,7 @@ from .account import AccountServerClient, AccountSessionService
 from .agents import AgentManager
 from .api import create_app
 from .auth import EngineAuthToken
+from .capabilities import CapabilityResolver, RemoteCapabilitySource
 from .background import BackgroundStatusIndicator, SystemTrayStatusIndicator
 from .config import EngineConfig
 from .configuration import EncryptedModelConfigurationStore
@@ -30,10 +32,22 @@ from .runtime import RuntimeInfo, RuntimeInfoWriter
 from .services.rag_service import WorkspaceRagService
 from .storage import Database
 from .tools import ToolRegistry
+from .logging_setup import logged_suppress, spawn_logged
 
 StatusIndicatorFactory = Callable[..., BackgroundStatusIndicator]
 
 logger = logging.getLogger(__name__)
+
+# EADDRINUSE on POSIX plus the Windows WSAEADDRINUSE / WSAEACCES codes.
+_ADDRESS_IN_USE_ERRORS = {errno.EADDRINUSE, 10048, 10013}
+
+
+class EngineAlreadyRunningError(OSError):
+    """Raised when the engine port is already bound by another process."""
+
+    def __init__(self, port: int) -> None:
+        super().__init__(f"Another Subconscious engine is already running on port {port}.")
+        self.port = port
 
 
 class EngineHost:
@@ -108,6 +122,7 @@ class EngineHost:
             if config.subconscious_enabled
             else None
         )
+        capabilities_url = config.capabilities_url or os.getenv("SUBCONSCIOUS_CAPABILITIES_URL")
         self.account_session_service = AccountSessionService(
             AccountServerClient(config.resolved_account_server_url),
             credential_store=self.model_configuration_store,
@@ -124,6 +139,15 @@ class EngineHost:
             self.subconscious_worker,
             self.account_session_service,
             remote_tools_config=config.hive.remote_tools,
+            capability_resolver=CapabilityResolver(
+                RemoteCapabilitySource(
+                    capabilities_url,
+                    token=config.capabilities_token
+                    or os.getenv("SUBCONSCIOUS_CAPABILITIES_TOKEN"),
+                )
+                if capabilities_url
+                else None
+            ),
         )
         hive = config.hive
         self.hive_service = HiveService(
@@ -205,8 +229,18 @@ class EngineHost:
         unsubscribe_clients: Callable[[], None] | None = None
         runtime_written = False
         try:
-            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind((self.bind_host, self.requested_port))
+            if sys.platform == "win32":
+                # SO_REUSEADDR lets two engines share a port on Windows.
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                listener.bind((self.bind_host, self.requested_port))
+            except OSError as error:
+                code = error.errno or getattr(error, "winerror", None)
+                if code in _ADDRESS_IN_USE_ERRORS or getattr(error, "winerror", None) in _ADDRESS_IN_USE_ERRORS:
+                    raise EngineAlreadyRunningError(self.requested_port) from error
+                raise
             listener.listen(2048)
             self._listener = listener
             self._bound_port = int(listener.getsockname()[1])
@@ -215,12 +249,14 @@ class EngineHost:
                 uvicorn.Config(
                     self.app,
                     log_level="debug" if self.config.dev else "info",
+                    # Leave logger wiring to logging_setup so uvicorn lands in engine.log.
+                    log_config=None,
                 )
             )
             self._server = server
             if self._stop_requested:
                 server.should_exit = True
-            server_task = asyncio.create_task(server.serve(sockets=[listener]))
+            server_task = spawn_logged(server.serve(sockets=[listener]))
             await self._wait_for_start(server, server_task)
 
             runtime = RuntimeInfo(
@@ -249,19 +285,19 @@ class EngineHost:
             self._ready.set()
             # Resume an existing account session and start the hive only if the
             # user is signed in; failures never block the local engine.
-            hive_startup = asyncio.create_task(self.hive_service.startup())
+            hive_startup = spawn_logged(self.hive_service.startup())
             try:
                 await server_task
             finally:
                 hive_startup.cancel()
-                with suppress(asyncio.CancelledError, Exception):
+                with logged_suppress(asyncio.CancelledError, Exception):
                     await hive_startup
         finally:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await self.hive_service.shutdown()
             self._signal_stop()
             if server_task is not None and not server_task.done():
-                with suppress(asyncio.CancelledError):
+                with logged_suppress(asyncio.CancelledError):
                     await server_task
             if unsubscribe_clients is not None:
                 unsubscribe_clients()
@@ -269,7 +305,9 @@ class EngineHost:
                 self._status_indicator.stop()
                 self._status_indicator = None
             if runtime_written:
-                RuntimeInfoWriter.delete(self.config.resolved_data_directory)
+                RuntimeInfoWriter.delete(
+                    self.config.resolved_data_directory, expected_pid=os.getpid()
+                )
             listener.close()
             self._ready.clear()
             self._listener = None
@@ -289,7 +327,7 @@ class EngineHost:
     @staticmethod
     def _lan_address() -> str:
         candidates: set[str] = set()
-        with suppress(OSError):
+        with logged_suppress(OSError):
             candidates.update(
                 info[4][0]
                 for info in socket.getaddrinfo(

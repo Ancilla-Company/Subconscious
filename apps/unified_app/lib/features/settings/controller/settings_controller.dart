@@ -46,20 +46,20 @@ final class DashboardSettingsController extends ChangeNotifier {
 
   AppLightingMode get lightingMode =>
       switch (generalSettings[modeKey]?.toLowerCase()) {
-        'light' => AppLightingMode.light,
+        'device' => AppLightingMode.device,
         'dark' => AppLightingMode.dark,
-        _ => AppLightingMode.device,
+        _ => AppLightingMode.light,
       };
 
   AppAccentTheme get accentTheme =>
       switch (generalSettings[colourThemeKey]?.toLowerCase()) {
-        'default' => AppAccentTheme.neutral,
+        'device' => AppAccentTheme.device,
         'blue' => AppAccentTheme.blue,
         'purple' => AppAccentTheme.purple,
         'green' => AppAccentTheme.green,
         'orange' => AppAccentTheme.orange,
         'red' => AppAccentTheme.red,
-        _ => AppAccentTheme.device,
+        _ => AppAccentTheme.neutral, // 'default', missing, or unrecognised
       };
 
   DashboardSidebarPosition get sidebarPosition =>
@@ -172,16 +172,32 @@ final class DashboardSettingsController extends ChangeNotifier {
     }
   }
 
-  Future<void> loadGeneralSettings({bool force = false}) async {
+  /// Changes made while the engine was away; sent after the next load.
+  final Map<String, String> _pendingGeneral = <String, String>{};
+
+  bool get hasPendingGeneral => _pendingGeneral.isNotEmpty;
+
+  /// Reloads the general settings after a failure (the Retry button).
+  Future<void> retryGeneral() => loadGeneralSettings(force: true);
+
+  /// [silent] loads (background reconnects) show no progress and notify only
+  /// when the outcome changes, so the page does not flicker.
+  Future<void> loadGeneralSettings({
+    bool force = false,
+    bool silent = false,
+  }) async {
     if ((isLoadingGeneral || hasLoadedGeneralSettings) && !force) return;
     final int version = ++_generalLoadVersion;
     final Map<String, int> updateVersionsAtStart = Map<String, int>.of(
       _generalUpdateVersions,
     );
+    final Object? errorAtStart = generalError;
     if (force) hasLoadedGeneralSettings = false;
-    isLoadingGeneral = true;
-    generalError = null;
-    notifyListeners();
+    if (!silent) {
+      isLoadingGeneral = true;
+      generalError = null;
+      notifyListeners();
+    }
     try {
       final List<EngineSetting> loaded = await _client
           .getSettings(client: settingsClient)
@@ -196,15 +212,49 @@ final class DashboardSettingsController extends ChangeNotifier {
         final String? currentValue = generalSettings[update.key];
         if (currentValue != null) loadedSettings[update.key] = currentValue;
       }
+      loadedSettings.addAll(_pendingGeneral);
       generalSettings = loadedSettings;
       hasLoadedGeneralSettings = true;
+      generalError = null;
+      await _flushPendingGeneral();
     } on Object catch (error) {
       if (version == _generalLoadVersion) generalError = error;
     } finally {
       if (version == _generalLoadVersion) {
+        final bool wasLoading = isLoadingGeneral;
         isLoadingGeneral = false;
-        notifyListeners();
+        if (!silent ||
+            wasLoading ||
+            hasLoadedGeneralSettings ||
+            '$errorAtStart' != '$generalError') {
+          notifyListeners();
+        }
       }
+    }
+  }
+
+  Future<void> _flushPendingGeneral() async {
+    if (_pendingGeneral.isEmpty) return;
+    final Map<String, String> sending = Map<String, String>.of(_pendingGeneral);
+    try {
+      await _client
+          .putSettings(<EngineSetting>[
+            for (final MapEntry<String, String> entry in sending.entries)
+              EngineSetting(
+                key: entry.key,
+                value: entry.value,
+                client: settingsClient,
+              ),
+          ])
+          .timeout(requestTimeout);
+      for (final MapEntry<String, String> entry in sending.entries) {
+        if (_pendingGeneral[entry.key] == entry.value) {
+          _pendingGeneral.remove(entry.key);
+        }
+      }
+    } on Object catch (error) {
+      // Kept pending; sent after the next successful load.
+      debugPrint('Could not save pending settings: $error');
     }
   }
 
@@ -213,6 +263,12 @@ final class DashboardSettingsController extends ChangeNotifier {
     final int version = (_generalUpdateVersions[key] ?? 0) + 1;
     _generalUpdateVersions[key] = version;
     generalSettings = <String, String>{...generalSettings, key: value};
+    if (repositoryProvider() == null) {
+      // Engine away: keep the choice locally and save it once it is back.
+      _pendingGeneral[key] = value;
+      notifyListeners();
+      return;
+    }
     generalError = null;
     notifyListeners();
     try {
@@ -221,6 +277,7 @@ final class DashboardSettingsController extends ChangeNotifier {
             EngineSetting(key: key, value: value, client: settingsClient),
           ])
           .timeout(requestTimeout);
+      if (_pendingGeneral[key] == value) _pendingGeneral.remove(key);
     } on Object catch (error) {
       if (_generalUpdateVersions[key] != version) {
         return;

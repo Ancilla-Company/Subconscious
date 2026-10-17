@@ -25,6 +25,8 @@ from subconscious_engine.api.extra_schemas import (
     WorkspaceFileVersionDto,
 )
 from subconscious_engine.storage.models import Workspace
+import logging
+_LOG = logging.getLogger(__name__)
 
 _UTF8_BOM = b"\xef\xbb\xbf"
 # Atomic writes stage their bytes in a sibling file with this suffix. It is
@@ -418,12 +420,14 @@ class WorkspaceFileService:
                 try:
                     shutil.copymode(file, staged)
                 except OSError:
+                    _LOG.warning("services.workspace_files.WorkspaceFileService._write_sync: handled OSError; continuing with fallback", exc_info=True)
                     pass
                 self._replace_with_retry(staged, file)
             finally:
                 try:
                     staged.unlink(missing_ok=True)
                 except OSError:
+                    _LOG.warning("services.workspace_files.WorkspaceFileService._write_sync: handled OSError; continuing with fallback", exc_info=True)
                     pass
         return WorkspaceFileContentDto(content=content, version=content_version(payload))
 
@@ -476,6 +480,7 @@ class WorkspaceFileService:
             try:
                 target.relative_to(source)
             except ValueError:
+                _LOG.warning("services.workspace_files.WorkspaceFileService._move_sync: handled ValueError; continuing with fallback", exc_info=True)
                 pass
             else:
                 raise WorkspaceFileError(

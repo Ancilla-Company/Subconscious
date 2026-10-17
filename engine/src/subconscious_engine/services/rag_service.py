@@ -20,6 +20,7 @@ from subconscious_engine.rag import (
     SidecarStore, WorkspaceIndexer, WorkspaceRetriever,
 )
 from subconscious_engine.storage.models import Workspace
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger(__name__)
 _DAY_SECONDS = 24 * 60 * 60
@@ -68,6 +69,7 @@ class WorkspaceRagService:
         try:
             rag_config = json.loads(workspace.rag_config) if workspace.rag_config else {}
         except (TypeError, json.JSONDecodeError):
+            _LOG.warning("services.rag_service.WorkspaceRagService._root_specs: handled (TypeError, json.JSONDecodeError); continuing with fallback", exc_info=True)
             rag_config = {}
         if isinstance(rag_config, dict):
             configured_roots = rag_config.get("roots")
@@ -96,6 +98,7 @@ class WorkspaceRagService:
         try:
             resolved = Path(path).expanduser().resolve(strict=False)
         except (OSError, RuntimeError):
+            _LOG.warning("services.rag_service.WorkspaceRagService._path_key: handled (OSError, RuntimeError); continuing with fallback", exc_info=True)
             resolved = Path(path).expanduser()
         return os.path.normcase(os.path.normpath(str(resolved)))
 
@@ -165,6 +168,7 @@ class WorkspaceRagService:
                 try:
                     signature = store.get_metadata("embedding_signature")
                 except sqlite3.Error:
+                    _LOG.warning("services.rag_service.WorkspaceRagService.search: handled sqlite3.Error; continuing with fallback", exc_info=True)
                     signature = None
                 if signature != embedder.name:
                     store.close()
@@ -205,6 +209,7 @@ class WorkspaceRagService:
         try:
             raw = store.get_metadata("last_indexed_at")
         except (sqlite3.Error, ValueError):
+            _LOG.warning("services.rag_service.WorkspaceRagService._is_due: handled (sqlite3.Error, ValueError); continuing with fallback", exc_info=True)
             return True
         finally:
             store.close()
@@ -213,6 +218,7 @@ class WorkspaceRagService:
         try:
             return (now if now is not None else time.time()) - float(raw) >= _DAY_SECONDS
         except ValueError:
+            _LOG.warning("services.rag_service.WorkspaceRagService._is_due: handled ValueError; continuing with fallback", exc_info=True)
             return True
 
     async def index_due(self, database: Any) -> None:

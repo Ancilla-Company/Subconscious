@@ -13,6 +13,8 @@ from websockets.asyncio.client import connect
 
 from .config import EngineConfig
 from .runtime import RuntimeInfo, RuntimeInfoReader
+import logging
+_LOG = logging.getLogger(__name__)
 
 
 class EngineClientError(RuntimeError):
@@ -374,6 +376,7 @@ async def hive_request(
     try:
         payload = response.json()
     except ValueError:
+        _LOG.warning("client.hive_request: handled ValueError; continuing with fallback", exc_info=True)
         payload = {}
     if response.is_error:
         message = payload.get("error") if isinstance(payload, dict) else None

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:core_business_logic/core_business_logic.dart' as core;
 import 'package:flutter/foundation.dart';
 
@@ -22,6 +24,12 @@ final class EngineChatMessage {
   /// Name of the hive node that produced this message, when known (shown as
   /// a badge on assistant messages).
   String? ranOn;
+
+  /// Time the response took and tokens used (estimated when the engine does
+  /// not report usage).
+  Duration? elapsed;
+  int? tokens;
+  bool tokensEstimated = false;
 
   String get text => _text;
 
@@ -110,6 +118,7 @@ final class EngineLlmProvider extends ChangeNotifier {
       // Older engines or restricted routes: the badge relies on task.status.
     }
   }
+
   final List<EngineChatMessage> _history = <EngineChatMessage>[];
   final Map<EngineChatMessage, DateTime?> _timestamps =
       <EngineChatMessage, DateTime?>{};
@@ -134,6 +143,10 @@ final class EngineLlmProvider extends ChangeNotifier {
   }
 
   void replaceEngineHistory(Iterable<core.ChatMessage> messages) {
+    // Responses still streaming are not stored yet; keep them across a refresh.
+    final Map<EngineChatMessage, DateTime?> live = <EngineChatMessage, DateTime?>{
+      for (final EngineChatMessage message in _live) message: _timestamps[message],
+    };
     _history.clear();
     _timestamps.clear();
     for (final core.ChatMessage message in messages) {
@@ -147,6 +160,10 @@ final class EngineLlmProvider extends ChangeNotifier {
         _history.add(converted);
         _timestamps[converted] = message.createdAt;
       }
+    }
+    for (final MapEntry<EngineChatMessage, DateTime?> entry in live.entries) {
+      _history.add(entry.key);
+      _timestamps[entry.key] = entry.value;
     }
     notifyListeners();
   }
@@ -177,25 +194,135 @@ final class EngineLlmProvider extends ChangeNotifier {
     response.ranOn = executorLabel;
     _history.add(response);
     _timestamps[response] = DateTime.now();
+    _live.add(response);
     notifyListeners();
     try {
+      final Stopwatch watch = Stopwatch()..start();
+      Map<String, dynamic>? doneData;
       await for (final String delta in _stream(
         prompt,
         fileContext: fileContext,
+        onDone: (Map<String, dynamic> data) => doneData = data,
       )) {
         response.append(delta);
         notifyListeners();
         yield delta;
       }
+      watch.stop();
+      final Object? elapsedMs = doneData?['elapsed_ms'];
+      response.elapsed = elapsedMs is num
+          ? Duration(milliseconds: elapsedMs.toInt())
+          : watch.elapsed;
+      final int? total = _totalTokens(doneData);
+      final bool reported = total != null && total > 0;
+      response.tokens = reported ? total : (response.text.length / 4).ceil();
+      response.tokensEstimated = !reported;
+      notifyListeners();
     } on Object {
       _history.remove(response);
       _timestamps.remove(response);
       notifyListeners();
       rethrow;
+    } finally {
+      _live.remove(response);
     }
   }
 
-  Stream<String> _stream(String prompt, {core.ChatFileContext? fileContext}) {
+  final List<EngineChatMessage> _live = <EngineChatMessage>[];
+  StreamSubscription<String>? _turnSubscription;
+  Completer<void>? _turnCompletion;
+
+  /// Last failure of a turn that ran without a panel attached to report it.
+  Object? lastError;
+
+  /// True while a turn is running. It keeps running when the user opens
+  /// another thread; the panel reattaches to the same provider on return.
+  bool get isBusy => _turnSubscription != null;
+
+  /// Starts a turn that this provider owns, so it survives the panel going
+  /// away. Completes when the turn ends and fails if the turn failed.
+  Future<void> runTurn(String prompt, {core.ChatFileContext? fileContext}) {
+    final Completer<void> completion = Completer<void>();
+    lastError = null;
+    late final StreamSubscription<String> subscription;
+    subscription = sendMessageStream(prompt, fileContext: fileContext).listen(
+      (_) {
+        // Notifications from sendMessageStream redraw the streaming response.
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        lastError = error;
+        if (!completion.isCompleted) completion.completeError(error, stackTrace);
+      },
+      onDone: () {
+        if (!completion.isCompleted) completion.complete();
+      },
+      cancelOnError: true,
+    );
+    _turnSubscription = subscription;
+    _turnCompletion = completion;
+    unawaited(
+      completion.future.then<void>((_) {}, onError: (_) {}).whenComplete(() {
+        if (identical(_turnSubscription, subscription)) {
+          _turnSubscription = null;
+          _turnCompletion = null;
+        }
+        unawaited(subscription.cancel());
+        notifyListeners();
+      }),
+    );
+    notifyListeners();
+    return completion.future;
+  }
+
+  /// Stops the running turn (the engine cancels it and keeps partial text).
+  Future<void> cancelTurn() async {
+    final StreamSubscription<String>? subscription = _turnSubscription;
+    final Completer<void>? completion = _turnCompletion;
+    if (subscription == null) return;
+    await subscription.cancel();
+    if (completion != null && !completion.isCompleted) completion.complete();
+  }
+
+  @override
+  void dispose() {
+    unawaited(cancelTurn());
+    super.dispose();
+  }
+
+  /// Sends a message while a turn is running. The engine injects it into the
+  /// running agent; if it arrives too late the engine answers it as a
+  /// follow-up turn on the same stream. Returns false when it cannot be sent.
+  bool sendSteeringMessage(String prompt, {void Function(Object error)? onError}) {
+    final String? thread = threadUuid;
+    if (thread == null || executorNodeId != null) return false;
+    final EngineChatMessage user = EngineChatMessage.user(prompt);
+    _history.add(user);
+    _timestamps[user] = DateTime.now();
+    notifyListeners();
+    EngineChatMessage? response;
+    repository
+        .streamChat(content: prompt, threadUuid: thread, modelId: modelId)
+        .listen(
+          (String delta) {
+            // Deltas only arrive when the message became a follow-up turn.
+            if (response == null) {
+              response = EngineChatMessage.assistant()..ranOn = executorLabel;
+              _history.add(response!);
+              _timestamps[response!] = DateTime.now();
+            }
+            response!.append(delta);
+            notifyListeners();
+          },
+          onError: (Object error) => onError?.call(error),
+        );
+    return true;
+  }
+
+  Stream<String> _stream(
+    String prompt, {
+    core.ChatFileContext? fileContext,
+    void Function(Map<String, dynamic>)? onDone,
+  }) {
     final String? executor = executorNodeId;
     if (executor == null) {
       return repository.streamChat(
@@ -258,4 +385,20 @@ final class EngineLlmProvider extends ChangeNotifier {
       rethrow;
     }
   }
+}
+
+int? _totalTokens(Map<String, dynamic>? data) {
+  if (data == null) return null;
+  final Object? usage = data['usage'] is Map ? data['usage'] : data;
+  if (usage is! Map) return null;
+  int? read(String key) {
+    final Object? v = usage[key];
+    return v is num ? v.toInt() : null;
+  }
+
+  final int? total = read('total_tokens') ?? read('totalTokens');
+  if (total != null) return total;
+  final int? input = read('input_tokens') ?? read('prompt_tokens');
+  final int? output = read('output_tokens') ?? read('completion_tokens');
+  return input == null && output == null ? null : (input ?? 0) + (output ?? 0);
 }

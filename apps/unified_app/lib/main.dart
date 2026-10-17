@@ -6,7 +6,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import 'features/account/account_controller.dart';
+import 'features/connection/engine_bootstrap.dart';
 import 'features/connection/engine_connection_resolver.dart';
+import 'features/connection/engine_launcher.dart';
 import 'features/dashboard/controller/dashboard_controller.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'features/dashboard/presentation/window_composition_bar.dart';
@@ -26,6 +28,22 @@ Future<void> main() async {
       ? 'subconscious-dev-token'
       : '';
   final Uri? explicitEndpoint = _configuredEngineEndpoint(preferDev: preferDev);
+  // Production desktop builds start the packaged engine when none is
+  // running. Development builds (SUBCONSCIOUS_ENGINE_DEV=true) never do.
+  final EngineBootstrap? engineBootstrap = _hasLocalEngine
+      ? EngineBootstrap(
+          preferDev: preferDev,
+          hasExplicitEndpoint: explicitEndpoint != null,
+          engineLogPath: _engineLogPath(),
+          isEngineHealthy: () async =>
+              await discoverLocalEnginePort(preferDev: false) != null,
+          launcher: PlatformEngineLauncher(
+            executableOverride: const String.fromEnvironment(
+              'SUBCONSCIOUS_ENGINE_EXE',
+            ),
+          ),
+        )
+      : null;
   final DashboardController controller = DashboardController(
     ({Uri? explicitEndpoint, String? explicitToken}) => resolveEngineRepository(
       explicitEndpoint: explicitEndpoint,
@@ -34,6 +52,11 @@ Future<void> main() async {
     ),
     initialEndpoint: explicitEndpoint,
     initialToken: token,
+    engineStartup: engineBootstrap == null
+        ? null
+        : () async {
+            await engineBootstrap.ensureRunning();
+          },
     executors: HiveRuntime.shared,
     initialWorkspaceUuid: const String.fromEnvironment(
       'SUBCONSCIOUS_WORKSPACE_UUID',
@@ -53,6 +76,16 @@ Future<void> main() async {
       accountController: accountController,
     ),
   );
+}
+
+/// Where the packaged engine writes its log, or null when unknown.
+String? _engineLogPath() {
+  final String? directory = engineDataDirectory(preferDev: false);
+  if (directory == null) return null;
+  final String separator = defaultTargetPlatform == TargetPlatform.windows
+      ? r'\'
+      : '/';
+  return '$directory${separator}logs${separator}engine.log';
 }
 
 Future<void> _loadEngineAndRestoreAccount(

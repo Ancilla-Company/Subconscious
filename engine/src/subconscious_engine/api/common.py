@@ -5,6 +5,8 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+import logging
+_LOG = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -28,6 +30,7 @@ async def parse_request(request: Request, model: type[T]) -> T | Response:
     try:
         return model.model_validate(await request.json())
     except (ValidationError, ValueError) as error:
+        _LOG.warning("api.common.parse_request: handled (ValidationError, ValueError); continuing with fallback", exc_info=True)
         return JSONResponse({"error": "Invalid request body.", "details": str(error)}, 400)
 
 

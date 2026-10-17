@@ -15,6 +15,8 @@ from typing import Any, Protocol
 from cryptography.fernet import Fernet
 
 from .errors import ModelConfigurationStoreError
+import logging
+_LOG = logging.getLogger(__name__)
 
 SERVICE_NAME = "subconscious"
 USER_NAME = "encryption_key"
@@ -113,6 +115,7 @@ class DpapiFernetKeyProvider:
                     try:
                         key = self._legacy_key_reader()
                     except Exception as error:
+                        _LOG.exception("configuration.key_provider.DpapiFernetKeyProvider.get_or_create_key: handled Exception; continuing with fallback")
                         legacy_error = error
                         key = None
 
@@ -189,11 +192,13 @@ class DpapiFernetKeyProvider:
                 try:
                     os.close(descriptor)
                 except OSError:
+                    _LOG.warning("configuration.key_provider.DpapiFernetKeyProvider._write_key_file: handled OSError; continuing with fallback", exc_info=True)
                     pass
             if temporary_path is not None:
                 try:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
+                    _LOG.warning("configuration.key_provider.DpapiFernetKeyProvider._write_key_file: handled OSError; continuing with fallback", exc_info=True)
                     pass
 
 

@@ -15,10 +15,10 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from typing import Any
 
 from .channels import ChannelError, Envelope
+from ..logging_setup import logged_suppress, spawn_logged
 
 DIRECT_TIER = "direct"
 RELAY_TIER = "ws-relay"
@@ -94,7 +94,7 @@ class SwitchableLink:
         def retire() -> None:
             if holder:
                 self._timers.discard(holder[0])
-            task = asyncio.ensure_future(self._close_inner(previous))
+            task = spawn_logged(self._close_inner(previous))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
@@ -104,7 +104,7 @@ class SwitchableLink:
 
     @staticmethod
     async def _close_inner(inner: Any) -> None:
-        with suppress(Exception):
+        with logged_suppress(Exception):
             await inner.close()
 
     def inner_closed(self, inner: Any) -> None:

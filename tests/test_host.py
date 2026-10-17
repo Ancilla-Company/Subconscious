@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager, suppress
 import ipaddress
 import json
 import socket
+import sys
 from unittest.mock import patch
 
 import httpx
@@ -10,7 +11,7 @@ import pytest
 
 from subconscious_engine import __version__
 from subconscious_engine.config import EngineConfig
-from subconscious_engine.host import EngineHost
+from subconscious_engine.host import EngineAlreadyRunningError, EngineHost
 
 
 class FakeIndicator:
@@ -175,6 +176,47 @@ def test_port_conflict_fails_without_publishing_runtime_file(tmp_path):
         assert not (tmp_path / "runtime.json").exists()
     finally:
         blocker.close()
+
+
+def test_second_engine_on_same_port_raises_and_keeps_first_runtime_file(tmp_path):
+    async def scenario():
+        first = EngineHost(
+            EngineConfig(port=0, data_directory=tmp_path / "a", headless=True)
+        )
+        async with running_host(first):
+            runtime_path = tmp_path / "a" / "runtime.json"
+            before = runtime_path.read_text(encoding="utf-8")
+            second = EngineHost(
+                EngineConfig(
+                    port=first.bound_port, data_directory=tmp_path / "b", headless=True
+                )
+            )
+            with pytest.raises(EngineAlreadyRunningError) as caught:
+                await asyncio.wait_for(second.serve(), 10)
+            assert caught.value.port == first.bound_port
+            assert runtime_path.read_text(encoding="utf-8") == before
+            assert not (tmp_path / "b" / "runtime.json").exists()
+
+    run(scenario())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="exclusive bind is Windows-only")
+def test_windows_bind_is_exclusive_against_reuseaddr_listener(tmp_path):
+    other = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    other.bind(("127.0.0.1", 0))
+    other.listen(1)
+    try:
+        host = EngineHost(
+            EngineConfig(
+                port=other.getsockname()[1], data_directory=tmp_path, headless=True
+            )
+        )
+        with pytest.raises(EngineAlreadyRunningError):
+            run(host.serve())
+        assert not (tmp_path / "runtime.json").exists()
+    finally:
+        other.close()
 
 
 def test_runtime_write_failure_stops_server_and_closes_listener(tmp_path):

@@ -15,6 +15,7 @@ from subconscious_engine.configuration import EncryptedModelConfigurationStore
 from subconscious_engine.configuration.key_provider import (
     SERVICE_NAME as _ENCRYPTION_KEYRING_SERVICE,
 )
+_LOG = logging.getLogger(__name__)
 
 DEFAULT_ACCOUNT_SERVER_URL = "https://api.subconscious.chat"
 _LOGGER = logging.getLogger("uvicorn.error")
@@ -100,6 +101,7 @@ class KeyringRefreshTokenStore:
             keyring.delete_password(_KEYRING_SERVICE, _KEYRING_USER)
         except PasswordDeleteError:
             # There is no local session to clear.
+            _LOG.warning("account.KeyringRefreshTokenStore.delete: handled PasswordDeleteError; continuing with fallback", exc_info=True)
             pass
         except Exception as error:
             raise AccountError(
@@ -151,6 +153,7 @@ class ResilientRefreshTokenStore:
         try:
             fallback_token = self._fallback.read()
         except AccountError:
+            _LOG.warning("account.ResilientRefreshTokenStore.read: handled AccountError; continuing with fallback", exc_info=True)
             fallback_token = None
         return fallback_token or self._primary.read()
 
@@ -158,12 +161,14 @@ class ResilientRefreshTokenStore:
         try:
             self._primary.write(token)
         except AccountError:
+            _LOG.warning("account.ResilientRefreshTokenStore.write: handled AccountError; continuing with fallback", exc_info=True)
             self._fallback.write(token)
         else:
             try:
                 self._fallback.delete()
             except AccountError:
                 # A stale fallback does not invalidate the keyring-backed session.
+                _LOG.warning("account.ResilientRefreshTokenStore.write: handled AccountError; continuing with fallback", exc_info=True)
                 pass
 
     def delete(self) -> None:
@@ -172,6 +177,7 @@ class ResilientRefreshTokenStore:
             try:
                 store.delete()
             except AccountError as error:
+                _LOG.warning("account.ResilientRefreshTokenStore.delete: handled AccountError; continuing with fallback", exc_info=True)
                 errors.append(error)
         if len(errors) == 2:
             raise errors[0]
@@ -399,6 +405,7 @@ class AccountSessionService:
                 await self._server.logout(refresh_token)
             except AccountError:
                 # The local credential is already gone, so the server session will expire.
+                _LOG.warning("account.AccountSessionService.logout: handled AccountError; continuing with fallback", exc_info=True)
                 pass
 
     async def _refresh_user(self) -> AccountUser:
@@ -451,6 +458,7 @@ def _error_message(response: httpx.Response) -> str:
     try:
         value = response.json()
     except ValueError:
+        _LOG.warning("account._error_message: handled ValueError; continuing with fallback", exc_info=True)
         value = None
     if isinstance(value, dict):
         for key in ("message", "error", "detail"):

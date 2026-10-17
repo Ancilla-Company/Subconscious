@@ -47,6 +47,7 @@ from .ops import (
     sign_op,
     verify_op,
 )
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 SCHEMA_VERSION = 1
@@ -91,6 +92,7 @@ def parse_datetime(value: Any) -> datetime | None:
     try:
         return to_naive_utc(datetime.fromisoformat(value))
     except ValueError:
+        _LOG.warning("hive.sync.engine.parse_datetime: handled ValueError; continuing with fallback", exc_info=True)
         return None
 
 
@@ -530,6 +532,7 @@ class SyncEngine:
         try:
             self.clock.observe(op.hlc)
         except (ClockSkewError, InvalidStamp):
+            _LOG.warning("hive.sync.engine.SyncEngine._apply_one: handled (ClockSkewError, InvalidStamp); continuing with fallback", exc_info=True)
             report.rejected.append((op, "clock_skew"))
             return
         session.add(SyncLog(
@@ -539,6 +542,7 @@ class SyncEngine:
         try:
             missing = await self._apply_entity(session, op)
         except OpError as error:
+            _LOG.warning("hive.sync.engine.SyncEngine._apply_one: handled OpError; continuing with fallback", exc_info=True)
             report.rejected.append((op, str(error)))
             await self._advance(session, op.origin)
             return

@@ -1,6 +1,9 @@
 """Helpers for the redacted ``/models`` catalog."""
 
+import asyncio
 from collections.abc import Iterable
+
+from subconscious_engine.capabilities import CapabilityResolver, ModelCapabilities
 
 from .models import ModelConfigurationDto, ModelDto
 
@@ -10,6 +13,7 @@ ECHO_MODEL = ModelDto(
     name="Echo (dev)",
     provider="subconscious",
     description="Echoes the last user message back; no credentials required.",
+    capabilities=ModelCapabilities(chat=True, sources=["builtin"]),
 )
 
 
@@ -27,6 +31,21 @@ def build_model_catalog(configurations: Iterable[ModelConfigurationDto]) -> list
     ]
     result.append(ECHO_MODEL)
     return result
+
+
+async def build_model_catalog_with_capabilities(
+    configurations: Iterable[ModelConfigurationDto], resolver: CapabilityResolver
+) -> list[ModelDto]:
+    """The catalog with each model's resolved capabilities attached."""
+
+    items = list(configurations)
+    resolved = await asyncio.gather(
+        *(resolver.resolve(item.provider, item.model, item.capabilities) for item in items)
+    )
+    return [
+        model.model_copy(update={"capabilities": capabilities})
+        for model, capabilities in zip(build_model_catalog(items)[: len(items)], resolved)
+    ] + [ECHO_MODEL]
 
 
 async def model_catalog(store: object) -> list[ModelDto]:

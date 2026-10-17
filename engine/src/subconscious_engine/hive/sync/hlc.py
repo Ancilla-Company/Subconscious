@@ -10,6 +10,8 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+import logging
+_LOG = logging.getLogger(__name__)
 
 MAX_DRIFT_MS = 5 * 60 * 1000
 _MAX_COUNTER = 99_999
@@ -63,6 +65,7 @@ class HybridClock:
             try:
                 self._ms, self._counter = parse_stamp(last)
             except InvalidStamp:
+                _LOG.warning("hive.sync.hlc.HybridClock.__init__: handled InvalidStamp; continuing with fallback", exc_info=True)
                 pass
 
     @property

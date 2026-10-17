@@ -1,8 +1,9 @@
 """ Pydantic AI model construction, history conversion, and approval resumption """
 
 import os
+from contextvars import ContextVar
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Awaitable, Callable, Sequence
 
 from pydantic_ai.models import Model
@@ -33,6 +34,28 @@ from subconscious_engine.configuration.models import ModelConfig
 # Variable setup
 ApprovalCallback = Callable[[Any], Awaitable[bool]]
 AgentEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+SteeringSource = Callable[[], Awaitable[list[str]]]
+
+# Set by the transport for the running turn. Returns user messages that arrived while
+# the agent was working; they are injected before the next model request.
+steering_source: ContextVar[SteeringSource | None] = ContextVar("steering_source", default=None)
+
+
+def _steering_processor(source: SteeringSource):
+    async def inject(messages: list[ModelMessage]) -> list[ModelMessage]:
+        texts = await source()
+        if not texts:
+            return messages
+        part = UserPromptPart(content=(
+            "The user sent additional input while you were working. "
+            "Take it into account and continue the task:\n\n" + "\n\n".join(texts)))
+        out = list(messages)
+        if out and isinstance(out[-1], ModelRequest):
+            out[-1] = replace(out[-1], parts=[*out[-1].parts, part])
+        else:
+            out.append(ModelRequest(parts=[part]))
+        return out
+    return inject
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +82,10 @@ class AgentManager:
             return AgentExecutionResult(text, [])
         model = self._model(config)
         resolved_prompt = system_prompt if system_prompt is not None else config.system_prompt
+        source = steering_source.get()
         agent = Agent(model, output_type=[str, DeferredToolRequests],
-                      system_prompt=resolved_prompt or (), tools=tools)
+                      system_prompt=resolved_prompt or (), tools=tools,
+                      history_processors=[_steering_processor(source)] if source else None)
         messages = self._history(history)
         deferred: DeferredToolResults | None = None
         user_prompt: str | Sequence[Any] | None = prompt

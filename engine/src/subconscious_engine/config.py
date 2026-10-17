@@ -143,6 +143,9 @@ class EngineConfig:
     subconscious_enabled: bool = True
     reflection_interval_seconds: float = 86_400
     account_server_url: str | None = None
+    # Optional model capability service; see capabilities.RemoteCapabilitySource.
+    capabilities_url: str | None = None
+    capabilities_token: str | None = None
     hive: HiveConfig = HiveConfig()
 
     @property

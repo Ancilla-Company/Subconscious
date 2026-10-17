@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import suppress
 from typing import Any
 
 from subconscious_engine.auth import PeerPrincipal
@@ -24,6 +23,7 @@ from .session import PeerSession
 from .sync.engine import SyncEngine
 from .sync.protocol import SyncCoordinator
 from .tasks import PEER_EVENT_FRAMES, HiveContext, TaskManager
+from ..logging_setup import logged_suppress, spawn_logged
 
 _LOGGER = logging.getLogger("uvicorn.error")
 
@@ -38,13 +38,13 @@ class PeerRuntime:
         self.tasks: set[asyncio.Task[Any]] = set()
 
     def rpc(self, envelope: Envelope) -> None:
-        task = asyncio.ensure_future(self._rpc(envelope))
+        task = spawn_logged(self._rpc(envelope))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
     async def _rpc(self, envelope: Envelope) -> None:
         response = await self.tunnel.handle(envelope)
-        with suppress(Exception):
+        with logged_suppress(Exception):
             await self.link.send("rpc", response)
 
     async def stop(self) -> None:
@@ -184,7 +184,7 @@ class HiveNode(HiveContext):
             service.on_link_closed(node_id)
 
     def _spawn(self, coro: Any) -> None:
-        task = asyncio.ensure_future(coro)
+        task = spawn_logged(coro)
         self._background.add(task)
         task.add_done_callback(self._background.discard)
         task.add_done_callback(_log_failure)

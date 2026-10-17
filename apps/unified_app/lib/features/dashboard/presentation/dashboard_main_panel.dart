@@ -730,7 +730,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             value: value,
             child: _workspaceModelLabel(value),
           ),
-        for (final ModelInfo model in _models)
+        for (final ModelInfo model in _models.where((ModelInfo m) => m.isChatModel))
           DropdownMenuItem<String>(
             value: model.id,
             child: _workspaceModelLabel(model.name),

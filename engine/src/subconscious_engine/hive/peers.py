@@ -20,7 +20,6 @@ import logging
 import secrets
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -43,6 +42,8 @@ from .identity import (
 )
 from .relay import RateLimiter, RelayManager, RelaySender, RelaySession
 from .switchable import DIRECT_TIER, RELAY_TIER, SwitchableLink
+from ..logging_setup import logged_suppress, spawn_logged
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 FRESHNESS_WINDOW_SECONDS = 60.0
@@ -272,7 +273,7 @@ class PeerManager:
             remote = self._directory.trusted_node(node_id)
             if remote is None or role_for_kind(remote.kind) is None:
                 raise ConnectionError("That node is not a trusted member of this hive.")
-            pending = asyncio.ensure_future(self._ladder(node_id))
+            pending = spawn_logged(self._ladder(node_id))
             pending.add_done_callback(_mark_retrieved)
             self._ladders[node_id] = pending
             pending.add_done_callback(lambda f, n=node_id: self._ladders.pop(n, None) if self._ladders.get(n) is f else None)
@@ -319,6 +320,7 @@ class PeerManager:
         try:
             config = await self._ice_provider()
         except Exception:
+            _LOG.exception("hive.peers.PeerManager._relay_allowed: handled Exception; continuing with fallback")
             return False
         return isinstance(config, dict) and config.get("ws_relay_enabled") is True
 
@@ -396,7 +398,7 @@ class PeerManager:
             or self.is_polite(node_id)
         ):
             return
-        task = asyncio.ensure_future(self._upgrade_loop(node_id, link))
+        task = spawn_logged(self._upgrade_loop(node_id, link))
         self._upgrades[node_id] = task
         task.add_done_callback(
             lambda t, n=node_id: self._upgrades.pop(n, None) if self._upgrades.get(n) is t else None
@@ -414,6 +416,7 @@ class PeerManager:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                _LOG.exception("hive.peers.PeerManager._upgrade_loop: handled Exception; continuing with fallback")
                 wait = min(wait * 2, self._upgrade_max_interval)
 
     async def handle_signal(self, data: dict[str, Any]) -> None:
@@ -470,7 +473,7 @@ class PeerManager:
         for task in list(self._tasks):
             task.cancel()
         for task in list(self._tasks):
-            with suppress(asyncio.CancelledError, Exception):
+            with logged_suppress(asyncio.CancelledError, Exception):
                 await task
 
     # --- internals ------------------------------------------------------------
@@ -478,12 +481,12 @@ class PeerManager:
         return self._locks.setdefault(node_id, asyncio.Lock())
 
     def _spawn(self, coro: Awaitable[Any]) -> None:
-        task = asyncio.ensure_future(coro)
+        task = spawn_logged(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
     async def _safe_connect(self, node_id: str) -> None:
-        with suppress(Exception):
+        with logged_suppress(Exception):
             await self.connect(node_id)
 
     async def _rtc_configuration(self) -> Any:
@@ -548,7 +551,7 @@ class PeerManager:
             if pc.connectionState in {"failed", "closed"}:
                 self._spawn(self._teardown(attempt, pc.connectionState, notify=False))
 
-        attempt.timeout = asyncio.ensure_future(self._expire(attempt))
+        attempt.timeout = spawn_logged(self._expire(attempt))
         self._attempts[remote.id] = attempt
         return attempt
 
@@ -726,6 +729,7 @@ class PeerManager:
                 Envelope(frame_type, data, None, self._identity.node_id, attempt.remote.id)
             )
         except ChannelError:
+            _LOG.warning("hive.peers.PeerManager._send_control: handled ChannelError; continuing with fallback", exc_info=True)
             await self._teardown(attempt, "failed")
 
     def _on_envelope(self, attempt: _Attempt, channel: str, envelope: Envelope) -> None:
@@ -809,9 +813,9 @@ class PeerManager:
         if attempt.timeout is not None and attempt.timeout is not asyncio.current_task():
             attempt.timeout.cancel()
         if notify and not self._closed_quietly:
-            with suppress(Exception):
+            with logged_suppress(Exception):
                 await self._signaler.send_signal(attempt.sid, remote_id, "bye", {}, None)
-        with suppress(Exception):
+        with logged_suppress(Exception):
             await attempt.pc.close()
         if settle and not attempt.ready.done():
             attempt.ready.set_exception(ConnectionError(f"Peer connection {reason}."))

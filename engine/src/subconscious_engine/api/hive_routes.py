@@ -7,6 +7,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from subconscious_engine.hive.errors import HiveError
+import logging
+_LOG = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # the service imports the API layer, so avoid a runtime cycle
     from subconscious_engine.hive.service import HiveService
@@ -20,6 +22,7 @@ async def _body(request: Request) -> dict[str, Any]:
     try:
         value = await request.json()
     except ValueError:
+        _LOG.warning("api.hive_routes._body: handled ValueError; continuing with fallback", exc_info=True)
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -49,6 +52,7 @@ async def enroll(request: Request) -> Response:
     try:
         return JSONResponse(await service.enroll(invite if isinstance(invite, str) else None))
     except HiveError as error:
+        _LOG.warning("api.hive_routes.enroll: handled HiveError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
 
 
@@ -59,6 +63,7 @@ async def create_invite(request: Request) -> Response:
     try:
         return JSONResponse(await service.create_invite())
     except HiveError as error:
+        _LOG.warning("api.hive_routes.create_invite: handled HiveError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
 
 
@@ -72,6 +77,7 @@ async def approve_node(request: Request) -> Response:
     try:
         await service.approve(request.path_params["node_id"], sas)
     except HiveError as error:
+        _LOG.warning("api.hive_routes.approve_node: handled HiveError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
     return JSONResponse({"approved": True})
 
@@ -83,6 +89,7 @@ async def revoke_node(request: Request) -> Response:
     try:
         await service.revoke(request.path_params["node_id"])
     except HiveError as error:
+        _LOG.warning("api.hive_routes.revoke_node: handled HiveError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
     return JSONResponse({"revoked": True})
 
@@ -95,6 +102,7 @@ async def list_tasks(request: Request) -> Response:
     try:
         limit = int(params.get("limit", "100"))
     except ValueError:
+        _LOG.warning("api.hive_routes.list_tasks: handled ValueError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": "limit must be a number."}, 400)
     tasks = await manager.list_tasks(
         status=params.get("status") or None, thread_uuid=params.get("thread_uuid") or None, limit=limit)
@@ -115,12 +123,14 @@ async def put_remote_tools(request: Request) -> Response:
     try:
         value = await request.json()
     except ValueError:
+        _LOG.warning("api.hive_routes.put_remote_tools: handled ValueError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": "The request body must be a JSON object."}, 400)
     if not isinstance(value, dict):
         return JSONResponse({"error": "The request body must be a JSON object."}, 400)
     try:
         return JSONResponse(service.update(value))
     except ValueError as error:
+        _LOG.warning("api.hive_routes.put_remote_tools: handled ValueError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": str(error)}, 400)
 
 

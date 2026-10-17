@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from subconscious_engine.account import AccountError, AccountSessionService, AccountUser
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 
@@ -32,6 +33,7 @@ async def _body(request: Request) -> dict[str, Any] | None:
     try:
         value = await request.json()
     except ValueError:
+        _LOG.warning("api.account_routes._body: handled ValueError; continuing with fallback", exc_info=True)
         return None
     return value if isinstance(value, dict) else None
 
@@ -48,6 +50,7 @@ async def get_session(request: Request) -> Response:
     try:
         return _session_response(await _service(request).restore())
     except AccountError as error:
+        _LOG.warning("api.account_routes.get_session: handled AccountError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
 
 
@@ -78,6 +81,7 @@ async def request_signup_code(request: Request) -> Response:
         notice = await _service(request).request_signup_code(email)
         return JSONResponse({"notice": notice})
     except AccountError as error:
+        _LOG.warning("api.account_routes.request_signup_code: handled AccountError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
 
 
@@ -97,6 +101,7 @@ async def complete_signup(request: Request) -> Response:
         )
         return _session_response(user)
     except AccountError as error:
+        _LOG.warning("api.account_routes.complete_signup: handled AccountError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
 
 
@@ -104,6 +109,7 @@ async def logout(request: Request) -> Response:
     try:
         await _service(request).logout()
     except AccountError as error:
+        _LOG.warning("api.account_routes.logout: handled AccountError; continuing with fallback", exc_info=True)
         return JSONResponse({"error": error.message}, error.status_code)
     return _session_response(None)
 

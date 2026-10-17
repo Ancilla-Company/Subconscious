@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../../editor/presentation/markdown/markdown_preview.dart';
 import '../../hive/executor_selection.dart';
+import '../../voice/voice_controller.dart';
 import '../engine_llm_provider.dart';
 import 'executor_widgets.dart';
 import '../../settings/presentation/settings_main_panel.dart';
@@ -73,6 +74,7 @@ final class EngineChatPanel extends StatefulWidget {
 
 final class _EngineChatPanelState extends State<EngineChatPanel> {
   late final TextEditingController _composer;
+  late final VoiceController _voice;
   final FocusNode _composerFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   List<ModelInfo> _models = const <ModelInfo>[];
@@ -82,19 +84,22 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   Timer? _tagSearchDebounce;
   int _tagSearchVersion = 0;
   String? _workspaceDefaultModelId;
-  bool _isSending = false;
+  bool _isStarting = false;
   bool _isUpdatingModel = false;
   bool _showThreadSettings = false;
   int _modelLoadVersion = 0;
   int _modelUpdateVersion = 0;
   int _workspaceDefaultLoadVersion = 0;
-  StreamSubscription<String>? _sendSubscription;
-  Completer<void>? _sendCompletion;
 
   @override
   void initState() {
     super.initState();
     _composer = _ComposerTextController()..addListener(_onComposerChanged);
+    _voice = VoiceController(repository: () => widget.provider.repository)
+      ..onError = (String message) {
+        if (mounted) _showErrorToast(context, message);
+      }
+      ..addListener(_onVoiceChanged);
     _workspaceDefaultModelId = _normalizedModelId(
       widget.workspace?.defaultModelId,
     );
@@ -108,6 +113,14 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     if (widget.isComposerEnabled) unawaited(_loadModels());
     _bindExecutors();
     _scheduleScrollToBottom();
+    // A turn that failed while another thread was open reports here.
+    final Object? missed = widget.provider.lastError;
+    if (missed != null && !widget.provider.isBusy) {
+      widget.provider.lastError = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showErrorToast(context, "Couldn't send the message: $missed");
+      });
+    }
   }
 
   /// Applies the stored per thread executor choice and name lookup.
@@ -163,7 +176,6 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       }
     }
     if (oldWidget.provider != widget.provider) {
-      unawaited(_cancelActiveSend());
       _modelUpdateVersion++;
       oldWidget.provider.removeListener(_onProviderChanged);
       widget.provider.addListener(_onProviderChanged);
@@ -189,6 +201,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
           .listModels();
       if (!mounted || version != _modelLoadVersion) return;
       setState(() => _models = loaded);
+      _voice.models = loaded;
     } on Object catch (error) {
       if (!mounted || version != _modelLoadVersion) return;
       _showErrorToast(context, "Couldn't load models: $error");
@@ -250,6 +263,56 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       if (mounted && version == _modelUpdateVersion) {
         setState(() => _isUpdatingModel = false);
       }
+    }
+  }
+
+  void _onVoiceChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Records a prompt, then appends its transcript to the composer.
+  Future<void> _toggleDictation() async {
+    if (_voice.dictation == DictationState.recording) {
+      final String? text = await _voice.finishDictation();
+      if (text == null || text.trim().isEmpty || !mounted) return;
+      final String current = _composer.text;
+      final String joined = current.isEmpty || current.endsWith(' ')
+          ? '$current${text.trim()}'
+          : '$current ${text.trim()}';
+      _composer.value = TextEditingValue(
+        text: joined,
+        selection: TextSelection.collapsed(offset: joined.length),
+      );
+      _composerFocusNode.requestFocus();
+    } else {
+      await _voice.startDictation();
+    }
+  }
+
+  /// Starts or ends a realtime voice conversation in this thread.
+  Future<void> _toggleRealtime() async {
+    if (_voice.realtime != RealtimeState.off) {
+      await _voice.stopRealtime();
+      return;
+    }
+    try {
+      EngineLlmProvider provider = widget.provider;
+      if (widget.thread == null) {
+        final MaterializeThreadDraftCallback? materialize =
+            widget.onMaterializeThreadDraft;
+        if (materialize == null) {
+          throw StateError('The draft thread cannot be created.');
+        }
+        provider = await materialize('Voice conversation');
+      }
+      final String? thread = provider.threadUuid;
+      if (thread == null) throw StateError('The thread is not ready.');
+      await _voice.startRealtime(
+        threadUuid: thread,
+        agentModelId: provider.modelId,
+      );
+    } on Object catch (error) {
+      if (mounted) _showErrorToast(context, "Couldn't start voice: $error");
     }
   }
 
@@ -410,13 +473,34 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
         : _attachments.isNotEmpty
         ? 'Review the attached file${_attachments.length == 1 ? '' : 's'}.'
         : '';
-    if (!widget.isComposerEnabled || content.isEmpty || _isSending) return;
+    if (!widget.isComposerEnabled || content.isEmpty) return;
+    if (_isSending) {
+      // The agent is still working: guide the running turn instead of waiting.
+      if (typedContent.isEmpty) return;
+      final bool accepted = widget.provider.sendSteeringMessage(
+        content,
+        onError: (Object error) {
+          if (mounted) _showErrorToast(context, "Couldn't send the message: $error");
+        },
+      );
+      if (accepted) {
+        _clearComposerContext();
+        if (mounted) {
+          setState(() {
+            _fileSuggestions = const <WorkspaceFileMatch>[];
+            _tagQuery = null;
+          });
+        }
+        _scheduleScrollToBottom();
+      }
+      return;
+    }
     final ChatFileContext fileContext = ChatFileContext(
       activeFile: widget.activeFile,
       taggedFiles: _activeComposerReferences,
       attachments: List<ChatAttachment>.unmodifiable(_attachments),
     );
-    setState(() => _isSending = true);
+    setState(() => _isStarting = true);
     try {
       EngineLlmProvider provider = widget.provider;
       if (widget.thread == null) {
@@ -447,60 +531,46 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
           _tagQuery = null;
         });
       }
-      final Completer<void> completion = Completer<void>();
-      final StreamSubscription<String> subscription = provider
-          .sendMessageStream(content, fileContext: fileContext)
-          .listen(
-            (_) {
-              // Provider notifications redraw the streaming response.
-            },
-            onError: (Object error, StackTrace stackTrace) {
-              if (!completion.isCompleted) {
-                completion.completeError(error, stackTrace);
+      final Future<void> turn = provider.runTurn(
+        content,
+        fileContext: fileContext,
+      );
+      if (mounted) setState(() => _isStarting = false);
+      final Future<void> Function()? refreshActiveFile =
+          widget.onRefreshActiveFile;
+      // Do not hold the composer: the turn keeps running even if this panel
+      // is replaced by another thread.
+      unawaited(
+        turn.then<void>(
+          (_) async {
+            if (fileContext.activeFile != null && refreshActiveFile != null) {
+              try {
+                await refreshActiveFile();
+              } on Object {
+                // A successful turn should not fail because a preview refresh did.
               }
-            },
-            onDone: () {
-              if (!completion.isCompleted) completion.complete();
-            },
-            cancelOnError: true,
-          );
-      _sendSubscription = subscription;
-      _sendCompletion = completion;
-      try {
-        await completion.future;
-      } finally {
-        if (identical(_sendSubscription, subscription)) {
-          _sendSubscription = null;
-          _sendCompletion = null;
-        }
-        await subscription.cancel();
-      }
-      if (fileContext.activeFile != null &&
-          widget.onRefreshActiveFile != null) {
-        try {
-          await widget.onRefreshActiveFile!.call();
-        } on Object {
-          // A successful turn should not fail because a preview refresh did.
-        }
-      }
+            }
+          },
+          onError: (Object error) {
+            if (mounted) {
+              _showErrorToast(context, "Couldn't send the message: $error");
+            }
+          },
+        ),
+      );
     } on Object catch (error) {
       if (mounted) {
         _showErrorToast(context, "Couldn't send the message: $error");
       }
     } finally {
-      if (mounted) setState(() => _isSending = false);
+      if (mounted) setState(() => _isStarting = false);
       _scheduleScrollToBottom();
     }
   }
 
-  Future<void> _cancelActiveSend() async {
-    final StreamSubscription<String>? subscription = _sendSubscription;
-    final Completer<void>? completion = _sendCompletion;
-    _sendSubscription = null;
-    _sendCompletion = null;
-    await subscription?.cancel();
-    if (completion != null && !completion.isCompleted) completion.complete();
-  }
+  bool get _isSending => _isStarting || widget.provider.isBusy;
+
+  void _stopTurn() => unawaited(widget.provider.cancelTurn());
 
   void _createThread() {
     if (_showThreadSettings) setState(() => _showThreadSettings = false);
@@ -537,8 +607,10 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     _workspaceDefaultLoadVersion++;
     _tagSearchVersion++;
     _tagSearchDebounce?.cancel();
-    unawaited(_cancelActiveSend());
     widget.provider.removeListener(_onProviderChanged);
+    _voice
+      ..removeListener(_onVoiceChanged)
+      ..dispose();
     _composer
       ..removeListener(_onComposerChanged)
       ..dispose();
@@ -559,18 +631,20 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
           final double horizontalPadding = constraints.maxWidth > 770
               ? (constraints.maxWidth - 750) / 2
               : 10;
-          return Padding(
+          Widget gutter(Widget child) => Padding(
             padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
+            child: child,
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              gutter(
                 _ChatHeader(
                   title: widget.title?.trim().isNotEmpty ?? false
                       ? widget.title!
                       : 'New thread',
                   canCreateThread:
                       widget.isComposerEnabled &&
-                      !_isSending &&
                       widget.onCreateThread != null,
                   canEditThread:
                       (widget.isComposerEnabled || _showThreadSettings) &&
@@ -583,9 +657,11 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                   onCreateThread: _createThread,
                   onEditThread: _toggleThreadSettings,
                 ),
-                Expanded(
-                  child: _showThreadSettings && widget.workspace != null
-                      ? _ThreadSettingsPanel(
+              ),
+              Expanded(
+                child: _showThreadSettings && widget.workspace != null
+                    ? gutter(
+                        _ThreadSettingsPanel(
                           repository: widget.provider.repository,
                           workspace: widget.workspace!,
                           initialTitle: widget.title,
@@ -596,12 +672,20 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                           isDraft: widget.thread == null,
                           onCancel: _toggleThreadSettings,
                           onSave: _saveThreadSettings,
-                        )
-                      : messages.isEmpty
-                      ? const _EmptyChat()
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                        ),
+                      )
+                    : messages.isEmpty
+                    ? const _EmptyChat()
+                    : Scrollbar(
+                        controller: _scrollController,
+                        child: SelectionArea(child: ListView.builder(
+                            controller: _scrollController,
+                          padding: EdgeInsets.fromLTRB(
+                            horizontalPadding + 14,
+                            14,
+                            horizontalPadding + 14,
+                            10,
+                          ),
                           itemCount: messages.length,
                           itemBuilder: (BuildContext context, int index) =>
                               _MessageBubble(
@@ -611,23 +695,43 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                                 ),
                                 useNeutralUserBubbleForeground:
                                     widget.useNeutralUserBubbleForeground,
+                                onSpeak:
+                                    _voice.canSpeak &&
+                                        messages[index].origin ==
+                                            EngineChatMessageOrigin.assistant
+                                    ? () => unawaited(
+                                        _voice.toggleSpeak(
+                                          messages[index],
+                                          messages[index].text,
+                                        ),
+                                      )
+                                    : null,
+                                isSpeaking:
+                                    _voice.speakingKey == messages[index],
                               ),
-                        ),
-                ),
-                if (!_showThreadSettings)
-                  if (widget.toolApproval
-                      case final ToolApprovalRequest request)
+                        )),
+                      ),
+              ),
+              if (!_showThreadSettings)
+                if (widget.toolApproval case final ToolApprovalRequest request)
+                  gutter(
                     _ToolApprovalCard(
                       request: request,
                       onDecision: widget.onToolApproval,
                     ),
-                if (!_showThreadSettings && widget.executors != null)
-                  TaskStatusBar(provider: widget.provider),
-                if (!_showThreadSettings)
+                  ),
+              if (!_showThreadSettings && widget.executors != null)
+                gutter(TaskStatusBar(provider: widget.provider)),
+              if (!_showThreadSettings && _voice.realtime != RealtimeState.off)
+                gutter(_VoiceBanner(voice: _voice, onEnd: _toggleRealtime)),
+              if (!_showThreadSettings)
+                gutter(
                   _Composer(
                     controller: _composer,
                     focusNode: _composerFocusNode,
-                    models: _models,
+                    models: _models
+                        .where((ModelInfo model) => model.isChatModel)
+                        .toList(growable: false),
                     selectedModelId: widget.provider.modelId,
                     workspaceDefaultModelId: _workspaceDefaultModelId,
                     activeFile: widget.activeFile,
@@ -650,9 +754,13 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                     onModelSelected: (String modelId) =>
                         unawaited(_selectModel(modelId)),
                     onSend: _send,
+                    onStop: _stopTurn,
+                    voice: _voice,
+                    onToggleDictation: () => unawaited(_toggleDictation()),
+                    onToggleRealtime: () => unawaited(_toggleRealtime()),
                   ),
-              ],
-            ),
+                ),
+            ],
           );
         },
       ),
@@ -750,8 +858,13 @@ final class _MessageBubble extends StatelessWidget {
     required this.message,
     required this.useNeutralUserBubbleForeground,
     this.timestamp,
+    this.onSpeak,
+    this.isSpeaking = false,
   });
 
+  /// Reads the message aloud; null when no text-to-speech model is set up.
+  final VoidCallback? onSpeak;
+  final bool isSpeaking;
   final EngineChatMessage message;
   final DateTime? timestamp;
   final bool useNeutralUserBubbleForeground;
@@ -775,16 +888,15 @@ final class _MessageBubble extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         if (isAssistant)
-          MarkdownPreview(
-            text: text,
-            embedded: true,
-            debounce: Duration.zero,
-          )
+          MarkdownPreview(text: text, embedded: true, debounce: Duration.zero)
         else
-          SelectableText(
-            text,
-            style: Theme.of(context).textTheme.bodyMedium
-                ?.copyWith(height: 1.45, color: messageForeground),
+          Text.rich(
+            _withReferencePills(
+              context,
+              text,
+              Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(height: 1.45, color: messageForeground),
+            ),
           ),
         Row(
           children: <Widget>[
@@ -796,7 +908,39 @@ final class _MessageBubble extends StatelessWidget {
               ),
             if (isAssistant && message.ranOn != null)
               NodeBadge(name: message.ranOn!),
+            if (isAssistant && message.elapsed != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: Text(
+                  _formatElapsed(message.elapsed!),
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(color: metadataForeground),
+                ),
+              ),
+            if (isAssistant && (message.tokens ?? 0) > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: Text(
+                  '${message.tokensEstimated ? '~' : ''}${message.tokens} tokens',
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(color: metadataForeground),
+                ),
+              ),
             const Spacer(),
+            if (onSpeak != null)
+              IconButton(
+                tooltip: isSpeaking ? 'Stop reading' : 'Read aloud',
+                constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                padding: EdgeInsets.zero,
+                style: _compactControlStyle(context),
+                onPressed: onSpeak,
+                icon: Icon(
+                  isSpeaking
+                      ? FluentIcons.stop_16_regular
+                      : FluentIcons.speaker_2_16_regular,
+                  size: 14,
+                ),
+              ),
             IconButton(
               tooltip: 'Copy message',
               constraints: const BoxConstraints.tightFor(width: 26, height: 26),
@@ -895,9 +1039,8 @@ final class _ToolApprovalCard extends StatelessWidget {
                 '${request.peerName ?? 'Another device'} wants to use a tool '
                 'on this device',
                 key: const ValueKey<String>('remote-approval-peer'),
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colors.onTertiaryContainer,
-                ),
+                style: Theme.of(context).textTheme.labelMedium
+                    ?.copyWith(color: colors.onTertiaryContainer),
               ),
             ),
           Text(
@@ -954,6 +1097,10 @@ final class _Composer extends StatelessWidget {
     required this.onRemoveAttachment,
     required this.onModelSelected,
     required this.onSend,
+    required this.onStop,
+    required this.voice,
+    required this.onToggleDictation,
+    required this.onToggleRealtime,
     this.executorPicker,
   });
 
@@ -976,6 +1123,10 @@ final class _Composer extends StatelessWidget {
   final ValueChanged<String> onRemoveAttachment;
   final ValueChanged<String> onModelSelected;
   final VoidCallback onSend;
+  final VoidCallback onStop;
+  final VoiceController voice;
+  final VoidCallback onToggleDictation;
+  final VoidCallback onToggleRealtime;
 
   @override
   Widget build(BuildContext context) {
@@ -1029,19 +1180,44 @@ final class _Composer extends StatelessWidget {
                   itemCount: fileSuggestions.length,
                   itemBuilder: (BuildContext context, int index) {
                     final WorkspaceFileMatch file = fileSuggestions[index];
-                    return ListTile(
-                      dense: true,
-                      leading: const Icon(
-                        FluentIcons.document_20_regular,
-                        size: 17,
-                      ),
-                      title: Text(
-                        file.relativePath,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text('Linked folder ${file.rootIndex + 1}'),
+                    final String path = file.relativePath.replaceAll('\\', '/');
+                    final int slash = path.lastIndexOf('/');
+                    final String name = path.substring(slash + 1);
+                    final TextStyle? base = Theme.of(context)
+                        .textTheme
+                        .bodyMedium;
+                    return InkWell(
                       onTap: () => onFileSelected(file),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            const Icon(
+                              FluentIcons.document_20_regular,
+                              size: 17,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(name, style: base),
+                            if (slash > 0) ...<Widget>[
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  path.substring(0, slash),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textDirection: TextDirection.rtl,
+                                  style: base?.copyWith(
+                                    color: colors.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -1114,7 +1290,7 @@ final class _Composer extends StatelessWidget {
           TextField(
             controller: controller,
             focusNode: focusNode,
-            enabled: interactive,
+            enabled: enabled,
             minLines: 3,
             maxLines: 6,
             keyboardType: TextInputType.multiline,
@@ -1146,6 +1322,34 @@ final class _Composer extends StatelessWidget {
                   style: _compactControlStyle(context),
                   icon: const Icon(FluentIcons.attach_20_regular, size: 19),
                 ),
+                if (voice.canDictate) ...<Widget>[
+                  const SizedBox(width: 2),
+                  _DictationButton(
+                    state: voice.dictation,
+                    enabled: enabled && voice.realtime == RealtimeState.off,
+                    onPressed: onToggleDictation,
+                  ),
+                ],
+                if (voice.canRealtime) ...<Widget>[
+                  const SizedBox(width: 2),
+                  IconButton(
+                    tooltip: voice.realtime == RealtimeState.off
+                        ? 'Talk (realtime voice)'
+                        : 'End voice conversation',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 32,
+                      height: 32,
+                    ),
+                    padding: EdgeInsets.zero,
+                    isSelected: voice.realtime != RealtimeState.off,
+                    style: _compactControlStyle(context),
+                    onPressed: enabled ? onToggleRealtime : null,
+                    icon: const Icon(
+                      FluentIcons.headphones_sound_wave_20_regular,
+                      size: 19,
+                    ),
+                  ),
+                ],
                 const SizedBox(width: 6),
                 Expanded(
                   child: SizedBox(
@@ -1216,25 +1420,149 @@ final class _Composer extends StatelessWidget {
                   const SizedBox(width: 4),
                 ],
                 IconButton(
-                  tooltip: enabled ? 'Send' : 'Engine unavailable',
+                  tooltip: !enabled
+                      ? 'Engine unavailable'
+                      : isSending
+                      ? 'Send to the running agent'
+                      : 'Send',
                   constraints: const BoxConstraints.tightFor(
                     width: 32,
                     height: 32,
                   ),
                   padding: EdgeInsets.zero,
-                  onPressed: interactive ? onSend : null,
+                  onPressed: enabled ? onSend : null,
                   style: _compactControlStyle(context),
-                  icon: isSending
-                      ? const SizedBox.square(
-                          dimension: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(FluentIcons.send_20_regular, size: 20),
+                  icon: const Icon(FluentIcons.send_20_regular, size: 20),
                 ),
+                if (isSending) ...<Widget>[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: 'Stop',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 32,
+                      height: 32,
+                    ),
+                    padding: EdgeInsets.zero,
+                    onPressed: onStop,
+                    style: _compactControlStyle(context),
+                    icon: const Icon(FluentIcons.stop_20_regular, size: 20),
+                  ),
+                ],
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+final class _DictationButton extends StatelessWidget {
+  const _DictationButton({
+    required this.state,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final DictationState state;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return switch (state) {
+      DictationState.transcribing => const SizedBox.square(
+        dimension: 32,
+        child: Padding(
+          padding: EdgeInsets.all(8),
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      DictationState.recording => IconButton(
+        tooltip: 'Stop recording',
+        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        padding: EdgeInsets.zero,
+        style: IconButton.styleFrom(
+          foregroundColor: colors.onError,
+          backgroundColor: colors.error,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        ),
+        onPressed: onPressed,
+        icon: const Icon(FluentIcons.stop_20_filled, size: 18),
+      ),
+      DictationState.idle => IconButton(
+        tooltip: 'Dictate a message',
+        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        padding: EdgeInsets.zero,
+        style: _compactControlStyle(context),
+        onPressed: enabled ? onPressed : null,
+        icon: const Icon(FluentIcons.mic_20_regular, size: 19),
+      ),
+    };
+  }
+}
+
+/// Live caption and controls while a realtime voice conversation is open.
+final class _VoiceBanner extends StatelessWidget {
+  const _VoiceBanner({required this.voice, required this.onEnd});
+
+  final VoiceController voice;
+  final VoidCallback onEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final TextTheme text = Theme.of(context).textTheme;
+    final VoiceLine? last = voice.lines.isEmpty ? null : voice.lines.last;
+    final String status = voice.realtime == RealtimeState.connecting
+        ? 'Connecting…'
+        : voice.toolActivity != null
+        ? 'Working on it…'
+        : 'Listening';
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        margin: const EdgeInsets.only(top: 4),
+        padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+        decoration: BoxDecoration(
+          color: colors.secondaryContainer,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              FluentIcons.headphones_sound_wave_20_regular,
+              size: 18,
+              color: colors.onSecondaryContainer,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    status,
+                    style: text.labelMedium?.copyWith(
+                      color: colors.onSecondaryContainer,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (last != null)
+                    Text(
+                      '${last.role == 'user' ? 'You' : 'Assistant'}: ${last.text}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodySmall?.copyWith(
+                        color: colors.onSecondaryContainer,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            TextButton(onPressed: onEnd, child: const Text('End')),
+          ],
+        ),
       ),
     );
   }
@@ -1423,6 +1751,59 @@ Widget _modelDropdownLabel(
   maxLines: 1,
   overflow: TextOverflow.ellipsis,
 );
+
+String _formatElapsed(Duration d) {
+  if (d.inMilliseconds < 1000) return '${d.inMilliseconds} ms';
+  if (d.inSeconds < 60)
+    return '${(d.inMilliseconds / 1000).toStringAsFixed(1)} s';
+  return '${d.inMinutes}m ${(d.inSeconds % 60).toString().padLeft(2, '0')}s';
+}
+
+/// Renders #path references as rounded pills like attachment chips.
+TextSpan _withReferencePills(
+  BuildContext context,
+  String text,
+  TextStyle? style,
+) {
+  final ColorScheme colors = Theme.of(context).colorScheme;
+  final RegExp pattern = RegExp(r'(?<=^|\s)#[^\s#]+');
+  final List<InlineSpan> spans = <InlineSpan>[];
+  int cursor = 0;
+  for (final RegExpMatch m in pattern.allMatches(text)) {
+    if (m.start > cursor)
+      spans.add(TextSpan(text: text.substring(cursor, m.start)));
+    final String label = m.group(0)!.substring(1);
+    spans.add(
+      WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Icon(FluentIcons.document_20_regular, size: 13),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: style?.copyWith(fontSize: (style.fontSize ?? 14) - 1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    cursor = m.end;
+  }
+  if (cursor < text.length) spans.add(TextSpan(text: text.substring(cursor)));
+  return TextSpan(style: style, children: spans);
+}
 
 String _formatTimestamp(DateTime value) {
   final DateTime local = value.toLocal();

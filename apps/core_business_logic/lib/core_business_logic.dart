@@ -9,6 +9,7 @@ export 'engine/echo_model_provider.dart';
 export 'engine/genkit_model_provider.dart';
 export 'engine/in_memory_engine.dart';
 export 'features/chat_session.dart';
+export 'features/realtime_session.dart';
 export 'hive/channel_codec.dart';
 export 'hive/data_channel_http_client.dart';
 export 'hive/directory.dart';

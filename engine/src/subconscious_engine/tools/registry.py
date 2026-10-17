@@ -18,6 +18,8 @@ from subconscious_engine.services.rag_service import WorkspaceRagService
 from subconscious_engine.services.workspace_files import WorkspaceFileService
 from subconscious_engine.tools.database_tools import database_tool_entries
 from subconscious_engine.tools.filesystem_tools import filesystem_tool_entries
+import logging
+_LOG = logging.getLogger(__name__)
 
 ToolFunction = Callable[..., Any]
 
@@ -382,6 +384,7 @@ async def get_current_weather(location: str) -> str:
                 f"Visibility: {current.get('visibility', '?')} km\n"
                 f"Cloud cover: {current.get('cloudcover', '?')}%")
     except (httpx.HTTPError, ValueError) as error:
+        _LOG.warning("tools.registry.get_current_weather: handled (httpx.HTTPError, ValueError); continuing with fallback", exc_info=True)
         return f"Failed to fetch weather data: {error}"
 
 
@@ -408,4 +411,5 @@ async def get_weather_forecast(location: str, days: int = 3) -> str:
                 f"  Sun hours: {day.get('sunHour', '?')}", f"  UV Index: {day.get('uvIndex', '?')}", ""])
         return "\n".join(lines).rstrip()
     except (httpx.HTTPError, ValueError) as error:
+        _LOG.warning("tools.registry.get_weather_forecast: handled (httpx.HTTPError, ValueError); continuing with fallback", exc_info=True)
         return f"Failed to fetch forecast data: {error}"

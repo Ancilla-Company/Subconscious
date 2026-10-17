@@ -12,6 +12,8 @@ from subconscious_engine.api.extra_schemas import (
     WriteWorkspaceFileRequest,
 )
 from subconscious_engine.services.workspace_files import WorkspaceFileError, WorkspaceFileService
+import logging
+_LOG = logging.getLogger(__name__)
 
 
 def _root_index(request: Request) -> int:
@@ -44,6 +46,7 @@ async def search_files(request: Request) -> Response:
     try:
         limit = int(request.query_params.get("limit", "20"))
     except ValueError:
+        _LOG.warning("api.file_routes.search_files: handled ValueError; continuing with fallback", exc_info=True)
         return _failure(WorkspaceFileError(400, "limit must be an integer."))
     try:
         async with request.app.state.database.session() as session:
@@ -52,6 +55,7 @@ async def search_files(request: Request) -> Response:
             )
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.search_files: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 
@@ -62,6 +66,7 @@ async def list_files(request: Request) -> Response:
                 request.path_params["uuid"], _root_index(request), _path(request))
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.list_files: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 async def read_file(request: Request) -> Response:
@@ -71,6 +76,7 @@ async def read_file(request: Request) -> Response:
                 request.path_params["uuid"], _root_index(request), _path(request) or "")
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.read_file: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 
@@ -81,6 +87,7 @@ async def file_version(request: Request) -> Response:
                 request.path_params["uuid"], _root_index(request), _path(request) or "")
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.file_version: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 
@@ -110,6 +117,7 @@ async def preview_file(request: Request) -> Response:
             },
         )
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.preview_file: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 
@@ -129,6 +137,7 @@ async def mutate_file(request: Request) -> Response:
                     uuid, root_index, path, body.content, body.expected_version)
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.mutate_file: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 
@@ -139,6 +148,7 @@ async def create_directory(request: Request) -> Response:
                 request.path_params["uuid"], _root_index(request), _path(request) or "")
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.create_directory: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 
@@ -157,6 +167,7 @@ async def move_path(request: Request) -> Response:
             )
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.move_path: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
         return _failure(error)
 
 

@@ -54,7 +54,7 @@
       "options": { "cwd": "${workspaceFolder}" },
       "group": "build",
       "problemMatcher": [],
-      "detail": "Outputs build/packaging/pyinstaller/engine (subconscious.exe + subconscious-tray.exe)."
+      "detail": "Outputs build/packaging/pyinstaller/engine (subconscious.exe + subconscious-desktop.exe)."
     },
     {
       "label": "Package: Flutter Windows GUI",
@@ -76,27 +76,78 @@
       "detail": "Outputs build/packaging/tui/subconscious-tui.exe."
     },
     {
-      "label": "Package: MSIX (PyInstaller engine)",
+      "label": "Package: Build components",
       "type": "shell",
-      "command": "powershell",
-      "args": [
-        "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", "packaging/msix/build_msix.ps1",
-        "-Python", "${command:python.interpreterPath}"
-      ],
-      "options": { "cwd": "${workspaceFolder}" },
+      "command": "echo components built",
       "dependsOn": [
         "Package: Engine (PyInstaller)",
         "Package: Flutter Windows GUI",
         "Package: TUI (Dart exe)"
       ],
       "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "detail": "Engine + GUI + TUI builds consumed by the MSIX tasks."
+    },
+    {
+      "label": "Package: Dev signing cert (create + trust)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", "tools/new_dev_cert.ps1"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "detail": "Creates build/packaging/dev-cert/dev.pfx (CN=Placeholder) if missing and trusts it (UAC prompt). Local installs only."
+    },
+    {
+      "label": "Package: MSIX (Local, self-signed)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", "packaging/msix/build_msix.ps1",
+        "-Python", "${command:python.interpreterPath}",
+        "-CertPath", "build/packaging/dev-cert/dev.pfx",
+        "-IdentityName", "Ancilla.Subconscious.Dev",
+        "-Publisher", "CN=Placeholder",
+        "-CertPassword", "subconscious-dev"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": [
+        "Package: Dev signing cert (create + trust)",
+        "Package: Build components"
+      ],
+      "dependsOrder": "sequence",
       "group": "build",
       "problemMatcher": [],
-      "detail": "Builds everything and packs build/packaging/Subconscious-pyinstaller-*.msix. Add Partner Center identity args to the script for Store uploads."
+      "detail": "Signed with the dev cert; install with: Add-AppxPackage build/packaging/Subconscious-<version>.msix"
+    },
+    {
+      "label": "Package: MSIX (Store, unsigned)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", "packaging/msix/build_msix.ps1",
+        "-Python", "${command:python.interpreterPath}",
+        "-Version", "${input:msixVersion}"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": ["Package: Build components"],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Unsigned package for Partner Center upload (Microsoft signs on ingestion). Identity values come from the build_msix.ps1 defaults (Partner Center)."
     }
   ],
   "inputs": [
+    {
+      "id": "msixVersion",
+      "type": "promptString",
+      "description": "MSIX version (4 parts; Store requires last part 0)",
+      "default": "0.1.0.0"
+    },
     {
       "id": "androidEmulator",
       "type": "pickString",

@@ -11,7 +11,6 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
@@ -20,6 +19,8 @@ from ..channels import Envelope
 from ..peers import PeerLink
 from .engine import SCHEMA_VERSION, SyncEngine
 from .ops import OpError, SyncOp
+from ...logging_setup import logged_suppress, spawn_logged
+_LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 BATCH_OPS = 200
@@ -78,7 +79,7 @@ class SyncCoordinator:
         self.peers.clear()
 
     def _spawn(self, coro: Any) -> asyncio.Task[Any]:
-        task = asyncio.ensure_future(coro)
+        task = spawn_logged(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
@@ -114,7 +115,7 @@ class SyncCoordinator:
         if self.engine.hive_id is None or self.engine.blocked is not None:
             return
         vv = await self.engine.version_vector()
-        with suppress(Exception):
+        with logged_suppress(Exception):
             await self._send(state, "sync.hello", {
                 "hive_id": self.engine.hive_id, "vv": vv, "schema_version": SCHEMA_VERSION})
 
@@ -216,6 +217,7 @@ class SyncCoordinator:
             try:
                 ops.append(SyncOp.from_wire(item))
             except OpError:
+                _LOG.warning("hive.sync.protocol.SyncCoordinator._parse: handled OpError; continuing with fallback", exc_info=True)
                 continue
         return ops
 
@@ -236,7 +238,7 @@ class SyncCoordinator:
             now = time.monotonic()
             if now - state.last_pull >= PULL_INTERVAL_SECONDS:
                 state.last_pull = now
-                with suppress(Exception):
+                with logged_suppress(Exception):
                     await self._send(state, "sync.pull", {"vv": vv})
 
     # --- outbound -------------------------------------------------------------
@@ -275,6 +277,7 @@ class SyncCoordinator:
                     continue
                 break
         except asyncio.TimeoutError:
+            _LOG.warning("hive.sync.protocol.SyncCoordinator._catch_up: handled asyncio.TimeoutError; continuing with fallback", exc_info=True)
             state.last_error = "ack_timeout"
         except Exception:
             state.last_error = "catchup_failed"
@@ -339,6 +342,7 @@ class SyncCoordinator:
                     "batch": uuid4().hex, "ops": wire[start:start + self.batch_ops], "live": True})
             state.ops_sent += len(wire)
         except Exception:
+            _LOG.exception("hive.sync.protocol.SyncCoordinator._push: handled Exception; continuing with fallback")
             state.last_error = "push_failed"
 
     # --- reporting -------------------------------------------------------------------

@@ -8,6 +8,8 @@ from starlette.routing import Route
 from subconscious_engine.api.common import json_response
 from subconscious_engine.api.extra_schemas import AppStateSettingDto
 from subconscious_engine.services.settings import SettingsService
+import logging
+_LOG = logging.getLogger(__name__)
 
 
 async def list_settings(request: Request) -> Response:
@@ -21,6 +23,7 @@ async def update_settings(request: Request) -> Response:
     try:
         values = TypeAdapter(list[AppStateSettingDto]).validate_python(await request.json())
     except (ValidationError, ValueError):
+        _LOG.warning("api.settings_routes.update_settings: handled (ValidationError, ValueError); continuing with fallback", exc_info=True)
         return JSONResponse({"error": "Invalid request body."}, 400)
     scopes = [(item.key, item.tag, item.client) for item in values]
     if not values or any(not item.key.strip() for item in values) or len(scopes) != len(set(scopes)):
