@@ -197,6 +197,7 @@ final class _MobileFlyout extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
                   SvgPicture.asset(
                     'windows/runner/resources/icon_title.svg',
@@ -209,7 +210,7 @@ final class _MobileFlyout extends StatelessWidget {
                     semanticsLabel: 'Subconscious logo',
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
+                  Flexible(
                     child: Text(
                       'Subconscious',
                       overflow: TextOverflow.ellipsis,
