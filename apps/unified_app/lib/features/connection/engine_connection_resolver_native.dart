@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:core_business_logic/core_business_logic.dart';
 
 import '../hive/hive_repository_resolver.dart';
+import '../hive/hive_runtime.dart';
 
 const Duration _healthTimeout = Duration(seconds: 2);
 const EngineRuntimeInfo _developmentRuntime = EngineRuntimeInfo(
@@ -27,6 +28,8 @@ Future<EngineRepository?> resolveEngineRepository({
         loader: _FileRuntimeInfoLoader(directory),
         healthProbe: _isReachable,
       ).discover();
+      // The local engine is the full node; this GUI is only its client.
+      HiveRuntime.shared.hasLocalFullNode = true;
       return _repositoryFromRuntime(runtime);
     } on Object catch (error) {
       discoveryError = error;

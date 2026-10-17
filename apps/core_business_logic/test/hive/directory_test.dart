@@ -138,4 +138,17 @@ void main() {
     expect(chooseHomeEngine(views, lastUsedNodeId: off.nodeId)!.id, a.nodeId);
     expect(chooseHomeEngine(<NodeView>[view(a, trusted: false)]), isNull);
   });
-}
+
+  test('a thin client is never a trust root', () async {
+    final NodeIdentity phone = await seededIdentity(40);
+    final NodeIdentity other = await seededIdentity(80);
+    final NodeDirectory alone = NodeDirectory(userId: user, localNodeId: phone.nodeId);
+    await alone.update(<Object?>[nodeJson(phone, kind: 'thin')]);
+    expect(alone.isTrusted(phone.nodeId), isFalse, reason: 'local thin node');
+    final NodeDirectory tofu = NodeDirectory(userId: user, localNodeId: other.nodeId);
+    await tofu.update(<Object?>[
+      nodeJson(phone, kind: 'thin'),
+      nodeJson(other, kind: 'thin'),
+    ]);
+    expect(tofu.isTrusted(phone.nodeId), isFalse, reason: 'tofu thin node');
+  });}
