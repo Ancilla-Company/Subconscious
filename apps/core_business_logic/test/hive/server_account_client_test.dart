@@ -187,4 +187,50 @@ void main() {
     expect(client.accessToken, isNull);
     expect(client.user, isNull);
   });
+
+  group('password reset', () {
+    test('request posts the email and leaves the session untouched', () async {
+      final ServerAccountClient client = make(
+        (http.Request r) => http.Response(jsonEncode(<String, dynamic>{'message': 'Sent.'}), 202),
+      );
+      expect(await client.requestPasswordReset('a@b.c'), 'Sent.');
+      expect(requests.single.url.toString(), 'https://api.test/auth/password-reset/request');
+      expect(jsonDecode(requests.single.body), <String, dynamic>{'email': 'a@b.c'});
+      expect(client.isSignedIn, isFalse);
+      expect(await store.read(), isNull);
+    });
+
+    test('confirm posts native=true, stores the tokens and sets the user', () async {
+      final ServerAccountClient client = make((http.Request r) => http.Response(jsonEncode(authBody()), 200));
+      final ServerUser user = await client.confirmPasswordReset(email: 'a@b.c', code: '123456', newPassword: 'new-pass-1');
+      expect(user.id, 'u-1');
+      expect(requests.single.url.toString(), 'https://api.test/auth/password-reset/confirm?native=true');
+      expect(jsonDecode(requests.single.body), <String, dynamic>{
+        'email': 'a@b.c',
+        'code': '123456',
+        'new_password': 'new-pass-1',
+      });
+      expect(client.user!.id, 'u-1');
+      expect(await store.read(), 'refresh-1');
+    });
+
+    for (final int status in <int>[400, 429]) {
+      test('confirm surfaces a $status as HiveApiException and stores nothing', () async {
+        final ServerAccountClient client = make(
+          (http.Request r) => http.Response(jsonEncode(<String, dynamic>{'detail': 'nope'}), status),
+        );
+        await expectLater(
+          client.confirmPasswordReset(email: 'a@b.c', code: '1', newPassword: 'new-pass-1'),
+          throwsA(isA<HiveApiException>().having((HiveApiException e) => e.statusCode, 'status', status)),
+        );
+        expect(await store.read(), isNull);
+        expect(client.isSignedIn, isFalse);
+      });
+    }
+
+    test('request reports a network failure as HiveApiException', () async {
+      final ServerAccountClient client = make((http.Request r) => throw http.ClientException('down'));
+      await expectLater(client.requestPasswordReset('a@b.c'), throwsA(isA<HiveApiException>()));
+    });
+  });
 }

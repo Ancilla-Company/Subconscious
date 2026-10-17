@@ -1,24 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../hive/hive_runtime.dart';
 import '../../hive/presentation/nodes_page.dart';
 import '../account_controller.dart';
 
 final class AccountPanel extends StatelessWidget {
-  const AccountPanel({
-    required this.controller,
-    this.devicesRuntime,
-    super.key,
-  });
+  const AccountPanel({required this.controller, super.key});
 
   final AccountController controller;
-
-  /// Runtime backing the Devices section; defaults to [HiveRuntime.shared].
-  final HiveRuntime? devicesRuntime;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -28,10 +21,7 @@ final class AccountPanel extends StatelessWidget {
         AccountStatus.initializing => const Center(
           child: CircularProgressIndicator(),
         ),
-        AccountStatus.authenticated => _SignedInAccount(
-          controller: controller,
-          devicesRuntime: devicesRuntime ?? HiveRuntime.shared,
-        ),
+        AccountStatus.authenticated => _SignedInAccount(controller: controller),
         AccountStatus.anonymous => _AnonymousAccount(controller: controller),
       };
       final ThemeData theme = Theme.of(context);
@@ -106,13 +96,9 @@ ButtonStyle _rectangularControlStyle(ButtonStyle? inherited) =>
     );
 
 final class _SignedInAccount extends StatelessWidget {
-  const _SignedInAccount({
-    required this.controller,
-    required this.devicesRuntime,
-  });
+  const _SignedInAccount({required this.controller});
 
   final AccountController controller;
-  final HiveRuntime devicesRuntime;
 
   @override
   Widget build(BuildContext context) {
@@ -196,7 +182,7 @@ final class _SignedInAccount extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         Text('Devices', style: theme.textTheme.titleMedium),
-        DevicesSection(runtime: devicesRuntime),
+        DevicesSection(account: controller),
       ],
     );
   }
@@ -215,6 +201,8 @@ enum _AccountForm { signIn, signUp }
 
 final class _AnonymousAccountState extends State<_AnonymousAccount> {
   _AccountForm _form = _AccountForm.signIn;
+  bool _forgotPassword = false;
+  String _resetEmailPrefill = '';
 
   @override
   Widget build(BuildContext context) => Column(
@@ -226,36 +214,57 @@ final class _AnonymousAccountState extends State<_AnonymousAccount> {
             : 'Sign in to connect this desktop app to your Subconscious account. Your local engine remains private and uses its own joining token.',
       ),
       const SizedBox(height: 20),
-      SegmentedButton<_AccountForm>(
-        segments: const <ButtonSegment<_AccountForm>>[
-          ButtonSegment<_AccountForm>(
-            value: _AccountForm.signIn,
-            label: Text('Sign in'),
-          ),
-          ButtonSegment<_AccountForm>(
-            value: _AccountForm.signUp,
-            label: Text('Create account'),
-          ),
-        ],
-        selected: <_AccountForm>{_form},
-        onSelectionChanged: (Set<_AccountForm> selection) => setState(() {
-          _form = selection.single;
-          widget.controller.clearFeedback();
-        }),
-      ),
-      const SizedBox(height: 20),
-      if (_form == _AccountForm.signIn)
-        _SignInForm(controller: widget.controller)
-      else
-        _SignupForm(controller: widget.controller),
+      if (_forgotPassword)
+        _ForgotPasswordForm(
+          controller: widget.controller,
+          initialEmail: _resetEmailPrefill,
+          onBack: () {
+            widget.controller.clearFeedback();
+            setState(() => _forgotPassword = false);
+          },
+        )
+      else ...<Widget>[
+        SegmentedButton<_AccountForm>(
+          segments: const <ButtonSegment<_AccountForm>>[
+            ButtonSegment<_AccountForm>(
+              value: _AccountForm.signIn,
+              label: Text('Sign in'),
+            ),
+            ButtonSegment<_AccountForm>(
+              value: _AccountForm.signUp,
+              label: Text('Create account'),
+            ),
+          ],
+          selected: <_AccountForm>{_form},
+          onSelectionChanged: (Set<_AccountForm> selection) => setState(() {
+            _form = selection.single;
+            widget.controller.clearFeedback();
+          }),
+        ),
+        const SizedBox(height: 20),
+        if (_form == _AccountForm.signIn)
+          _SignInForm(
+            controller: widget.controller,
+            onForgotPassword: (String email) {
+              widget.controller.clearFeedback();
+              setState(() {
+                _resetEmailPrefill = email;
+                _forgotPassword = true;
+              });
+            },
+          )
+        else
+          _SignupForm(controller: widget.controller),
+      ],
     ],
   );
 }
 
 final class _SignInForm extends StatefulWidget {
-  const _SignInForm({required this.controller});
+  const _SignInForm({required this.controller, required this.onForgotPassword});
 
   final AccountController controller;
+  final void Function(String email) onForgotPassword;
 
   @override
   State<_SignInForm> createState() => _SignInFormState();
@@ -297,8 +306,18 @@ final class _SignInFormState extends State<_SignInForm> {
           obscure: _obscurePassword,
           onToggleObscure: () =>
               setState(() => _obscurePassword = !_obscurePassword),
+          onSubmitted: widget.controller.isBusy ? null : _submit,
         ),
-        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: widget.controller.isBusy
+                ? null
+                : () => widget.onForgotPassword(_email.text.trim()),
+            child: const Text('Forgot password?'),
+          ),
+        ),
+        const SizedBox(height: 4),
         _FeedbackMessage(controller: widget.controller),
         const SizedBox(height: 8),
         FilledButton(
@@ -471,6 +490,212 @@ final class _SignupFormState extends State<_SignupForm> {
   );
 }
 
+final class _ForgotPasswordForm extends StatefulWidget {
+  const _ForgotPasswordForm({
+    required this.controller,
+    required this.initialEmail,
+    required this.onBack,
+  });
+
+  final AccountController controller;
+  final String initialEmail;
+  final VoidCallback onBack;
+
+  @override
+  State<_ForgotPasswordForm> createState() => _ForgotPasswordFormState();
+}
+
+final class _ForgotPasswordFormState extends State<_ForgotPasswordForm> {
+  static const Duration _resendCooldown = Duration(seconds: 60);
+
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _email = TextEditingController(
+    text: widget.initialEmail,
+  );
+  final TextEditingController _code = TextEditingController();
+  final TextEditingController _password = TextEditingController();
+  Timer? _resendTimer;
+  int _secondsUntilResend = 0;
+  bool _codeSent = false;
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _resendTimer?.cancel();
+    _email.dispose();
+    _code.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendCode() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final String? message = await widget.controller.requestPasswordReset(
+      email: _email.text,
+    );
+    if (message != null && mounted) {
+      setState(() {
+        _codeSent = true;
+        _startResendCooldown();
+      });
+    }
+  }
+
+  Future<void> _resendCode() async {
+    if (_secondsUntilResend > 0 || widget.controller.isBusy) return;
+    final String? message = await widget.controller.requestPasswordReset(
+      email: _email.text,
+    );
+    if (message != null && mounted) {
+      setState(_startResendCooldown);
+    }
+  }
+
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    _secondsUntilResend = _resendCooldown.inSeconds;
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_secondsUntilResend <= 1) {
+        timer.cancel();
+        setState(() => _secondsUntilResend = 0);
+        return;
+      }
+      setState(() => _secondsUntilResend--);
+    });
+  }
+
+  void _useDifferentEmail() {
+    _resendTimer?.cancel();
+    widget.controller.clearFeedback();
+    setState(() {
+      _codeSent = false;
+      _secondsUntilResend = 0;
+      _code.clear();
+      _password.clear();
+    });
+  }
+
+  Future<void> _confirm() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final bool succeeded = await widget.controller.confirmPasswordReset(
+      email: _email.text,
+      code: _code.text,
+      newPassword: _password.text,
+    );
+    if (!succeeded && mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool busy = widget.controller.isBusy;
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Semantics(
+            header: true,
+            child: Text(
+              'Reset your password',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (!_codeSent)
+            _EmailField(controller: _email, enabled: !busy)
+          else ...<Widget>[
+            Text('Code sent to ${_email.text.trim()}'),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: busy ? null : _useDifferentEmail,
+                child: const Text('Use a different email'),
+              ),
+            ),
+            const SizedBox(height: 4),
+            TextFormField(
+              controller: _code,
+              enabled: !busy,
+              keyboardType: TextInputType.number,
+              inputFormatters: <TextInputFormatter>[
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(12),
+              ],
+              autofillHints: const <String>[AutofillHints.oneTimeCode],
+              autocorrect: false,
+              enableSuggestions: false,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(labelText: 'Reset code'),
+              validator: (String? value) =>
+                  value == null || value.trim().isEmpty
+                  ? 'Enter the code from your email.'
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            _PasswordField(
+              controller: _password,
+              enabled: !busy,
+              obscure: _obscurePassword,
+              label: 'New password',
+              onToggleObscure: () =>
+                  setState(() => _obscurePassword = !_obscurePassword),
+              validator: (String? value) {
+                final String password = value ?? '';
+                if (password.length < 8) return 'Use at least 8 characters.';
+                if (utf8.encode(password).length > 72) {
+                  return 'Use at most 72 bytes.';
+                }
+                return null;
+              },
+              onSubmitted: busy ? null : _confirm,
+            ),
+          ],
+          const SizedBox(height: 12),
+          _FeedbackMessage(controller: widget.controller),
+          if (_codeSent) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              "No email? Check spam, or wait a few minutes and try again. If it still doesn't arrive, try again in an hour.",
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          const SizedBox(height: 8),
+          FilledButton(
+            onPressed: busy ? null : (_codeSent ? _confirm : _sendCode),
+            child: Text(
+              busy
+                  ? 'Contacting server…'
+                  : _codeSent
+                  ? 'Reset password'
+                  : 'Send reset code',
+            ),
+          ),
+          if (_codeSent)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TextButton(
+                onPressed: busy || _secondsUntilResend > 0 ? null : _resendCode,
+                child: Text(
+                  _secondsUntilResend > 0
+                      ? 'Send a new code in ${_secondsUntilResend}s'
+                      : 'Send a new code',
+                ),
+              ),
+            ),
+          TextButton(
+            onPressed: busy ? null : widget.onBack,
+            child: const Text('Back to sign in'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 final class _EmailField extends StatelessWidget {
   const _EmailField({required this.controller, required this.enabled});
 
@@ -501,12 +726,18 @@ final class _PasswordField extends StatelessWidget {
     required this.enabled,
     required this.obscure,
     required this.onToggleObscure,
+    this.label = 'Password',
+    this.validator,
+    this.onSubmitted,
   });
 
   final TextEditingController controller;
   final bool enabled;
   final bool obscure;
   final VoidCallback onToggleObscure;
+  final String label;
+  final String? Function(String?)? validator;
+  final VoidCallback? onSubmitted;
 
   @override
   Widget build(BuildContext context) => TextFormField(
@@ -516,8 +747,9 @@ final class _PasswordField extends StatelessWidget {
     enableSuggestions: false,
     autocorrect: false,
     textInputAction: TextInputAction.done,
+    onFieldSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
     decoration: InputDecoration(
-      labelText: 'Password',
+      labelText: label,
       helperText: 'At least 8 characters',
       suffixIcon: IconButton(
         tooltip: obscure ? 'Show password' : 'Hide password',
@@ -527,8 +759,10 @@ final class _PasswordField extends StatelessWidget {
         ),
       ),
     ),
-    validator: (String? value) =>
-        (value?.length ?? 0) < 8 ? 'Use at least 8 characters.' : null,
+    validator:
+        validator ??
+        (String? value) =>
+            (value?.length ?? 0) < 8 ? 'Use at least 8 characters.' : null,
   );
 }
 
@@ -543,19 +777,23 @@ final class _FeedbackMessage extends StatelessWidget {
     if (message == null) return const SizedBox.shrink();
     final bool isError = controller.error != null;
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: isError ? colors.errorContainer : colors.secondaryContainer,
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          message,
-          style: TextStyle(
-            color: isError
-                ? colors.onErrorContainer
-                : colors.onSecondaryContainer,
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: isError ? colors.errorContainer : colors.secondaryContainer,
+          borderRadius: const BorderRadius.all(Radius.circular(3)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            message,
+            style: TextStyle(
+              color: isError
+                  ? colors.onErrorContainer
+                  : colors.onSecondaryContainer,
+            ),
           ),
         ),
       ),

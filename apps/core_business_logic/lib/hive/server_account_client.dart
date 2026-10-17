@@ -25,11 +25,7 @@ final class MemoryRefreshTokenStore implements RefreshTokenStore {
 }
 
 final class ServerUser {
-  const ServerUser({
-    required this.id,
-    required this.email,
-    this.displayName,
-  });
+  const ServerUser({required this.id, required this.email, this.displayName});
   final String id;
   final String email;
   final String? displayName;
@@ -48,7 +44,9 @@ Future<PkcePair> createPkcePair({Random? random}) async {
   final String verifier = b64uEncode(
     List<int>.generate(48, (int _) => rng.nextInt(256)),
   );
-  final String challenge = b64uEncode(await sha256Bytes(ascii.encode(verifier)));
+  final String challenge = b64uEncode(
+    await sha256Bytes(ascii.encode(verifier)),
+  );
   return PkcePair(verifier: verifier, challenge: challenge);
 }
 
@@ -90,10 +88,11 @@ final class ServerAccountClient {
     required String email,
     required String password,
   }) async => _acceptAuth(
-    await _post('auth/email/login', <String, dynamic>{
-      'email': email,
-      'password': password,
-    }, query: const <String, String>{'native': 'true'}),
+    await _post(
+      'auth/email/login',
+      <String, dynamic>{'email': email, 'password': password},
+      query: const <String, String>{'native': 'true'},
+    ),
   );
 
   /// `POST /auth/email/register`: emails a verification code. Returns the
@@ -108,6 +107,38 @@ final class ServerAccountClient {
         ? message
         : 'Check your email for a verification code.';
   }
+
+  /// `POST /auth/password-reset/request`: emails a reset code. Does not change
+  /// sign-in state. The server answers generically whether or not the account
+  /// exists.
+  Future<String> requestPasswordReset(String email) async {
+    final Map<String, dynamic> body = await _post(
+      'auth/password-reset/request',
+      <String, dynamic>{'email': email},
+    );
+    final Object? message = body['message'];
+    return message is String && message.trim().isNotEmpty
+        ? message
+        : 'If the address is valid, a reset code has been sent.';
+  }
+
+  /// `POST /auth/password-reset/confirm?native=true`: sets the new password and
+  /// adopts the session the server returns.
+  Future<ServerUser> confirmPasswordReset({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async => _acceptAuth(
+    await _post(
+      'auth/password-reset/confirm',
+      <String, dynamic>{
+        'email': email,
+        'code': code,
+        'new_password': newPassword,
+      },
+      query: const <String, String>{'native': 'true'},
+    ),
+  );
 
   /// `POST /auth/email/verify` then `POST /auth/email/complete?native=true`.
   Future<ServerUser> completeSignup({
@@ -249,7 +280,8 @@ final class ServerAccountClient {
     }
     _storeAccess(body);
     final Object? rotated = body['refresh_token'];
-    if (rotated is String && rotated.isNotEmpty) await tokenStore.write(rotated);
+    if (rotated is String && rotated.isNotEmpty)
+      await tokenStore.write(rotated);
     return _accessToken;
   }
 
@@ -309,7 +341,10 @@ final class ServerAccountClient {
       throw const HiveApiException('Could not reach the Subconscious server.');
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HiveApiException(_detail(text, response.statusCode), response.statusCode);
+      throw HiveApiException(
+        _detail(text, response.statusCode),
+        response.statusCode,
+      );
     }
     if (text.trim().isEmpty) return <String, dynamic>{};
     final Object? decoded = jsonDecode(text);
