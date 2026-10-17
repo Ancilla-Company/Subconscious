@@ -83,3 +83,9 @@ Besides workspace/thread/message CRUD, the authenticated `/api/v1` surface inclu
 Workspace directories remain the scope for the workspace file API and RAG indexing. The `filesystem` model tools instead accept any user-specified path (absolute or process-relative), including paths outside workspace directories; they rely on the operating system's permissions and the configured tool-approval policy rather than a workspace-root block. `read_filesystem_file` and `write_filesystem_file` handle UTF-8 text directly and use structured extraction/generation for PDF, DOCX, XLSX, and PPTX files. Document generation preserves the supported normalized content, not arbitrary source formatting.
 
 Only `/api/v1/health` is public. HTTP endpoints require an `Authorization: Bearer ...` header; the `token` query parameter is accepted only during WebSocket connection setup for client compatibility. Model API keys and configured-tool headers are encrypted in `data.enc` and are never returned by API responses.
+
+## Trust model: local, signed in, LAN
+
+- **Local = full node.** A client is local only when the engine sees a loopback transport peer (127.0.0.0/8, ::1). Forwarded headers and client-sent flags are ignored, hive tunnel peers are always remote, and the bearer token in `runtime.json` (user-only file) is still required. `client.hello.ack` reports `local` for display.
+- **Signed in = no code.** A trusted engine auto-approves pending devices of the signed-in account (`engine.hive.auto_approve_account_devices`, default `true`; max 5 per minute, logged at INFO). Only engine nodes can be trust roots. Set the flag to `false` to require the short-code approval again.
+- **LAN, offline.** Without an account, clients join with the engine's LAN joining token; no hive is involved.

@@ -63,6 +63,7 @@ class DirectoryNode:
     created_at: str | None = None
     last_seen_at: str | None = None
     online: bool = False
+    proof: str | None = None
 
     @property
     def public_key_b64u(self) -> str:
@@ -98,6 +99,7 @@ class DirectoryNode:
                 created_at=raw.get("created_at"),
                 last_seen_at=raw.get("last_seen_at"),
                 online=raw.get("online") is True,
+                proof=raw.get("proof") if isinstance(raw.get("proof"), str) else None,
             )
         except (KeyError, IdentityError, TypeError):
             _LOG.warning("hive.directory.DirectoryNode.parse: handled (KeyError, IdentityError, TypeError); continuing with fallback", exc_info=True)
@@ -205,14 +207,20 @@ class Directory:
         return trusted
 
     def _roots(self) -> set[str]:
-        roots = {r for r in self._pins.roots if r in self._nodes}
+        # Only engine nodes can be trust roots: a thin client never becomes one.
+        roots = {r for r in self._pins.roots if r in self._nodes and self._nodes[r].kind == "engine"}
         local = self._nodes.get(self.local_node_id)
-        if local is not None and local.status == "active" and local.approved_by is None:
+        if (
+            local is not None
+            and local.kind == "engine"
+            and local.status == "active"
+            and local.approved_by is None
+        ):
             roots.add(local.id)  # we are the first node of this hive
         if not roots:
             candidates = [
                 n for n in self._nodes.values()
-                if n.status == "active" and n.approved_by is None
+                if n.kind == "engine" and n.status == "active" and n.approved_by is None
             ]
             if len(candidates) == 1:
                 roots.add(candidates[0].id)

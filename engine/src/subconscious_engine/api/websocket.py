@@ -25,6 +25,7 @@ from subconscious_engine.audio.realtime import (
 from subconscious_engine.audio.routes import capabilities_for
 from subconscious_engine.approval import ApprovalConfig, classify_operation
 from subconscious_engine.configuration.models import ModelConfig
+from subconscious_engine.locality import is_local_peer
 from subconscious_engine.storage.models import ConversationThread, Message, Workspace, utc_now
 from subconscious_engine.tools import (
     ContextAttachment,
@@ -418,7 +419,9 @@ class WebSocketSession:
         await self.app.state.client_registry.release(self.client_id)
         self.client_id = identifier
         await self.app.state.client_registry.register_session(identifier, self)
-        await self._send("client.hello.ack", {"clientId": identifier})
+        await self._send(
+            "client.hello.ack", {"clientId": identifier, "local": is_local_peer(self.socket)}
+        )
 
     @property
     def active_turn(self) -> "asyncio.Task[None] | None":
