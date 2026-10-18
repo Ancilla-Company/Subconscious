@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:unified_app/features/account/account_controller.dart';
 import 'package:unified_app/features/dashboard/controller/dashboard_controller.dart';
+import 'package:unified_app/features/hive/hive_runtime.dart';
 import 'package:unified_app/features/dashboard/presentation/dashboard_page.dart';
 
 void main() {
@@ -15,6 +16,7 @@ void main() {
       ({Uri? explicitEndpoint, String? explicitToken}) async => null,
     );
     final AccountController accountController = AccountController(
+      session: HiveRuntime.shared,
       clientProvider: () => null,
     );
     addTearDown(controller.dispose);

@@ -199,17 +199,21 @@ class HiveService:
     # --- main loop ------------------------------------------------------------
     async def _run(self) -> None:
         assert self.api and self.directory and self.identity
+        enroll_tried = False
         try:
             while True:
                 await self._refresh_directory()
-                nodes = self.directory.nodes
                 local = self.directory.get(self.identity.node_id)
                 if local is None:
-                    if nodes:
-                        self.state, self.detail = "unenrolled", "Run 'subconscious node enroll'."
-                    else:
-                        await self.enroll(None)  # first node of the account
+                    # Signing in to the account authorizes this engine: register it as a
+                    # full node whether or not other devices (clients) are listed already.
+                    if not enroll_tried:
+                        enroll_tried = True
+                        await self.enroll(None)
                         continue
+                    self.state = "error"
+                    self.detail = "This engine could not be listed on your account. Retrying."
+                    enroll_tried = False
                 elif not self.directory.is_trusted(local.id):
                     self.state, self.detail = "pending", "Waiting for approval from another node."
                 else:

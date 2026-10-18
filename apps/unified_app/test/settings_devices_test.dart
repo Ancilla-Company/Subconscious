@@ -193,7 +193,7 @@ void main() {
       await tester.pump();
       expect(tester.takeException(), isNull);
       expect(find.text('Devices'), findsOneWidget);
-      expect(find.textContaining("Couldn't load your devices"), findsOneWidget);
+      expect(find.textContaining('The server returned 400'), findsOneWidget);
       expect(find.widgetWithText(TextButton, 'Retry'), findsOneWidget);
       expect(find.textContaining('raw-socket-failure-xyz'), findsNothing);
       expect(find.textContaining('status 400'), findsNothing);

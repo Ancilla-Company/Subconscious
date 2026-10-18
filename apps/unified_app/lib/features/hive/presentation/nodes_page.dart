@@ -189,6 +189,17 @@ final class _ExecutorSection extends StatelessWidget {
   }
 }
 
+/// A signed-in device is listed by the server, so it is never "unverified" in a
+/// way the user can act on while a trusted full node exists: that node signs
+/// the approval automatically. Only when there is no trusted full node (nothing
+/// can approve yet) is the state worth showing.
+bool _awaitingApproval(HiveRuntime runtime, NodeView view) {
+  if (view.trusted || view.node.status != 'active') return false;
+  return !runtime.nodes.any(
+    (NodeView v) => v.trusted && v.node.isEngine && v.node.status == 'active',
+  );
+}
+
 final class _NodeTile extends StatelessWidget {
   const _NodeTile({required this.runtime, required this.view});
   final HiveRuntime runtime;
@@ -200,10 +211,10 @@ final class _NodeTile extends StatelessWidget {
     final bool canApprove =
         runtime.canApprove && node.status == 'pending' && !view.isLocal;
     final List<String> details = <String>[
-      node.isEngine ? 'Engine' : 'Thin client',
+      node.isEngine ? 'Full node' : 'Client',
       node.platform,
       if (node.status != 'active') node.status,
-      if (!view.trusted && node.status == 'active') 'not verified',
+      if (_awaitingApproval(runtime, view)) 'Awaiting approval',
       if (view.online && view.tier != null) view.tier!,
     ].where((String s) => s.isNotEmpty).toList();
     return Card(

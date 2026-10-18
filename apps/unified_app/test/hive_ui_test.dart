@@ -8,6 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:unified_app/features/account/account_controller.dart';
 import 'package:unified_app/features/hive/hive_runtime.dart';
 import 'package:unified_app/features/hive/presentation/nodes_page.dart';
 import 'package:unified_app/features/hive/secure_storage_stores.dart';
@@ -101,6 +102,15 @@ void main() {
       return runtime;
     }
 
+    AccountController accountFor(HiveRuntime runtime) {
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => null,
+      )..status = AccountStatus.anonymous;
+      addTearDown(account.dispose);
+      return account;
+    }
+
     NodeView view(String name, {String kind = 'engine', String status = 'active', bool local = false}) =>
         NodeView(
           node: DirectoryNode(
@@ -121,21 +131,101 @@ void main() {
       WidgetTester tester,
     ) async {
       final HiveRuntime runtime = await signedIn(<http.Request>[]);
+      final AccountController account = accountFor(runtime);
       await runtime.signIn(email: 'a@b.c', password: 'password1');
       runtime.nodes = <NodeView>[view('Desk', local: true), view('Laptop')];
       await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(runtime: runtime)))),
+        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(account: account)))),
       );
       await tester.pump();
       expect(find.byIcon(Icons.circle), findsNothing);
       expect(find.textContaining('·'), findsNothing);
-      expect(find.text('Online, Engine, windows'), findsNWidgets(2));
+      expect(find.text('Online, Full node, windows'), findsNWidgets(2));
+    });
+
+    testWidgets('clients read "Client" and a signed-in device is never "not verified"', (
+      WidgetTester tester,
+    ) async {
+      final HiveRuntime runtime = await signedIn(<http.Request>[]);
+      final AccountController account = accountFor(runtime);
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      // A trusted full node exists, so an untrusted active client needs nothing.
+      final NodeView phone = NodeView(
+        node: DirectoryNode(
+          id: 'n_phone',
+          kind: 'thin',
+          name: 'Phone',
+          platform: 'android',
+          appVersion: '1',
+          publicKey: Uint8List(32),
+          status: 'active',
+        ),
+        trusted: false,
+        online: true,
+        isLocal: false,
+      );
+      runtime.nodes = <NodeView>[view('Desk', local: true), phone];
+      await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(account: account)))),
+      );
+      await tester.pump();
+      expect(find.text('Online, Client, android'), findsOneWidget);
+      expect(find.text('Online, Full node, windows'), findsOneWidget);
+      expect(find.textContaining('Thin'), findsNothing);
+      expect(find.textContaining('not verified'), findsNothing);
+      expect(find.textContaining('Awaiting approval'), findsNothing);
+
+      // With no trusted full node there is nothing to approve it: say so.
+      runtime.nodes = <NodeView>[phone];
+      runtime.notifyListeners();
+      await tester.pump();
+      expect(find.text('Online, Client, android, Awaiting approval'), findsOneWidget);
+    });
+
+    test('a local full node lists devices (itself included) from the engine', () async {
+      final List<http.Request> requests = <http.Request>[];
+      final HiveRuntime runtime = await signedIn(requests);
+      runtime.hasLocalFullNode = true;
+      final List<http.Request> engineRequests = <http.Request>[];
+      runtime.localEngineClient = () async => RestEngineClient(
+        baseUri: Uri.parse('http://engine.test/api/v1/'),
+        token: 't',
+        client: MockClient((http.Request r) async {
+          engineRequests.add(r);
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'nodes': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 'n_eng', 'name': 'Laptop', 'kind': 'engine', 'platform': 'windows',
+                  'status': 'active', 'trusted': true, 'local': true, 'online': true, 'tier': null,
+                },
+                <String, dynamic>{
+                  'id': 'n_ph', 'name': 'Phone', 'kind': 'thin', 'platform': 'android',
+                  'status': 'active', 'trusted': true, 'local': false, 'online': false,
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      expect(engineRequests.single.url.path, '/api/v1/hive/nodes');
+      expect(runtime.nodes.map((NodeView v) => v.node.name), <String>['Laptop', 'Phone']);
+      expect(runtime.nodes.first.node.isEngine, isTrue);
+      expect(runtime.nodes.first.isLocal, isTrue);
+      expect(
+        requests.map((http.Request r) => r.url.path),
+        <String>['/auth/email/login'],
+        reason: 'the GUI itself registers nothing with the server',
+      );
     });
 
     testWidgets('signed-in pending device shows no code until the grace period', (
       WidgetTester tester,
     ) async {
       final HiveRuntime runtime = await signedIn(<http.Request>[]);
+      final AccountController account = accountFor(runtime);
       runtime.approvalGrace = const Duration(seconds: 30);
       await runtime.signIn(email: 'a@b.c', password: 'password1');
       runtime.nodes = <NodeView>[
@@ -143,7 +233,7 @@ void main() {
         view('Phone', kind: 'thin', status: 'pending', local: true),
       ];
       await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(runtime: runtime)))),
+        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(account: account)))),
       );
       await tester.pump();
       expect(find.text('Connecting to your account'), findsOneWidget);
