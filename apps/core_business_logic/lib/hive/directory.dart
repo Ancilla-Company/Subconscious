@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'encoding.dart';
 import 'identity.dart';
 
-const int _maxChainDepth = 8;
 
 /// One entry of `GET /nodes`.
 final class DirectoryNode {
@@ -93,12 +92,11 @@ final class MemoryPinStore implements PinStore {
   Future<void> save() async {}
 }
 
-/// Verified view of the account's nodes: key pinning plus approval chains.
+/// Verified view of the account's nodes: key pinning for active members.
 ///
-/// A node is trusted only when its id matches its key, its key matches any
-/// earlier pin, and it is a trust root or carries an `approval_sig` from
-/// another trusted node over `sc-approve-v1 | user_id | new_public_key`.
-/// The server alone can therefore never add a member.
+/// A node is a member when the signed-in account lists it as active, its id
+/// matches its key and its key matches any earlier pin. There is no trust root
+/// or approval chain.
 final class NodeDirectory {
   NodeDirectory({
     required this.userId,
@@ -143,65 +141,12 @@ final class NodeDirectory {
     if (changed) await _pins.save();
   }
 
-  Future<Set<String>> _computeTrusted() async {
-    final Set<String> roots = await _roots();
-    final Set<String> trusted = <String>{};
-    for (final String id in _nodes.keys) {
-      if (await _chainOk(id, roots, <String>{}, 0)) trusted.add(id);
-    }
-    return trusted;
-  }
-
-  Future<Set<String>> _roots() async {
-    final Set<String> roots = <String>{
-      // A thin client is never a trust root, even if it was pinned earlier.
-      for (final String r in _pins.roots)
-        if (_nodes[r]?.isEngine ?? false) r,
-    };
-    final DirectoryNode? local = _nodes[localNodeId];
-    if (local != null &&
-        local.isEngine &&
-        local.status == 'active' &&
-        local.approvedBy == null) {
-      roots.add(local.id);
-    }
-    if (roots.isEmpty) {
-      // Trust on first use: exactly one active engine without an approver.
-      final List<DirectoryNode> candidates = <DirectoryNode>[
-        for (final DirectoryNode n in _nodes.values)
-          if (n.isEngine && n.status == 'active' && n.approvedBy == null) n,
-      ];
-      if (candidates.length == 1) roots.add(candidates.single.id);
-    }
-    if (!_pins.roots.containsAll(roots)) {
-      _pins.roots.addAll(roots);
-      await _pins.save();
-    }
-    return roots;
-  }
-
-  Future<bool> _chainOk(
-    String id,
-    Set<String> roots,
-    Set<String> seen,
-    int depth,
-  ) async {
-    final DirectoryNode? node = _nodes[id];
-    if (node == null || node.status != 'active' || depth > _maxChainDepth) {
-      return false;
-    }
-    if (roots.contains(id)) return true;
-    if (seen.contains(id) || node.approvedBy == null || node.approvalSig == null) {
-      return false;
-    }
-    final DirectoryNode? approver = _nodes[node.approvedBy];
-    if (approver == null || approver.id == node.id) return false;
-    final bool valid = await verifySignature(
-      publicKey: approver.publicKey,
-      signature: node.approvalSig!,
-      message: approvalMessage(userId, node.publicKeyB64u),
-    );
-    if (!valid) return false;
-    return _chainOk(approver.id, roots, <String>{...seen, id}, depth + 1);
-  }
+  /// No trust root: every node the signed-in account lists as active is a
+  /// member, and this node itself once it is listed (not revoked). Id/key
+  /// consistency and pinning were already checked in [update].
+  Future<Set<String>> _computeTrusted() async => <String>{
+    for (final DirectoryNode n in _nodes.values)
+      if (n.status == 'active' || (n.id == localNodeId && n.status != 'revoked'))
+        n.id,
+  };
 }

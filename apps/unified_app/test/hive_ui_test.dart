@@ -175,11 +175,12 @@ void main() {
       expect(find.textContaining('not verified'), findsNothing);
       expect(find.textContaining('Awaiting approval'), findsNothing);
 
-      // With no trusted full node there is nothing to approve it: say so.
+      // No trust root: even without a full node, an active client has no warning.
       runtime.nodes = <NodeView>[phone];
       runtime.notifyListeners();
       await tester.pump();
-      expect(find.text('Online, Client, android, Awaiting approval'), findsOneWidget);
+      expect(find.text('Online, Client, android'), findsOneWidget);
+      expect(find.textContaining('Awaiting approval'), findsNothing);
     });
 
     test('a local full node lists devices (itself included) from the engine', () async {
