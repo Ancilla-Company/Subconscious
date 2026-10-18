@@ -72,7 +72,7 @@ def test_host_defaults_choose_loopback_ephemeral_or_stable_dev_port(tmp_path):
     )
 
     assert production.bind_host == "127.0.0.1"
-    assert production.requested_port == EngineHost.PRODUCTION_PORT == 50506
+    assert production.requested_port == EngineHost.PRODUCTION_PORT == 51516
     assert development.requested_port == EngineHost.DEVELOPMENT_PORT
     assert development.token.value == EngineHost.DEVELOPMENT_TOKEN
     assert lan.bind_host == "0.0.0.0"
@@ -198,6 +198,63 @@ def test_second_engine_on_same_port_raises_and_keeps_first_runtime_file(tmp_path
             assert not (tmp_path / "b" / "runtime.json").exists()
 
     run(scenario())
+
+
+def test_blocked_port_falls_back_and_publishes_actual_port(tmp_path, monkeypatch):
+    import json
+    import types
+
+    from subconscious_engine import host as host_module
+
+    class BlockedSocket(socket.socket):
+        def bind(self, address):
+            if address[1] != 0:
+                raise OSError(13, "access denied (reserved port range)")
+            super().bind(address)
+
+    proxy = types.SimpleNamespace(**vars(socket))
+    proxy.socket = BlockedSocket
+    monkeypatch.setattr(host_module, "socket", proxy)
+
+    async def scenario():
+        host = EngineHost(
+            EngineConfig(port=51516, data_directory=tmp_path, headless=True)
+        )
+        async with running_host(host):
+            assert host.bound_port != 51516
+            published = json.loads((tmp_path / "runtime.json").read_text("utf-8"))
+            assert published["port"] == host.bound_port
+
+    run(scenario())
+
+
+def test_blocked_port_with_live_listener_still_reports_already_running(
+    tmp_path, monkeypatch
+):
+    from subconscious_engine import host as host_module
+
+    live = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    live.bind(("127.0.0.1", 0))
+    live.listen(1)
+    port = live.getsockname()[1]
+
+    class BlockedSocket(socket.socket):
+        def bind(self, address):
+            raise OSError(13, "access denied")
+
+    import types
+
+    proxy = types.SimpleNamespace(**vars(socket))
+    proxy.socket = BlockedSocket
+    monkeypatch.setattr(host_module, "socket", proxy)
+    try:
+        host = EngineHost(
+            EngineConfig(port=port, data_directory=tmp_path, headless=True)
+        )
+        with pytest.raises(EngineAlreadyRunningError):
+            run(host.serve())
+    finally:
+        live.close()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="exclusive bind is Windows-only")

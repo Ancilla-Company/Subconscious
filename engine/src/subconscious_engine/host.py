@@ -39,8 +39,10 @@ StatusIndicatorFactory = Callable[..., BackgroundStatusIndicator]
 
 logger = logging.getLogger(__name__)
 
-# EADDRINUSE on POSIX plus the Windows WSAEADDRINUSE / WSAEACCES codes.
-_ADDRESS_IN_USE_ERRORS = {errno.EADDRINUSE, 10048, 10013}
+# EADDRINUSE on POSIX plus the Windows WSAEADDRINUSE code.
+_ADDRESS_IN_USE_ERRORS = {errno.EADDRINUSE, 10048}
+# Windows WSAEACCES: port is in a reserved range (or exclusively held).
+_ADDRESS_BLOCKED_ERRORS = {errno.EACCES, 10013}
 
 
 class EngineAlreadyRunningError(OSError):
@@ -52,8 +54,8 @@ class EngineAlreadyRunningError(OSError):
 
 
 class EngineHost:
-    DEVELOPMENT_PORT = 50505
-    PRODUCTION_PORT = 50506
+    DEVELOPMENT_PORT = 51515
+    PRODUCTION_PORT = 51516
     DEVELOPMENT_TOKEN = "subconscious-dev-token"
 
     def __init__(
@@ -225,6 +227,15 @@ class EngineHost:
         if self._server is not None:
             self._server.should_exit = True
 
+    def _port_has_listener(self, port: int) -> bool:
+        probe_host = "127.0.0.1" if self.bind_host in ("0.0.0.0", "") else self.bind_host
+        try:
+            with socket.create_connection((probe_host, port), timeout=0.5):
+                return True
+        except OSError as error:
+            logger.debug("No listener on port %s: %s", port, error)
+            return False
+
     async def serve(self) -> None:
         if self._listener is not None or self._server is not None:
             raise RuntimeError("The engine host is already running.")
@@ -243,10 +254,28 @@ class EngineHost:
             try:
                 listener.bind((self.bind_host, self.requested_port))
             except OSError as error:
-                code = error.errno or getattr(error, "winerror", None)
-                if code in _ADDRESS_IN_USE_ERRORS or getattr(error, "winerror", None) in _ADDRESS_IN_USE_ERRORS:
+                codes = {error.errno, getattr(error, "winerror", None)}
+                if codes & _ADDRESS_IN_USE_ERRORS:
                     raise EngineAlreadyRunningError(self.requested_port) from error
-                raise
+                if self.requested_port and codes & _ADDRESS_BLOCKED_ERRORS:
+                    # Windows refuses binds inside reserved port ranges (Hyper-V,
+                    # WSL, Docker) with WSAEACCES. With SO_EXCLUSIVEADDRUSE the same
+                    # code can mean a live listener, so probe before falling back.
+                    if self._port_has_listener(self.requested_port):
+                        raise EngineAlreadyRunningError(self.requested_port) from error
+                    logger.warning(
+                        "Port %s is blocked or reserved by the OS (%s); falling back to an available port.",
+                        self.requested_port,
+                        error,
+                    )
+                    listener.close()
+                    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    if sys.platform == "win32":
+                        listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    listener.bind((self.bind_host, 0))
+                    logger.warning("Engine fell back to port %s.", listener.getsockname()[1])
+                else:
+                    raise
             listener.listen(2048)
             self._listener = listener
             self._bound_port = int(listener.getsockname()[1])

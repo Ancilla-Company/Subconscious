@@ -22,7 +22,7 @@ Nothing is started when `SUBCONSCIOUS_ENGINE_DEV=true`, when an explicit engine 
 flutter run -d windows --release --dart-define=SUBCONSCIOUS_ENGINE_EXE=C:\path\to\engine\subconscious-desktop.exe
 ```
 
-Two app windows starting together are kept to one launch by an exclusive lock file (`gui-engine-launch.lock` in `%APPDATA%\Subconscious`). Follow-up: the Python engine has no real single-instance guard on Windows (`SO_REUSEADDR` lets a second process bind port 50506 and overwrite `runtime.json`), so starting it by hand while the app launches it can still produce two engines.
+Two app windows starting together are kept to one launch by an exclusive lock file (`gui-engine-launch.lock` in `%APPDATA%\Subconscious`). Follow-up: the Python engine has no real single-instance guard on Windows (`SO_REUSEADDR` lets a second process bind port 51516 and overwrite `runtime.json`), so starting it by hand while the app launches it can still produce two engines.
 
 ## Devices, executor picker and relay fallback
 

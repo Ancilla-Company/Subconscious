@@ -10,7 +10,7 @@ All engine and client commands accept `--config <path>`. The default is `config.
 
 ```powershell
 subconscious config init --config .\subconscious.yaml
-subconscious config set --config .\subconscious.yaml engine.port 50505
+subconscious config set --config .\subconscious.yaml engine.port 51515
 subconscious config validate --config .\subconscious.yaml
 subconscious config show --config .\subconscious.yaml
 subconscious start --config .\subconscious.yaml
@@ -34,9 +34,9 @@ subconscious start --dev
 Running `subconscious` without a command prints help. `subconscious start`
 runs the engine with its tray status indicator. Add `--detached` to launch it as
 a background process, and independently add `--no-tray` when no tray icon is
-wanted. Production is the default: port `50506` and a generated token.
+wanted. Production is the default: port `51516` and a generated token.
 Development mode (`--dev` or `SUBCONSCIOUS_ENV=development`) defaults to port
-`50505`, token `subconscious-dev-token`, and a separate `-dev` data directory,
+`51515`, token `subconscious-dev-token`, and a separate `-dev` data directory,
 so both can run side by side. `--port 0` picks any free port. Use `--lan` for all-interface IPv4 binding.
 
 The tray menu can copy a future-compatible join command containing the engine

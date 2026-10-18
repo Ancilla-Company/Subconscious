@@ -114,6 +114,60 @@
       "detail": "Engine + GUI + TUI builds consumed by the MSIX tasks."
     },
     {
+      "label": "Package: Build components (no TUI)",
+      "type": "shell",
+      "command": "echo components built",
+      "dependsOn": [
+        "Package: Engine (PyInstaller)",
+        "Package: Flutter Windows GUI"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "detail": "Engine + GUI only; skips the TUI."
+    },
+    {
+      "label": "Package: MSIX (Local, self-signed, no TUI)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", "packaging/msix/build_msix.ps1",
+        "-Python", "${command:python.interpreterPath}",
+        "-CertPath", "build/packaging/dev-cert/dev.pfx",
+        "-IdentityName", "Ancilla.Subconscious.Dev",
+        "-Publisher", "CN=Placeholder",
+        "-CertPassword", "subconscious-dev",
+        "-SkipTui"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": [
+        "Package: Dev signing cert (create + trust)",
+        "Package: Build components (no TUI)"
+      ],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Like the Local task but without the TUI (faster)."
+    },
+    {
+      "label": "Package: MSIX (Store, unsigned, no TUI)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", "packaging/msix/build_msix.ps1",
+        "-Python", "${command:python.interpreterPath}",
+        "-Version", "${input:msixVersion}",
+        "-SkipTui"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": ["Package: Build components (no TUI)"],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Like the Store task but without the TUI (faster)."
+    },
+    {
       "label": "Package: Dev signing cert (create + trust)",
       "type": "shell",
       "command": "powershell",

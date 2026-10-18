@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--port",
         type=int,
         default=None,
-        help="Listen port; default is 50506 (production) or 50505 (development); zero picks an available port.",
+        help="Listen port; default is 51516 (production) or 51515 (development); zero picks an available port.",
     )
     start.add_argument("--lan", action="store_true", default=None, help="Bind to all IPv4 interfaces.")
     start.add_argument("--node-id", help="Advertise a stable engine node identifier.")

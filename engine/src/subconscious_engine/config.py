@@ -128,7 +128,7 @@ class HiveConfig:
 
 @dataclass(frozen=True, slots=True)
 class EngineConfig:
-    # None selects the mode default (50506 production, 50505 development);
+    # None selects the mode default (51516 production, 51515 development);
     # 0 requests an ephemeral port.
     port: int | None = None
     api: bool = True

@@ -9,7 +9,7 @@ import '../hive/hive_runtime.dart';
 const Duration _healthTimeout = Duration(seconds: 2);
 const EngineRuntimeInfo _developmentRuntime = EngineRuntimeInfo(
   host: '127.0.0.1',
-  port: 50505,
+  port: 51515,
   token: 'subconscious-dev-token',
   pid: 0,
   version: 'development',

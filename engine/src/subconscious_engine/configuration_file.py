@@ -78,7 +78,7 @@ def write_template(path: Path, *, overwrite: bool = False) -> None:
     document = {
         "version": _VERSION,
         "engine": {
-            "port": 50506, "dev": False, "headless": False, "lan_enabled": False,
+            "port": 51516, "dev": False, "headless": False, "lan_enabled": False,
             "node_id": None, "data_directory": None, "conscious_graph": None,
             "subconscious_graph": None, "subconscious_model_id": None,
             "subconscious_enabled": True, "reflection_interval_seconds": 86400,
@@ -98,7 +98,7 @@ def write_template(path: Path, *, overwrite: bool = False) -> None:
             },
         },
         "client": {
-            "engine_url": "http://localhost:50506", "token": "${SUBCONSCIOUS_ENGINE_TOKEN}",
+            "engine_url": "http://localhost:51516", "token": "${SUBCONSCIOUS_ENGINE_TOKEN}",
             "workspace": "General", "flutter_device": "windows",
         },
     }

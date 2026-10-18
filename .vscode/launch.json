@@ -13,13 +13,13 @@
         "--dev",
         "--lan",
         "--port",
-        "50505"
+        "51515"
       ],
       "env": {
         // "PYTHONPATH": "${workspaceFolder}/engine/src",
         "SUBCONSCIOUS_SERVER_URL": "http://127.0.0.1:5050/",
         // "SUBCONSCIOUS_SERVER_URL" :"https://api.subconscious.chat/",
-        "PYTHONPATH": "${workspaceFolder}/engine/src"
+        "SUBCONSCIOUS_FERNET_KEY": "IqweDE7oO7LVqmt-4m6JT2tFPyFcMk_qjpSokXmlUnY=",
       },
       "justMyCode": true,
       "console": "internalConsole"
@@ -33,7 +33,7 @@
       "deviceId": "${input:flutterDevice}",
       "toolArgs": [
         "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
-        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=50505",
+        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=51515",
         "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
         // "--dart-define=SUBCONSCIOUS_SERVER_URL=https://api.subconscious.chat/",
         "--dart-define=SUBCONSCIOUS_SERVER_URL=http://127.0.0.1:5050/",
@@ -53,7 +53,7 @@
         "--web-port=8550",
         "--web-hostname=localhost",
         "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
-        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=50505",
+        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=51515",
         "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
         "--dart-define=SUBCONSCIOUS_SERVER_URL=http://127.0.0.1:5050/",
         "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token",
@@ -70,7 +70,7 @@
       "deviceId": "emulator-5554",
       "toolArgs": [
         "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
-        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=50505",
+        "--dart-define=SUBCONSCIOUS_ENGINE_PORT=51515",
         "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
         "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token"
       ],
@@ -84,7 +84,7 @@
       "program": "${workspaceFolder}/apps/tui_app/bin/main.dart",
       "cwd": "${workspaceFolder}",
       "toolArgs": [
-        "--define=SUBCONSCIOUS_ENGINE_URL=http://127.0.0.1:50505",
+        "--define=SUBCONSCIOUS_ENGINE_URL=http://127.0.0.1:51515",
         "--define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token"
       ],
       "console": "terminal"
