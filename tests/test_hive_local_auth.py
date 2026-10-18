@@ -71,7 +71,7 @@ def test_tunnel_peers_are_remote_even_with_a_loopback_looking_address():
 
 
 class _Registry:
-    async def acquire(self, requested, label=None):
+    async def acquire(self, requested, label=None, **kwargs):
         return requested or "c1"
 
     async def release(self, identifier):
