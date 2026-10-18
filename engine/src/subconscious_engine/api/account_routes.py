@@ -63,7 +63,7 @@ async def login(request: Request) -> Response:
     try:
         return _session_response(await _service(request).login(email, password))
     except AccountError as error:
-        _LOGGER.debug(
+        _LOG.warning(
             "Account login failed: status=%s reason=%s",
             error.status_code,
             error.message,

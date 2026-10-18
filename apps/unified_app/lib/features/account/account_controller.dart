@@ -42,6 +42,9 @@ final class AccountController extends ChangeNotifier {
   /// The server session when this device uses a remote engine, else null.
   HiveRuntime? get serverRuntime => thinClient ? session : null;
 
+  static const String sessionExpiredMessage =
+      'Your session expired. Sign in again.';
+
   bool get usesServerAccount => thinClient;
 
   AccountStatus status = AccountStatus.initializing;
@@ -186,6 +189,12 @@ final class AccountController extends ChangeNotifier {
       await action();
       await session.adoptSession();
       _applySession();
+      if (!session.isSignedIn) {
+        // The server accepted the login but rejected the session straight
+        // away; do not report success.
+        error = messageFor(session.error ?? StateError('Sign-in failed.'));
+        return false;
+      }
       notice = null;
       if (!thinClient) await _linkEngine(linkEngine);
       isBusy = false;
@@ -213,8 +222,19 @@ final class AccountController extends ChangeNotifier {
         return;
       }
       await link(client);
+    } on EngineApiException catch (caughtError) {
+      final String message = caughtError.engineMessage ?? 'no details';
+      debugPrint(
+        'Could not sign the local engine in: '
+        '${caughtError.statusCode} $message',
+      );
+      notice =
+          'Signed in to the server, but the local engine was refused '
+          '(${caughtError.statusCode}): $message';
     } on Object catch (caughtError) {
-      debugPrint('Could not sign the local engine in: $caughtError');
+      debugPrint(
+        'Could not sign the local engine in: ${caughtError.runtimeType}',
+      );
       notice =
           'Signed in, but the local engine could not be linked to your '
           'account. Try signing out and in again.';
@@ -241,6 +261,12 @@ final class AccountController extends ChangeNotifier {
     if (isBusy || status == AccountStatus.initializing) return;
     if (session.isSignedIn == isAuthenticated) return;
     _applySession();
+    final Object? cause = session.error;
+    if (!session.isSignedIn &&
+        cause is HiveApiException &&
+        cause.statusCode == 401) {
+      error = sessionExpiredMessage;
+    }
     notifyListeners();
   }
 

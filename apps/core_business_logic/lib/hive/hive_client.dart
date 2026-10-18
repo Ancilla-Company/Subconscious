@@ -139,6 +139,7 @@ final class HiveClient {
       baseUri: account.baseUri,
       accessToken: () => account.accessToken,
       refreshAccessToken: account.forceRefresh,
+      onUnauthorized: (String reason) => account.expireSession(reason),
     );
     api = hiveApi;
     await _register(hiveApi, self, userId);

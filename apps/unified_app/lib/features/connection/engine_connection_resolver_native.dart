@@ -109,7 +109,11 @@ Future<bool> _isReachable(EngineRuntimeInfo runtime) async {
 
 EngineRepository _repositoryFromRuntime(EngineRuntimeInfo runtime) =>
     EngineRepository(
-      rest: RestEngineClient(baseUri: runtime.httpUri, token: runtime.token),
+      rest: RestEngineClient(
+        baseUri: runtime.httpUri,
+        token: runtime.token,
+        client: createLoggingClient(),
+      ),
       socket: WebSocketEngineClient(
         endpoint: runtime.webSocketUri,
         identity: _clientIdentity(),
@@ -131,6 +135,7 @@ EngineRepository? _repositoryFromExplicit(Uri? endpoint, String token) {
         queryParameters: const <String, String>{},
       ),
       token: token,
+      client: createLoggingClient(),
     ),
     socket: WebSocketEngineClient(
       identity: _clientIdentity(),
