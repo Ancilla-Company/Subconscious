@@ -79,7 +79,7 @@ def test_run_accepts_handshake_uses_versioned_envelopes_and_releases_on_disconne
         await WebSocketSession(socket).run()
         assert socket.accepted is True
         assert socket.sent == [
-            {"v": 1, "type": "client.hello.ack", "data": {"clientId": "desktop"}},
+            {"v": 1, "type": "client.hello.ack", "data": {"clientId": "desktop", "local": False}},
             {"v": 1, "type": "pong", "data": None},
         ]
         assert await registry.acquire("desktop") == "desktop"

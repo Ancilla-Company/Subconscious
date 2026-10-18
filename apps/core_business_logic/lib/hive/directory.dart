@@ -154,18 +154,22 @@ final class NodeDirectory {
 
   Future<Set<String>> _roots() async {
     final Set<String> roots = <String>{
+      // A thin client is never a trust root, even if it was pinned earlier.
       for (final String r in _pins.roots)
-        if (_nodes.containsKey(r)) r,
+        if (_nodes[r]?.isEngine ?? false) r,
     };
     final DirectoryNode? local = _nodes[localNodeId];
-    if (local != null && local.status == 'active' && local.approvedBy == null) {
+    if (local != null &&
+        local.isEngine &&
+        local.status == 'active' &&
+        local.approvedBy == null) {
       roots.add(local.id);
     }
     if (roots.isEmpty) {
-      // Trust on first use: exactly one active node without an approver.
+      // Trust on first use: exactly one active engine without an approver.
       final List<DirectoryNode> candidates = <DirectoryNode>[
         for (final DirectoryNode n in _nodes.values)
-          if (n.status == 'active' && n.approvedBy == null) n,
+          if (n.isEngine && n.status == 'active' && n.approvedBy == null) n,
       ];
       if (candidates.length == 1) roots.add(candidates.single.id);
     }

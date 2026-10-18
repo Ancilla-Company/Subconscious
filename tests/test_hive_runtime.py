@@ -326,6 +326,7 @@ def _user(identifier="user-1"):
 
 def _service(tmp_path, account, api, store=None):
     service = HiveService(
+        auto_approve_account_devices=False,  # these tests exercise the short-code path
         account=account,
         credential_store=SimpleNamespace(),
         data_directory=tmp_path,

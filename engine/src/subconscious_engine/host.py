@@ -162,6 +162,7 @@ class EngineHost:
             direct_timeout=hive.direct_timeout_seconds,
             relay_enabled=hive.relay_enabled,
             force_relay=hive.force_relay,
+            auto_approve_account_devices=hive.auto_approve_account_devices,
         )
         self.app.state.hive_service = self.hive_service
         self.hive_service.attach(self.app)

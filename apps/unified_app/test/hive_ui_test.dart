@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
@@ -64,4 +66,105 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Sign in'), findsNothing);
   });
-}
+
+  group('device list', () {
+    Future<HiveRuntime> signedIn(List<http.Request> requests) async {
+      final HiveRuntime runtime = HiveRuntime(
+        account: ServerAccountClient(
+          baseUri: Uri.parse('https://api.test'),
+          tokenStore: MemoryRefreshTokenStore(),
+          client: MockClient((http.Request r) async {
+            requests.add(r);
+            if (r.url.path == '/auth/email/login') {
+              return http.Response(
+                jsonEncode(<String, dynamic>{
+                  'access_token': 'a',
+                  'token_type': 'bearer',
+                  'expires_in': 900,
+                  'refresh_token': 'r',
+                  'user': <String, dynamic>{
+                    'id': 'u-1',
+                    'email': 'a@b.c',
+                    'display_name': 'A',
+                    'avatar_url': null,
+                    'connected_providers': <String>[],
+                  },
+                }),
+                200,
+              );
+            }
+            throw const SocketException('offline');
+          }),
+        ),
+      );
+      addTearDown(runtime.dispose);
+      return runtime;
+    }
+
+    NodeView view(String name, {String kind = 'engine', String status = 'active', bool local = false}) =>
+        NodeView(
+          node: DirectoryNode(
+            id: 'n_$name',
+            kind: kind,
+            name: name,
+            platform: 'windows',
+            appVersion: '1',
+            publicKey: Uint8List(32),
+            status: status,
+          ),
+          trusted: status == 'active',
+          online: true,
+          isLocal: local,
+        );
+
+    testWidgets('device cards have no dot icon or dot separators', (
+      WidgetTester tester,
+    ) async {
+      final HiveRuntime runtime = await signedIn(<http.Request>[]);
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      runtime.nodes = <NodeView>[view('Desk', local: true), view('Laptop')];
+      await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(runtime: runtime)))),
+      );
+      await tester.pump();
+      expect(find.byIcon(Icons.circle), findsNothing);
+      expect(find.textContaining('·'), findsNothing);
+      expect(find.text('Online, Engine, windows'), findsNWidgets(2));
+    });
+
+    testWidgets('signed-in pending device shows no code until the grace period', (
+      WidgetTester tester,
+    ) async {
+      final HiveRuntime runtime = await signedIn(<http.Request>[]);
+      runtime.approvalGrace = const Duration(seconds: 30);
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      runtime.nodes = <NodeView>[
+        view('Desk'),
+        view('Phone', kind: 'thin', status: 'pending', local: true),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(runtime: runtime)))),
+      );
+      await tester.pump();
+      expect(find.text('Connecting to your account'), findsOneWidget);
+      expect(find.textContaining('Code with'), findsNothing);
+      await tester.pump(const Duration(seconds: 31));
+      expect(find.text('Waiting for approval'), findsOneWidget);
+      expect(find.textContaining('Code with Desk'), findsOneWidget);
+    });
+
+    test('a local full node skips thin registration', () async {
+      final List<http.Request> requests = <http.Request>[];
+      final HiveRuntime runtime = await signedIn(requests);
+      runtime.hasLocalFullNode = true;
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      expect(runtime.status, HiveStatus.ready);
+      expect(runtime.error, isNull);
+      expect(runtime.localNode, isNull);
+      expect(
+        requests.map((http.Request r) => r.url.path),
+        <String>['/auth/email/login'],
+        reason: 'no device registration or directory fetch',
+      );
+    });
+  });}

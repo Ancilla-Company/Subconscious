@@ -122,6 +122,8 @@ class HiveConfig:
     relay_enabled: bool = True
     # Test/diagnostic only: skip WebRTC entirely and use the socket relay.
     force_relay: bool = False
+    # Signed-in account devices are approved by a trusted node without a short code.
+    auto_approve_account_devices: bool = True
 
 
 @dataclass(frozen=True, slots=True)

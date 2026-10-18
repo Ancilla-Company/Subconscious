@@ -44,6 +44,10 @@ class RuntimeInfoWriter:
         temporary = data_directory / f".{cls.file_name}.{os.getpid()}.{uuid4().hex}.tmp"
         try:
             temporary.write_text(info.model_dump_json(indent=2), encoding="utf-8")
+            if os.name == "posix":
+                # Holds the bearer token: readable by this user only. On Windows the
+                # per-user data directory ACL is inherited.
+                os.chmod(temporary, 0o600)
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)

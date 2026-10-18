@@ -68,6 +68,16 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   List<NodeView> nodes = const <NodeView>[];
   bool _restored = false;
 
+  /// True when a live engine runs on this machine (found through its
+  /// `runtime.json`). That engine is the full node and this GUI is only a
+  /// client of it, so no thin device is registered and no approval is asked.
+  /// Set by the connection resolver.
+  bool hasLocalFullNode = false;
+
+  /// How long a signed-in pending device waits for automatic approval before
+  /// the screen falls back to manual guidance and the code.
+  Duration approvalGrace = const Duration(seconds: 30);
+
   bool get isSignedIn => account.user != null;
   String? get email => account.user?.email;
 
@@ -194,6 +204,12 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   }
 
   Future<void> _startHive() async {
+    if (hasLocalFullNode) {
+      error = null;
+      status = HiveStatus.ready;
+      notifyListeners();
+      return;
+    }
     _busy();
     await hive.start();
     await _viewSubscription?.cancel();
