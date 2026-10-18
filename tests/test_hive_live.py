@@ -223,37 +223,13 @@ async def _scenario(server, tmp_path):
         assert first["online"] is True  # signalling is up
 
         await e2.start()
-        await reach(e2, "unenrolled", 30)
-        enrolled = await e2.hive("POST", "/enroll", json={})
-        assert enrolled.status_code == 200, enrolled.text
-        n2 = e2.node_id
-        await reach(e2, "pending", 30)
-        assert node_view(await e2.nodes(), n2)["status"] == "pending"
-
-        # engine 1 learns about the pending node by listing (no presence frame exists for it)
-        view = None
-        deadline = time.monotonic() + 10
-        while view is None and time.monotonic() < deadline:
-            view = node_view(await e1.nodes(), n2)
-            await asyncio.sleep(0.2)
-        assert view is not None and view["status"] == "pending" and view["trusted"] is False
-        sas = view["sas"]
-        assert sas and len(sas) == 6 and sas == node_view(await e2.nodes(), n1)["sas"]  # both sides show the same code
-        wrong = await e1.hive("POST", f"/nodes/{n2}/approve", json={"sas": "000000" if sas != "000000" else "111111"})
-        assert wrong.status_code == 400
-        approved = await e1.hive("POST", f"/nodes/{n2}/approve", json={"sas": sas})
-        assert approved.status_code == 200, approved.text
+        # Signing in enrols the engine itself: no invite, approval code or trust root.
         await reach(e2, "running", 30)
-
+        n2 = e2.node_id
+        await until(lambda: e1.service.directory.is_trusted(n2) and e2.service.directory.is_trusted(n1), 30)
         listing = await e1.service.api.list_nodes()
         second = next(n for n in listing["nodes"] if n["id"] == n2)
-        assert second["status"] == "active" and second["approved_by"] == n1
-        assert verify_signature(
-            e1.service.identity.public_key, second["approval_sig"],
-            approval_message(account_a["user_id"], second["public_key"]),
-        )
-        assert e2.service.directory.is_trusted(n1) and e1.service.directory.is_trusted(n2)
-
+        assert second["status"] == "active"
         # presence: the server reports both online and each engine heard it
         await until(lambda: e1.service._online.get(n2) is True and e2.service._online.get(n1) is True, 20)
         listing = await e1.service.api.list_nodes()
@@ -550,19 +526,9 @@ async def _relay_scenario(server, tmp_path):
         await reach(e1, "running", 30)
         n1 = e1.node_id
         await e2.start()
-        await reach(e2, "unenrolled", 30)
-        assert (await e2.hive("POST", "/enroll", json={})).status_code == 200
-        n2 = e2.node_id
-        await reach(e2, "pending", 30)
-        view = None
-        deadline = time.monotonic() + 10
-        while view is None and time.monotonic() < deadline:
-            view = node_view(await e1.nodes(), n2)
-            await asyncio.sleep(0.2)
-        assert view is not None
-        approved = await e1.hive("POST", f"/nodes/{n2}/approve", json={"sas": view["sas"]})
-        assert approved.status_code == 200, approved.text
         await reach(e2, "running", 30)
+        n2 = e2.node_id
+        await until(lambda: e1.service.directory.is_trusted(n2) and e2.service.directory.is_trusted(n1), 30)
 
         # ---- the link is a relay link on both sides (no WebRTC was attempted) ----------------
         await until(lambda: e1.service.peers.link(n2) and e2.service.peers.link(n1), 40)
