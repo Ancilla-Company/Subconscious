@@ -287,7 +287,7 @@ final class _ThreadsSection extends StatelessWidget {
   );
 
   Widget _threadBody(BuildContext context) {
-    if (!controller.isConnected) {
+    if (!controller.isConnected && controller.threads.isEmpty) {
       return const _PanelMessage(
         'Threads are available when the engine is connected.',
       );

@@ -33,6 +33,7 @@ final class EngineChatPanel extends StatefulWidget {
   const EngineChatPanel({
     required this.provider,
     required this.isComposerEnabled,
+    this.onOpenDevices,
     this.workspace,
     this.activeFile,
     this.thread,
@@ -54,6 +55,10 @@ final class EngineChatPanel extends StatefulWidget {
   final ExecutorDirectory? executors;
   final EngineLlmProvider provider;
   final bool isComposerEnabled;
+
+  /// When set and the composer is disabled, a notice offers this shortcut to
+  /// the Account/Devices page.
+  final VoidCallback? onOpenDevices;
   final Workspace? workspace;
   final ChatFileReference? activeFile;
   final ThreadInfo? thread;
@@ -720,6 +725,12 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                       onDecision: widget.onToolApproval,
                     ),
                   ),
+              if (!_showThreadSettings &&
+                  !widget.isComposerEnabled &&
+                  widget.onOpenDevices != null)
+                gutter(
+                  _EngineUnreachableNotice(onOpenDevices: widget.onOpenDevices!),
+                ),
               if (!_showThreadSettings && widget.executors != null)
                 gutter(TaskStatusBar(provider: widget.provider)),
               if (!_showThreadSettings && _voice.realtime != RealtimeState.off)
@@ -763,6 +774,42 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+final class _EngineUnreachableNotice extends StatelessWidget {
+  const _EngineUnreachableNotice({required this.onOpenDevices});
+
+  final VoidCallback onOpenDevices;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey<String>('engine-unreachable-notice'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest,
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(Icons.cloud_off_outlined, size: 18, color: colors.onSurface),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'No engine is reachable',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+          TextButton(
+            onPressed: onOpenDevices,
+            child: const Text('Devices'),
+          ),
+        ],
       ),
     );
   }

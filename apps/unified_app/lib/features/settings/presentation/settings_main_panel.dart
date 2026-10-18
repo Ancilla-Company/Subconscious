@@ -1850,8 +1850,14 @@ String? _nullIfEmpty(String value) {
   return trimmed.isEmpty ? null : trimmed;
 }
 
+/// Flat, compact form controls shared with the Windows build. Mobile uses the
+/// same template so its buttons and fields match the app's styling; web and
+/// the other desktops keep the stock Material theme.
 ThemeData settingsFormTheme(BuildContext context) =>
-    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+    !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)
     ? _windowsSettingsTheme(context)
     : Theme.of(context);
 

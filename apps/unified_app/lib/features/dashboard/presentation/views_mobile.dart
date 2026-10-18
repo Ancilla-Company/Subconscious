@@ -12,7 +12,6 @@ import '../../account/presentation/account_panel.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
 import '../../hive/hive_runtime.dart';
-import '../../hive/presentation/home_engine_panel.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
@@ -70,35 +69,38 @@ final class MobileDashboardView extends StatelessWidget {
         accountController: accountController,
       );
     }
-    // No local engine on this device: until a home engine is reachable, show
-    // sign-in (direct to the server) or why no engine could be reached.
+    final EngineLlmProvider? provider = controller.chatProvider;
+    // No local engine on this device and nothing loaded yet: sign in directly
+    // to the server. Once content has loaded it always stays visible.
     final HiveRuntime? server = accountController.serverRuntime;
-    if (server != null && !controller.isConnected && !controller.isLoading) {
-      return accountController.isAuthenticated
-          ? HomeEnginePanel(
-              runtime: server,
-              error: controller.error,
-              onRetry: controller.reconnectNow,
-            )
-          : AccountPanel(controller: accountController);
+    if (provider == null &&
+        server != null &&
+        !accountController.isAuthenticated &&
+        !controller.isConnected &&
+        !controller.isLoading) {
+      return AccountPanel(controller: accountController);
     }
-    if (controller.isLoading || controller.isLoadingChat) {
+    // The spinner only covers the initial load; loaded content is never
+    // replaced by it.
+    if (provider == null &&
+        (controller.isLoading || controller.isLoadingChat)) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (controller.chatError case final Object error) {
+    final Object? chatError = controller.chatError;
+    if (provider == null && chatError != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text('$error'),
+          child: Text('$chatError'),
         ),
       );
     }
-    final EngineLlmProvider? provider = controller.chatProvider;
     if (provider != null) {
       return EngineChatPanel(
         key: ValueKey<int>(controller.chatSessionVersion),
         provider: provider,
         isComposerEnabled: controller.isConnected,
+        onOpenDevices: controller.openAccountShortcut,
         workspace: controller.threadsWorkspace,
         activeFile: controller.activeFileReference == null
             ? null
