@@ -27,25 +27,19 @@ void main() {
     expect(dir.trustedNode(root.nodeId)!.isEngine, isTrue);
   });
 
-  test('server-forged approval is not trusted', () async {
+  test('every active account node is trusted without approval signatures', () async {
     final NodeIdentity root = await seededIdentity(1);
-    final NodeIdentity evil = await seededIdentity(80);
+    final NodeIdentity other = await seededIdentity(80);
     final NodeIdentity stranger = await seededIdentity(120);
     final NodeDirectory dir = NodeDirectory(userId: user, localNodeId: root.nodeId);
     await dir.update(<Object?>[
       nodeJson(root),
-      // Signed by a key that is not the claimed approver.
-      nodeJson(
-        evil,
-        approvedBy: root.nodeId,
-        approvalSig: await approval(stranger, evil),
-      ),
-      // Active but missing any approval.
-      nodeJson(stranger),
+      nodeJson(other),
+      nodeJson(stranger, kind: 'thin'),
     ]);
     expect(dir.isTrusted(root.nodeId), isTrue);
-    expect(dir.isTrusted(evil.nodeId), isFalse);
-    expect(dir.isTrusted(stranger.nodeId), isFalse);
+    expect(dir.isTrusted(other.nodeId), isTrue);
+    expect(dir.isTrusted(stranger.nodeId), isTrue);
   });
 
   test('pending and revoked nodes are never trusted', () async {
@@ -67,19 +61,13 @@ void main() {
     expect(dir.isTrusted(revoked.nodeId), isFalse);
   });
 
-  test('chains through an intermediate approver and rejects revoked links', () async {
+  test('a revoked node is no longer trusted', () async {
     final NodeIdentity root = await seededIdentity(1);
-    final NodeIdentity mid = await seededIdentity(40);
     final NodeIdentity leaf = await seededIdentity(80);
-    Future<List<Object?>> build(String midStatus) async => <Object?>[
-      nodeJson(root),
-      nodeJson(mid, status: midStatus, approvedBy: root.nodeId, approvalSig: await approval(root, mid)),
-      nodeJson(leaf, kind: 'thin', approvedBy: mid.nodeId, approvalSig: await approval(mid, leaf)),
-    ];
     final NodeDirectory dir = NodeDirectory(userId: user, localNodeId: root.nodeId);
-    await dir.update(await build('active'));
+    await dir.update(<Object?>[nodeJson(root), nodeJson(leaf, kind: 'thin')]);
     expect(dir.isTrusted(leaf.nodeId), isTrue);
-    await dir.update(await build('revoked'));
+    await dir.update(<Object?>[nodeJson(root), nodeJson(leaf, kind: 'thin', status: 'revoked')]);
     expect(dir.isTrusted(leaf.nodeId), isFalse);
   });
 
@@ -105,17 +93,16 @@ void main() {
     expect(dir.get(root.nodeId), isNull);
   });
 
-  test('trust on first use pins the sole unapproved active node', () async {
+  test('an engine is trusted without any pinned root or approver', () async {
     final NodeIdentity engine = await seededIdentity(1);
     final NodeIdentity phone = await seededIdentity(40);
-    final MemoryPinStore pins = MemoryPinStore();
-    final NodeDirectory dir = NodeDirectory(userId: user, localNodeId: phone.nodeId, pins: pins);
+    final NodeDirectory dir = NodeDirectory(userId: user, localNodeId: phone.nodeId);
     await dir.update(<Object?>[
       nodeJson(engine),
       nodeJson(phone, kind: 'thin', status: 'pending'),
     ]);
     expect(dir.isTrusted(engine.nodeId), isTrue);
-    expect(pins.roots, contains(engine.nodeId));
+    expect(dir.isTrusted(phone.nodeId), isTrue, reason: 'local node, listed');
   });
 
   test('chooseHomeEngine prefers last used, then any online trusted engine', () async {
@@ -137,5 +124,12 @@ void main() {
     expect(chooseHomeEngine(views, lastUsedNodeId: b.nodeId)!.id, b.nodeId);
     expect(chooseHomeEngine(views, lastUsedNodeId: off.nodeId)!.id, a.nodeId);
     expect(chooseHomeEngine(<NodeView>[view(a, trusted: false)]), isNull);
+  });
+
+  test('thin clients are members once active', () async {
+    final NodeIdentity phone = await seededIdentity(40);
+    final NodeDirectory alone = NodeDirectory(userId: user, localNodeId: phone.nodeId);
+    await alone.update(<Object?>[nodeJson(phone, kind: 'thin')]);
+    expect(alone.isTrusted(phone.nodeId), isTrue);
   });
 }

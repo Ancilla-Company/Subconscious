@@ -326,6 +326,7 @@ def _user(identifier="user-1"):
 
 def _service(tmp_path, account, api, store=None):
     service = HiveService(
+        auto_approve_account_devices=False,  # these tests exercise the short-code path
         account=account,
         credential_store=SimpleNamespace(),
         data_directory=tmp_path,
@@ -428,7 +429,38 @@ def test_approval_requires_matching_short_code_and_signs_the_new_key(tmp_path):
     run(scenario())
 
 
-def test_untrusted_local_node_waits_and_cannot_approve_or_invite(tmp_path):
+def test_engine_registers_as_full_node_even_when_clients_are_already_listed(tmp_path):
+    """Regression: a thin client signing in first used to leave the engine 'unenrolled' forever."""
+
+    class ActivatingServerApi(FakeServerApi):
+        async def register(self, body):
+            entry = await super().register(body)
+            if body["kind"] == "engine":
+                entry["status"] = "active"  # the registry lists engines as full nodes
+            return entry
+
+    async def scenario():
+        phone, web = NodeIdentity.generate(), NodeIdentity.generate()
+        account, api = FakeAccount(), ActivatingServerApi()
+        api.nodes = [
+            {**_entry(phone), "kind": "thin", "name": "Phone"},
+            {**_entry(web), "kind": "thin", "name": "Web"},
+        ]
+        service = _service(tmp_path, account, api)
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        registers = [c for c in api.calls if c[0] == "register"]
+        assert len(registers) == 1 and registers[0][1]["kind"] == "engine"
+        nodes = service.snapshot()["nodes"]
+        engine = next(n for n in nodes if n["local"])
+        assert engine["kind"] == "engine" and engine["trusted"]
+        assert engine["id"] == service.identity.node_id
+        assert {n["kind"] for n in nodes if not n["local"]} == {"thin"}
+        await service.shutdown()
+    run(scenario())
+
+
+def test_pending_local_node_does_not_wait_for_a_trust_root(tmp_path):
     async def scenario():
         root = NodeIdentity.generate()
         me = NodeIdentity.generate()
@@ -436,14 +468,8 @@ def test_untrusted_local_node_waits_and_cannot_approve_or_invite(tmp_path):
         api.nodes = [_entry(root), _entry(me, status="pending")]
         service = _service(tmp_path, account, api, MemoryStore(b64u_encode(me.seed())))
         account.emit(_user())
-        await until(lambda: service.state == "pending")
-        assert service.signaling is None  # no network presence until approved
-        with pytest.raises(HiveError) as invite:
-            await service.create_invite()
-        assert invite.value.status_code == 403
-        with pytest.raises(HiveError) as approve:
-            await service.approve(root.node_id, "123456")
-        assert approve.value.status_code == 403
+        await until(lambda: service.state == "running")
+        assert service.signaling is not None
         await service.shutdown()
     run(scenario())
 

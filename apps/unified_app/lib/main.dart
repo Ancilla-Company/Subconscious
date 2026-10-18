@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -17,6 +18,7 @@ import 'features/settings/controller/settings_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  httpLogSink = (String line) => debugPrint(line);
   await initializeDesktopWindow();
   const String configuredToken = String.fromEnvironment(
     'SUBCONSCIOUS_ENGINE_TOKEN',
@@ -69,8 +71,21 @@ Future<void> main() async {
     session: HiveRuntime.shared,
     clientProvider: () => controller.repository?.rest,
     thinClient: !_hasLocalEngine,
-    onSessionChanged: controller.reconnectNow,
+    onSessionChanged: () async {
+      await controller.reconnectNow();
+      if (!HiveRuntime.shared.hasLocalFullNode) return;
+      // The engine lists itself on the account a moment after it is signed in.
+      await HiveRuntime.shared.refresh();
+      unawaited(
+        Future<void>.delayed(
+          const Duration(seconds: 4),
+          HiveRuntime.shared.refresh,
+        ),
+      );
+    },
   );
+  HiveRuntime.shared.localEngineClient = () async =>
+      controller.repository?.rest;
   unawaited(_loadEngineAndRestoreAccount(controller, accountController));
   runApp(
     SubconsciousApp(

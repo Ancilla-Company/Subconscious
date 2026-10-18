@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
@@ -40,6 +41,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
           tokenStore: SecureRefreshTokenStore(_storage),
         );
     this.account = accountClient;
+    accountClient.onSessionExpired = _onSessionExpired;
     this.hive =
         hive ??
         HiveClient(
@@ -67,6 +69,21 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   Object? error;
   List<NodeView> nodes = const <NodeView>[];
   bool _restored = false;
+
+  /// True when a live engine runs on this machine (found through its
+  /// `runtime.json`). That engine is the full node and this GUI is only a
+  /// client of it, so no thin device is registered and no approval is asked.
+  /// Set by the connection resolver.
+  bool hasLocalFullNode = false;
+
+  /// The local engine's REST client. With [hasLocalFullNode] the device list
+  /// comes from that engine (it holds the account's directory and the trust
+  /// verdicts), since this GUI registers nothing itself.
+  Future<RestEngineClient?> Function()? localEngineClient;
+
+  /// How long a signed-in pending device waits for automatic approval before
+  /// the screen falls back to manual guidance and the code.
+  Duration approvalGrace = const Duration(seconds: 30);
 
   bool get isSignedIn => account.user != null;
   String? get email => account.user?.email;
@@ -194,6 +211,13 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   }
 
   Future<void> _startHive() async {
+    if (hasLocalFullNode) {
+      error = null;
+      status = HiveStatus.ready;
+      await _loadFromLocalEngine();
+      notifyListeners();
+      return;
+    }
     _busy();
     await hive.start();
     await _viewSubscription?.cancel();
@@ -207,7 +231,27 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     notifyListeners();
   }
 
+  /// Lists the account's devices through the local engine. A failure leaves
+  /// the list empty; it never turns the account sign-in into an error.
+  Future<void> _loadFromLocalEngine() async {
+    try {
+      final RestEngineClient? client = await localEngineClient?.call();
+      if (client == null) return;
+      nodes = <NodeView>[
+        for (final Map<String, dynamic> row in await client.listHiveNodes())
+          if (_viewFromEngineRow(row) case final NodeView view) view,
+      ];
+    } on Object catch (caught) {
+      debugPrint('Could not list devices from the local engine: $caught');
+    }
+  }
+
   Future<void> refresh() async {
+    if (hasLocalFullNode) {
+      await _loadFromLocalEngine();
+      notifyListeners();
+      return;
+    }
     try {
       nodes = await hive.refreshDirectory();
       notifyListeners();
@@ -267,6 +311,19 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     notifyListeners();
   }
 
+  /// The server rejected the session (401): drop it so the UI shows signed
+  /// out with the cause in [error], instead of a dead session.
+  void _onSessionExpired(HiveApiException caught) {
+    unawaited(_viewSubscription?.cancel());
+    _viewSubscription = null;
+    unawaited(hive.stop());
+    nodes = const <NodeView>[];
+    error = caught;
+    status = HiveStatus.signedOut;
+    _restored = false;
+    notifyListeners();
+  }
+
   void _fail(Object caught) {
     error = caught;
     status = isSignedIn ? HiveStatus.ready : HiveStatus.error;
@@ -279,6 +336,31 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     unawaited(hive.dispose());
     super.dispose();
   }
+}
+
+/// Maps one `GET /hive/nodes` row from the local engine to a [NodeView]. The
+/// engine already verified keys and approval chains, so `trusted` is its
+/// verdict; the public key is not needed for display and is left zeroed.
+NodeView? _viewFromEngineRow(Map<String, dynamic> row) {
+  final Object? id = row['id'];
+  if (id is! String) return null;
+  final bool online = row['online'] == true;
+  return NodeView(
+    node: DirectoryNode(
+      id: id,
+      kind: row['kind'] as String? ?? 'thin',
+      name: row['name'] as String? ?? '',
+      platform: row['platform'] as String? ?? '',
+      appVersion: '',
+      publicKey: Uint8List(32),
+      status: row['status'] as String? ?? 'active',
+      online: online,
+    ),
+    trusted: row['trusted'] == true,
+    online: online,
+    isLocal: row['local'] == true,
+    tier: row['tier'] as String?,
+  );
 }
 
 String _deviceName() {

@@ -26,12 +26,12 @@ final class HomeEnginePanel extends StatelessWidget {
       final NodeView? local = runtime.localNode;
       final bool pending = local != null && local.node.status == 'pending';
       final String title = pending
-          ? 'Waiting for approval'
+          ? 'Connecting to your account'
           : 'No engine reachable';
       final String body = pending
-          ? 'Approve this device from Account > Devices on a computer that is already '
-                'signed in to Subconscious. Both screens must show the same '
-                'code.'
+          ? 'Your account devices approve this one automatically. If it '
+                'takes longer than a minute, open Account > Devices on a '
+                'computer that is signed in to Subconscious.'
           : 'None of your engines is online. Start Subconscious on your '
                 'computer, make sure it is signed in to the same account, '
                 'then try again.';

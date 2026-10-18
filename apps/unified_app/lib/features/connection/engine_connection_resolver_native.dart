@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:core_business_logic/core_business_logic.dart';
 
 import '../hive/hive_repository_resolver.dart';
+import '../hive/hive_runtime.dart';
 
 const Duration _healthTimeout = Duration(seconds: 2);
 const EngineRuntimeInfo _developmentRuntime = EngineRuntimeInfo(
@@ -27,6 +28,8 @@ Future<EngineRepository?> resolveEngineRepository({
         loader: _FileRuntimeInfoLoader(directory),
         healthProbe: _isReachable,
       ).discover();
+      // The local engine is the full node; this GUI is only its client.
+      HiveRuntime.shared.hasLocalFullNode = true;
       return _repositoryFromRuntime(runtime);
     } on Object catch (error) {
       discoveryError = error;
@@ -106,7 +109,11 @@ Future<bool> _isReachable(EngineRuntimeInfo runtime) async {
 
 EngineRepository _repositoryFromRuntime(EngineRuntimeInfo runtime) =>
     EngineRepository(
-      rest: RestEngineClient(baseUri: runtime.httpUri, token: runtime.token),
+      rest: RestEngineClient(
+        baseUri: runtime.httpUri,
+        token: runtime.token,
+        client: createLoggingClient(),
+      ),
       socket: WebSocketEngineClient(
         endpoint: runtime.webSocketUri,
         identity: _clientIdentity(),
@@ -128,6 +135,7 @@ EngineRepository? _repositoryFromExplicit(Uri? endpoint, String token) {
         queryParameters: const <String, String>{},
       ),
       token: token,
+      client: createLoggingClient(),
     ),
     socket: WebSocketEngineClient(
       identity: _clientIdentity(),

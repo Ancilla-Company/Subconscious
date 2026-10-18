@@ -8,6 +8,7 @@ import logging
 import os
 import socket
 import sys
+from urllib.parse import urlsplit
 
 import uvicorn
 
@@ -123,6 +124,10 @@ class EngineHost:
             else None
         )
         capabilities_url = config.capabilities_url or os.getenv("SUBCONSCIOUS_CAPABILITIES_URL")
+        logger.info(
+            "account server: %s",
+            urlsplit(config.resolved_account_server_url).netloc,
+        )
         self.account_session_service = AccountSessionService(
             AccountServerClient(config.resolved_account_server_url),
             credential_store=self.model_configuration_store,
@@ -162,6 +167,7 @@ class EngineHost:
             direct_timeout=hive.direct_timeout_seconds,
             relay_enabled=hive.relay_enabled,
             force_relay=hive.force_relay,
+            auto_approve_account_devices=hive.auto_approve_account_devices,
         )
         self.app.state.hive_service = self.hive_service
         self.hive_service.attach(self.app)

@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform as platform_module
+import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ from .identity import (
     load_or_create_identity,
     register_message,
     short_authentication_string,
+    verify_signature,
     IdentitySeedStore,
 )
 from .node import HiveNode
@@ -38,6 +41,9 @@ _LOG = logging.getLogger(__name__)
 _LOGGER = logging.getLogger("uvicorn.error")
 DIRECTORY_POLL_SECONDS = 15.0
 REFRESH_DEBOUNCE_SECONDS = 1.0
+AUTO_APPROVE_LIMIT = 5
+AUTO_APPROVE_WINDOW_SECONDS = 60.0
+AUTO_APPROVE_KINDS = frozenset({"thin", "engine"})
 
 
 class HiveService:
@@ -57,6 +63,7 @@ class HiveService:
         direct_timeout: float = DEFAULT_DIRECT_TIMEOUT,
         relay_enabled: bool = True,
         force_relay: bool = False,
+        auto_approve_account_devices: bool = True,
     ) -> None:
         self._account = account
         self._data_directory = data_directory
@@ -70,6 +77,8 @@ class HiveService:
         self._direct_timeout = direct_timeout
         self._relay_enabled = relay_enabled
         self._force_relay = force_relay
+        self._auto_approve = auto_approve_account_devices
+        self._auto_approvals: deque[float] = deque()
         self.app: Any = None
         self.state = "stopped"
         self.detail = ""
@@ -190,21 +199,25 @@ class HiveService:
     # --- main loop ------------------------------------------------------------
     async def _run(self) -> None:
         assert self.api and self.directory and self.identity
+        enroll_tried = False
         try:
             while True:
                 await self._refresh_directory()
-                nodes = self.directory.nodes
                 local = self.directory.get(self.identity.node_id)
                 if local is None:
-                    if nodes:
-                        self.state, self.detail = "unenrolled", "Run 'subconscious node enroll'."
-                    else:
-                        await self.enroll(None)  # first node of the account
+                    # Signing in to the account authorizes this engine: register it as a
+                    # full node whether or not other devices (clients) are listed already.
+                    if not enroll_tried:
+                        enroll_tried = True
+                        await self.enroll(None)
                         continue
-                elif not self.directory.is_trusted(local.id):
-                    self.state, self.detail = "pending", "Waiting for approval from another node."
+                    self.state = "error"
+                    self.detail = "This engine could not be listed on your account. Retrying."
+                    enroll_tried = False
                 else:
                     await self._connect_network()
+                    if self._auto_approve and self.state == "running":
+                        await self._auto_approve_loop()
                     return
                 await asyncio.sleep(DIRECTORY_POLL_SECONDS)
         except asyncio.CancelledError:
@@ -320,6 +333,8 @@ class HiveService:
         except (HiveApiError, AccountError):
             _LOG.warning("hive.service.HiveService._debounced_refresh: handled (HiveApiError, AccountError); continuing with fallback", exc_info=True)
             return
+        with logged_suppress(HiveError, HiveApiError, AccountError):
+            await self._auto_approve_pending()
         peers, directory = self.peers, self.directory
         if peers is None or directory is None:
             return
@@ -357,6 +372,7 @@ class HiveService:
             return
         with logged_suppress(HiveApiError, AccountError):
             await self._refresh_directory()
+            await self._auto_approve_pending()
 
     async def enroll(self, invite_code: str | None) -> dict[str, Any]:
         api, directory, identity, user = self._require_running()
@@ -382,8 +398,6 @@ class HiveService:
 
     async def create_invite(self) -> dict[str, Any]:
         api, directory, identity, _ = self._require_running()
-        if not directory.is_trusted(identity.node_id):
-            raise HiveError("Only an approved node can create invites.", 403)
         try:
             return await api.create_invite(identity.node_id)
         except HiveApiError as error:
@@ -401,8 +415,6 @@ class HiveService:
 
     async def approve(self, node_id: str, sas: str) -> None:
         api, directory, identity, user = self._require_running()
-        if not directory.is_trusted(identity.node_id):
-            raise HiveError("Only an approved node can approve others.", 403)
         if directory.get(node_id) is None:
             await self.refresh()  # the pending node may have enrolled after our last listing
         node = directory.get(node_id)
@@ -410,12 +422,77 @@ class HiveService:
             raise HiveError("That node is not waiting for approval.", 404)
         if sas.strip() != self.sas_for(node_id):
             raise HiveError("The short authentication code does not match.", 400)
+        await self._approve_verified(node_id)
+
+    async def _approve_verified(self, node_id: str) -> None:
+        """Sign and submit an approval. Callers must already have verified the node."""
+        api, directory, identity, user = self._require_running()
+        node = directory.get(node_id)
+        if node is None:
+            raise HiveError("That node is not waiting for approval.", 404)
         signature = identity.sign(approval_message(user.id, node.public_key_b64u))
         try:
             await api.approve(node_id, identity.node_id, signature)
             await self._refresh_directory()
         except HiveApiError as error:
             raise HiveError(error.message, error.status_code) from error
+
+    async def _auto_approve_loop(self) -> None:
+        while True:
+            await asyncio.sleep(DIRECTORY_POLL_SECONDS)
+            try:
+                await self._refresh_directory()
+                await self._auto_approve_pending()
+            except (HiveApiError, AccountError, HiveError):
+                _LOG.warning("hive.service.HiveService._auto_approve_loop: handled; will retry", exc_info=True)
+
+    def _node_passes_ownership(self, node: Any, user_id: str) -> bool:
+        if node.kind not in AUTO_APPROVE_KINDS or not node.platform:
+            return False
+        if node.protocol_version != PROTOCOL_VERSION:
+            return False
+        # The server lists only nodes registered under this account; when it also
+        # returns the registration proof, re-verify it so the server cannot inject a key.
+        if node.proof is not None and not verify_signature(
+            node.public_key, node.proof, register_message(user_id, node.public_key_b64u)
+        ):
+            return False
+        return True
+
+    async def _auto_approve_pending(self) -> int:
+        """Approve pending nodes of the signed-in account without a short code.
+
+        Signing in is the proof of ownership. Only a trusted node does this, only
+        while the account is unchanged, and at most AUTO_APPROVE_LIMIT per window.
+        """
+        if not self._auto_approve:
+            return 0
+        if not (self.api and self.directory and self.identity and self._user):
+            return 0
+        directory, identity, user = self.directory, self.identity, self._user
+        current = self._account.current_account_user
+        if current is None or current.id != user.id or directory.user_id != user.id:
+            return 0
+        if not directory.is_trusted(identity.node_id):
+            return 0
+        approved = 0
+        for node in directory.nodes:
+            if node.status != "pending" or node.id == identity.node_id:
+                continue
+            if not self._node_passes_ownership(node, user.id):
+                _LOG.warning("hive auto-approve skipped node %s: ownership checks failed", node.id)
+                continue
+            now = time.monotonic()
+            while self._auto_approvals and now - self._auto_approvals[0] > AUTO_APPROVE_WINDOW_SECONDS:
+                self._auto_approvals.popleft()
+            if len(self._auto_approvals) >= AUTO_APPROVE_LIMIT:
+                _LOG.warning("hive auto-approve rate limit reached; deferring %s", node.id)
+                break
+            self._auto_approvals.append(now)
+            await self._approve_verified(node.id)
+            _LOGGER.info("Hive auto-approved account device node_id=%s name=%s", node.id, node.name)
+            approved += 1
+        return approved
 
     async def revoke(self, node_id: str) -> None:
         api, directory, identity, _ = self._require_running()
@@ -457,6 +534,7 @@ class HiveService:
             "enabled": self._enabled,
             "state": self.state,
             "detail": self.detail,
+            "autoApprove": self._auto_approve,
             "node_id": identity.node_id if identity else None,
             "hive_id": directory.hive_id if directory else None,
             "nodes": nodes,

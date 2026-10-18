@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 
@@ -110,7 +112,10 @@ final class _NodeList extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    _loadFailedMessage(error),
+                    devicesLoadFailedMessage(
+                      error,
+                      runtime.account.lastAuthError,
+                    ),
                     style: TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ),
@@ -192,27 +197,19 @@ final class _NodeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final DirectoryNode node = view.node;
-    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool canApprove =
         runtime.canApprove && node.status == 'pending' && !view.isLocal;
     final List<String> details = <String>[
-      node.isEngine ? 'Engine' : 'Thin client',
+      node.isEngine ? 'Full node' : 'Client',
       node.platform,
       if (node.status != 'active') node.status,
-      if (!view.trusted && node.status == 'active') 'not verified',
       if (view.online && view.tier != null) view.tier!,
     ].where((String s) => s.isNotEmpty).toList();
     return Card(
       child: ListTile(
-        leading: Icon(
-          Icons.circle,
-          size: 12,
-          color: view.online ? Colors.green : colors.outline,
-          semanticLabel: view.online ? 'Online' : 'Offline',
-        ),
         title: Text(view.isLocal ? '${node.name} (this device)' : node.name),
         subtitle: Text(
-          '${view.online ? 'Online' : 'Offline'} · ${details.join(' · ')}',
+          <String>[view.online ? 'Online' : 'Offline', ...details].join(', '),
         ),
         trailing: canApprove
             ? FilledButton.tonal(
@@ -230,15 +227,41 @@ final class _NodeTile extends StatelessWidget {
   }
 }
 
-final class _PendingBanner extends StatelessWidget {
+/// Signed in, this device is approved automatically by your account's devices,
+/// so no code is shown. Only after [HiveRuntime.approvalGrace] without an
+/// approval does it fall back to manual guidance and the code.
+final class _PendingBanner extends StatefulWidget {
   const _PendingBanner({required this.runtime, required this.nodes});
   final HiveRuntime runtime;
   final List<NodeView> nodes;
 
   @override
+  State<_PendingBanner> createState() => _PendingBannerState();
+}
+
+final class _PendingBannerState extends State<_PendingBanner> {
+  Timer? _timer;
+  bool _fallback = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(widget.runtime.approvalGrace, () {
+      if (mounted) setState(() => _fallback = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final HiveRuntime runtime = widget.runtime;
     final List<NodeView> approvers = <NodeView>[
-      for (final NodeView v in nodes)
+      for (final NodeView v in widget.nodes)
         if (!v.isLocal && v.trusted && v.node.status == 'active') v,
     ];
     return Card(
@@ -249,15 +272,19 @@ final class _PendingBanner extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              'Waiting for approval',
+              _fallback ? 'Waiting for approval' : 'Connecting to your account',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
-            const Text(
-              'On an approved device, open Account > Devices and approve this one. '
-              'Both screens must show the same code.',
+            Text(
+              _fallback
+                  ? 'No signed-in device has approved this one yet. Open '
+                        'Account > Devices on a signed-in computer. If asked, '
+                        'both screens must show the same code.'
+                  : 'Your account devices approve this one automatically.',
             ),
-            for (final NodeView approver in approvers)
+            if (_fallback)
+              for (final NodeView approver in approvers)
               _CodeRow(
                 label: 'Code with ${approver.node.name}',
                 code: runtime.codeFor(approver.node),
@@ -398,7 +425,17 @@ String _message(Object error) =>
     error is HiveApiException ? error.message : '$error';
 
 /// Device list failures never show raw text; the cause is logged.
-String _loadFailedMessage(Object error) {
+@visibleForTesting
+String devicesLoadFailedMessage(Object error, [String? lastAuthError]) {
   debugPrint('Devices error: $error');
+  if (error is HiveApiException &&
+      (error.statusCode == 401 || error.statusCode == 403)) {
+    final String detail = lastAuthError == null ? '' : ' ($lastAuthError)';
+    return 'Your session expired or was rejected by the server. '
+        'Sign in again.$detail';
+  }
+  if (error is HiveApiException && error.statusCode >= 400) {
+    return 'The server returned ${error.statusCode}. Try again later.';
+  }
   return "Couldn't load your devices. Check your connection and try again.";
 }

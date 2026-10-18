@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'http_debug_log.dart';
+
 final class HiveApiException implements Exception {
   const HiveApiException(this.message, [this.statusCode = 502]);
   final String message;
@@ -16,15 +18,20 @@ final class HiveApi {
     required Uri baseUri,
     required this.accessToken,
     this.refreshAccessToken,
+    this.onUnauthorized,
     http.Client? client,
   }) : baseUri = _withSlash(baseUri),
-       _client = client ?? http.Client();
+       _client = client ?? createLoggingClient();
 
   final Uri baseUri;
   final String? Function() accessToken;
 
   /// Called once on a 401 before retrying.
   final Future<void> Function()? refreshAccessToken;
+
+  /// Called when the server still answers 401 after a refresh attempt.
+  final Future<void> Function(String reason)? onUnauthorized;
+
   final http.Client _client;
 
   Future<void> close() async => _client.close();
@@ -69,6 +76,7 @@ final class HiveApi {
     for (int attempt = 0; attempt < 2; attempt++) {
       final String? token = accessToken();
       if (token == null || token.isEmpty) {
+        await onUnauthorized?.call('Sign in to use the hive.');
         throw const HiveApiException('Sign in to use the hive.', 401);
       }
       final http.Request request = http.Request(method, baseUri.resolve(path))
@@ -92,6 +100,11 @@ final class HiveApi {
           refreshAccessToken != null) {
         await refreshAccessToken!();
         continue;
+      }
+      if (streamed.statusCode == 401) {
+        final String reason = _errorText(text, 401);
+        await onUnauthorized?.call(reason);
+        throw HiveApiException(reason, 401);
       }
       if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
         throw HiveApiException(_errorText(text, streamed.statusCode), streamed.statusCode);

@@ -88,6 +88,7 @@ def write_template(path: Path, *, overwrite: bool = False) -> None:
                 "direct_timeout_seconds": 8.0, "relay_enabled": True,
                 # force_relay is a test/diagnostic switch (skips WebRTC); leave it off.
                 "force_relay": False,
+                "auto_approve_account_devices": True,
                 # Everything is off until a tool is named here (webrtc.md section 8).
                 "remote_tools": {
                     "tools": {}, "filesystem_roots": [], "call_timeout_seconds": 60,
@@ -263,7 +264,7 @@ def _validate_hive_values(value: Any) -> None:
     name = value.get("node_name")
     if name is not None and not isinstance(name, str):
         raise ConfigurationFileError("engine.hive.node_name must be a string.")
-    for flag in ("relay_enabled", "force_relay"):
+    for flag in ("relay_enabled", "force_relay", "auto_approve_account_devices"):
         if flag in value and not isinstance(value[flag], bool):
             raise ConfigurationFileError(f"engine.hive.{flag} must be a boolean.")
     timeout = value.get("direct_timeout_seconds")

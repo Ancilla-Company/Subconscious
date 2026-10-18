@@ -226,6 +226,22 @@ final class RestEngineClient {
     ];
   }
 
+  /// `GET /api/v1/hive/nodes`: the account's devices as this engine sees them
+  /// (raw snapshot rows: id, name, kind, platform, status, trusted, local,
+  /// online, tier). Empty when the engine's hive is not running.
+  Future<List<Map<String, dynamic>>> listHiveNodes() async {
+    final Map<String, dynamic> body = await _getMap(
+      'hive/nodes',
+      authenticate: true,
+    );
+    final Object? nodes = body['nodes'];
+    if (nodes is! List) return const <Map<String, dynamic>>[];
+    return <Map<String, dynamic>>[
+      for (final Object? raw in nodes)
+        if (raw is Map<String, dynamic>) raw,
+    ];
+  }
+
   Future<List<ModelInfo>> listModels() async =>
       _getList('models', ModelInfo.fromJson);
 

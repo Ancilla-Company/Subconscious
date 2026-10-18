@@ -1,14 +1,8 @@
-"""Cached node directory: key pinning and approval-chain verification.
+"""Cached node directory: key pinning for the account's nodes.
 
-The server is not trusted to add members. A node is *trusted* only when its id
-matches its key, its key matches any earlier pin, and either it is a local trust
-root or its ``approval_sig`` was made by another trusted node over
-``sc-approve-v1 | user_id | new_public_key``.
-
-Trust roots: the local node when it is the account's first node, plus roots
-pinned on this machine. If nothing is pinned and the server lists exactly one
-active node without an approver, that node is pinned on first use (TOFU); the
-short authentication string check at approval time is what protects enrolment.
+A node is a member when the signed-in account lists it as active, its id matches
+its key, and its key matches any earlier pin. There is no trust root or approval
+chain: signing in to the account is what makes a node active.
 """
 
 from __future__ import annotations
@@ -63,6 +57,7 @@ class DirectoryNode:
     created_at: str | None = None
     last_seen_at: str | None = None
     online: bool = False
+    proof: str | None = None
 
     @property
     def public_key_b64u(self) -> str:
@@ -98,6 +93,7 @@ class DirectoryNode:
                 created_at=raw.get("created_at"),
                 last_seen_at=raw.get("last_seen_at"),
                 online=raw.get("online") is True,
+                proof=raw.get("proof") if isinstance(raw.get("proof"), str) else None,
             )
         except (KeyError, IdentityError, TypeError):
             _LOG.warning("hive.directory.DirectoryNode.parse: handled (KeyError, IdentityError, TypeError); continuing with fallback", exc_info=True)
@@ -197,52 +193,15 @@ class Directory:
             self._pins.save()
 
     def _compute_trusted(self) -> set[str]:
-        roots = self._roots()
-        trusted: set[str] = set()
-        for node_id in self._nodes:
-            if self._chain_ok(node_id, roots, set(), 0):
-                trusted.add(node_id)
-        return trusted
-
-    def _roots(self) -> set[str]:
-        roots = {r for r in self._pins.roots if r in self._nodes}
-        local = self._nodes.get(self.local_node_id)
-        if local is not None and local.status == "active" and local.approved_by is None:
-            roots.add(local.id)  # we are the first node of this hive
-        if not roots:
-            candidates = [
-                n for n in self._nodes.values()
-                if n.status == "active" and n.approved_by is None
-            ]
-            if len(candidates) == 1:
-                roots.add(candidates[0].id)
-                self._pins.roots.add(candidates[0].id)
-                self._pins.save()
-        if roots - self._pins.roots:
-            self._pins.roots |= roots
-            self._pins.save()
-        return roots
-
-    def _chain_ok(
-        self, node_id: str, roots: set[str], seen: set[str], depth: int
-    ) -> bool:
-        node = self._nodes.get(node_id)
-        if node is None or node.status != "active" or depth > _MAX_CHAIN_DEPTH:
-            return False
-        if node_id in roots:
-            return True
-        if node_id in seen or node.approved_by is None or node.approval_sig is None:
-            return False
-        approver = self._nodes.get(node.approved_by)
-        if approver is None or approver.id == node.id:
-            return False
-        if not verify_signature(
-            approver.public_key,
-            node.approval_sig,
-            approval_message(self.user_id, node.public_key_b64u),
-        ):
-            return False
-        return self._chain_ok(approver.id, roots, seen | {node_id}, depth + 1)
+        # No trust root: every node the signed-in account lists as active is a
+        # member, and this node itself is one as soon as it is listed (not revoked).
+        # Id/key consistency and pinning were already checked in update().
+        return {
+            node_id
+            for node_id, node in self._nodes.items()
+            if node.status == "active"
+            or (node_id == self.local_node_id and node.status != "revoked")
+        }
 
 
 class HiveApi:
