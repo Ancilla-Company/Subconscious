@@ -18,8 +18,13 @@ from typing import Any
 LOG_FILE_NAME = "engine.log"
 LOG_DIRECTORY_NAME = "logs"
 MAX_BYTES = 5 * 1024 * 1024
-BACKUP_COUNT = 5
+BACKUP_COUNT = 3
 LEVEL_ENVIRONMENT_VARIABLE = "SUBCONSCIOUS_LOG_LEVEL"
+FILE_LEVEL_ENVIRONMENT_VARIABLE = "SUBCONSCIOUS_FILE_LOG_LEVEL"
+MAX_BYTES_ENVIRONMENT_VARIABLE = "SUBCONSCIOUS_LOG_MAX_BYTES"
+BACKUP_COUNT_ENVIRONMENT_VARIABLE = "SUBCONSCIOUS_LOG_BACKUP_COUNT"
+DEFAULT_FILE_LEVEL = logging.WARNING
+HEALTH_PATH = "/api/v1/health"
 _FORMAT = (
     "%(asctime)s.%(msecs)03d %(levelname)-8s %(name)s "
     "[pid=%(process)d tid=%(thread)d %(threadName)s] %(message)s"
@@ -59,6 +64,46 @@ def _resolve_level(dev: bool, level: int | str | None) -> int:
     return logging.DEBUG if dev else logging.INFO
 
 
+def _env_int(name: str, default: int, minimum: int) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, "").strip()))
+    except ValueError:
+        return default
+
+
+def _resolve_file_level() -> int:
+    requested = os.environ.get(FILE_LEVEL_ENVIRONMENT_VARIABLE, "").strip().upper()
+    if requested:
+        value = logging.getLevelName(requested)
+        if isinstance(value, int):
+            return value
+    return DEFAULT_FILE_LEVEL
+
+
+class HealthAccessFilter(logging.Filter):
+    """Drops uvicorn access lines for the health endpoint (polled constantly)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "uvicorn.access":
+            return True
+        try:
+            return HEALTH_PATH not in record.getMessage()
+        except Exception:  # noqa: BLE001
+            return True
+
+
+class SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Rotation that survives Windows file locks held by another process."""
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except OSError:
+            # Another process holds the file; keep appending and retry later.
+            if self.stream is None:
+                self.stream = self._open()
+
+
 def _stderr_is_stream() -> bool:
     stream = sys.stderr
     return stream is not None and hasattr(stream, "write")
@@ -68,9 +113,14 @@ def _open_file_handler(directory: Path) -> tuple[logging.Handler | None, Path | 
     try:
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / LOG_FILE_NAME
-        handler = logging.handlers.RotatingFileHandler(
-            path, maxBytes=MAX_BYTES, backupCount=BACKUP_COUNT, encoding="utf-8", delay=False
+        handler = SafeRotatingFileHandler(
+            path,
+            maxBytes=_env_int(MAX_BYTES_ENVIRONMENT_VARIABLE, MAX_BYTES, 1024),
+            backupCount=_env_int(BACKUP_COUNT_ENVIRONMENT_VARIABLE, BACKUP_COUNT, 0),
+            encoding="utf-8",
+            delay=False,
         )
+        handler.setLevel(_resolve_file_level())
         return handler, path, None
     except Exception as error:  # noqa: BLE001 - reported through the returned note
         return None, None, f"{type(error).__name__}: {error}"
@@ -124,10 +174,12 @@ def configure_engine_logging(
                     handlers.append(logging.StreamHandler(sys.stderr))
             for item in handlers:
                 item.setFormatter(formatter)
-                item.setLevel(logging.NOTSET)
+                if item is not handler:
+                    item.setLevel(logging.NOTSET)
+                item.addFilter(HealthAccessFilter())
                 setattr(item, _HANDLER_MARKER, True)
                 root.addHandler(item)
-            root.setLevel(log_level)
+            root.setLevel(min(log_level, _resolve_file_level()) if handler is not None else log_level)
             _configure_library_loggers(log_level)
             logging.captureWarnings(True)
             _log_path = path
@@ -162,13 +214,20 @@ def _log_startup(
         __version__ = "unknown"
     for note in notes:
         _log.warning("Logging fallback: %s", note)
-    _log.info(
+    # Emitted straight to our handlers so the startup banner reaches the file
+    # even though the file handler only keeps WARNING and above.
+    record = _log.makeRecord(
+        _log.name, logging.INFO, __file__, 0,
         "%s logging started: log_file=%s data_dir=%s version=%s frozen=%s executable=%s "
         "python=%s platform=%s dev=%s level=%s pid=%s stderr_attached=%s",
-        component, path, data_directory, __version__, bool(getattr(sys, "frozen", False)),
-        sys.executable, platform.python_version(), platform.platform(), dev,
-        logging.getLevelName(level), os.getpid(), _stderr_is_stream(),
+        (component, path, data_directory, __version__, bool(getattr(sys, "frozen", False)),
+         sys.executable, platform.python_version(), platform.platform(), dev,
+         logging.getLevelName(level), os.getpid(), _stderr_is_stream()),
+        None,
     )
+    for handler in logging.getLogger().handlers:
+        if getattr(handler, _HANDLER_MARKER, False):
+            handler.handle(record)
 
 
 def _report_failure(message: str) -> None:
