@@ -214,8 +214,6 @@ class HiveService:
                     self.state = "error"
                     self.detail = "This engine could not be listed on your account. Retrying."
                     enroll_tried = False
-                elif not self.directory.is_trusted(local.id):
-                    self.state, self.detail = "pending", "Waiting for approval from another node."
                 else:
                     await self._connect_network()
                     if self._auto_approve and self.state == "running":
@@ -400,8 +398,6 @@ class HiveService:
 
     async def create_invite(self) -> dict[str, Any]:
         api, directory, identity, _ = self._require_running()
-        if not directory.is_trusted(identity.node_id):
-            raise HiveError("Only an approved node can create invites.", 403)
         try:
             return await api.create_invite(identity.node_id)
         except HiveApiError as error:
@@ -419,8 +415,6 @@ class HiveService:
 
     async def approve(self, node_id: str, sas: str) -> None:
         api, directory, identity, user = self._require_running()
-        if not directory.is_trusted(identity.node_id):
-            raise HiveError("Only an approved node can approve others.", 403)
         if directory.get(node_id) is None:
             await self.refresh()  # the pending node may have enrolled after our last listing
         node = directory.get(node_id)

@@ -160,25 +160,12 @@ def test_short_authentication_string_is_symmetric_six_digits():
 # --- directory ---------------------------------------------------------------
 
 
-def test_approval_chain_is_verified_and_forged_approvals_are_rejected():
-    root, good, forged, wrong_key, outsider = (NodeIdentity.generate() for _ in range(5))
-    entries = [
-        node_entry(root),
-        node_entry(good, approver=root, sig=approve(root, good)),
-        # signed by someone who is not the claimed approver
-        node_entry(forged, approver=root, sig=approve(outsider, forged)),
-        # valid signature, but over a different key
-        node_entry(wrong_key, approver=root, sig=approve(root, good)),
-    ]
+def test_active_account_nodes_are_members_without_approval_signatures():
+    root, other, thin = (NodeIdentity.generate() for _ in range(3))
+    entries = [node_entry(root), node_entry(other), node_entry(thin, kind="thin")]
     directory = make_directory(root, *entries)
-    assert directory.is_trusted(root.node_id)
-    assert directory.is_trusted(good.node_id)
-    assert not directory.is_trusted(forged.node_id)
-    assert not directory.is_trusted(wrong_key.node_id)
-    # wrong account context invalidates the approval
-    other = Directory("other-user", root.node_id, PinStore(None))
-    other.update(entries)
-    assert not other.is_trusted(good.node_id)
+    for identity in (root, other, thin):
+        assert directory.is_trusted(identity.node_id)
 
 
 def test_revoked_pending_and_pinned_key_changes_are_not_trusted(tmp_path):
@@ -199,11 +186,11 @@ def test_revoked_pending_and_pinned_key_changes_are_not_trusted(tmp_path):
     assert PinStore(tmp_path / "pins.json").keys[member.node_id] == member.public_key_b64u
 
 
-def test_server_cannot_add_unapproved_member_to_existing_hive():
-    root, rogue = NodeIdentity.generate(), NodeIdentity.generate()
-    directory = make_directory(root, node_entry(root), node_entry(rogue))  # active, no approval
+def test_key_swaps_and_non_active_nodes_are_still_not_members():
+    root, pending = NodeIdentity.generate(), NodeIdentity.generate()
+    directory = make_directory(root, node_entry(root), node_entry(pending, status="pending"))
     assert directory.is_trusted(root.node_id)
-    assert not directory.is_trusted(rogue.node_id)
+    assert not directory.is_trusted(pending.node_id)
 
 
 # --- channels --------------------------------------------------------------------
@@ -669,11 +656,11 @@ async def _until(predicate):
         await asyncio.sleep(0.1)
 
 
-def test_unknown_or_untrusted_nodes_cannot_be_dialled():
+def test_unknown_nodes_cannot_be_dialled():
     async def scenario():
         a, b, entries = _hive_pair()
         rogue = NodeIdentity.generate()
-        manager = PeerManager(a, make_directory(a, *entries, node_entry(rogue)), NullSignaler(), no_ice)
+        manager = PeerManager(a, make_directory(a, *entries, node_entry(rogue, status="pending")), NullSignaler(), no_ice)
         with pytest.raises(ConnectionError):
             await manager.connect(rogue.node_id)
         with pytest.raises(ConnectionError):

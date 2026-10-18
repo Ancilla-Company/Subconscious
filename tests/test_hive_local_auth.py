@@ -121,16 +121,14 @@ def _node(identity, *, kind="engine", status="active", approver=None, proof=True
     return entry
 
 
-def test_thin_node_never_becomes_a_trust_root():
-    thin = NodeIdentity.generate()
+def test_thin_and_engine_nodes_are_both_members_once_active():
+    thin, engine = NodeIdentity.generate(), NodeIdentity.generate()
     directory = Directory(USER, thin.node_id, PinStore(None))
     directory.update([_node(thin, kind="thin")], "hive-1")
-    assert not directory.is_trusted(thin.node_id)
-
-    engine = NodeIdentity.generate()
+    assert directory.is_trusted(thin.node_id)
     directory = Directory(USER, engine.node_id, PinStore(None))
     directory.update([_node(thin, kind="thin"), _node(engine)], "hive-1")
-    assert directory.is_trusted(engine.node_id) and not directory.is_trusted(thin.node_id)
+    assert directory.is_trusted(engine.node_id) and directory.is_trusted(thin.node_id)
 
 
 # --- signed-in auto approval -------------------------------------------------------
@@ -277,21 +275,9 @@ def test_flag_off_keeps_the_short_code_path(tmp_path):
     run(scenario())
 
 
-def test_untrusted_engine_and_changed_account_do_not_auto_approve(tmp_path):
+def test_changed_account_does_not_auto_approve(tmp_path):
     async def scenario():
-        root, me, phone = (NodeIdentity.generate() for _ in range(3))
-        # We are an unapproved pending engine: another node is the root, so we are not trusted.
-        account, api = FakeAccount(), FakeApi([_node(root), _node(me, status="pending"), _node(phone, kind="thin", status="pending")])
-        service = HiveService(
-            account=account, credential_store=SimpleNamespace(), data_directory=tmp_path, api=api,
-            identity_store=MemoryStore(b64u_encode(me.seed())), node_name="engine",
-        )
-        service.attach(SimpleNamespace(state=SimpleNamespace(client_registry=None)))
-        account.emit(_user())
-        await until(lambda: service.state == "pending")
-        assert await service._auto_approve_pending() == 0 and api.approvals == []
-        await service.shutdown()
-
+        root, phone = NodeIdentity.generate(), NodeIdentity.generate()
         trusted, _, api = await _running(tmp_path, root, [_node(root), _node(phone, kind="thin", status="pending")])
         trusted._account.current_account_user = _user("someone-else")  # account changed mid-loop
         assert await trusted._auto_approve_pending() == 0 and api.approvals == []

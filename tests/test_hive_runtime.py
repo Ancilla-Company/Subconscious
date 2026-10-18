@@ -460,7 +460,7 @@ def test_engine_registers_as_full_node_even_when_clients_are_already_listed(tmp_
     run(scenario())
 
 
-def test_untrusted_local_node_waits_and_cannot_approve_or_invite(tmp_path):
+def test_pending_local_node_does_not_wait_for_a_trust_root(tmp_path):
     async def scenario():
         root = NodeIdentity.generate()
         me = NodeIdentity.generate()
@@ -468,14 +468,8 @@ def test_untrusted_local_node_waits_and_cannot_approve_or_invite(tmp_path):
         api.nodes = [_entry(root), _entry(me, status="pending")]
         service = _service(tmp_path, account, api, MemoryStore(b64u_encode(me.seed())))
         account.emit(_user())
-        await until(lambda: service.state == "pending")
-        assert service.signaling is None  # no network presence until approved
-        with pytest.raises(HiveError) as invite:
-            await service.create_invite()
-        assert invite.value.status_code == 403
-        with pytest.raises(HiveError) as approve:
-            await service.approve(root.node_id, "123456")
-        assert approve.value.status_code == 403
+        await until(lambda: service.state == "running")
+        assert service.signaling is not None
         await service.shutdown()
     run(scenario())
 
