@@ -172,7 +172,8 @@ void main() {
       ),
     );
     expect(launcher.started, hasLength(1));
-    expect(delays, 90);
+    // 500ms backoff doubling to a 2s cap: far fewer probes than 90.
+    expect(delays, 24);
     expect(launcher.locks.single.releases, 1);
   });
 

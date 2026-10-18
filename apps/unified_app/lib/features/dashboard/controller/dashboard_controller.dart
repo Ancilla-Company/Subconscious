@@ -90,6 +90,8 @@ final class DashboardController extends ChangeNotifier {
 
   static const Duration reconnectInterval = Duration(seconds: 3);
   static const Duration requestTimeout = Duration(seconds: 5);
+  static const Duration healthProbeInterval = Duration(seconds: 30);
+  DateTime? _lastHealthProbe;
   static const Duration appStateSaveDebounce = Duration(milliseconds: 300);
   static const String appStateKey = 'dashboard_state_v2';
   static const String navigationKey = 'dashboard_navigation_v1';
@@ -918,7 +920,16 @@ final class DashboardController extends ChangeNotifier {
     try {
       if (canReuseCurrent) {
         try {
-          await currentRepository.rest.health().timeout(requestTimeout);
+          // While the websocket is up it is the liveness signal; the REST
+          // health probe only runs as an occasional cross-check.
+          final DateTime now = DateTime.now();
+          final DateTime? lastProbe = _lastHealthProbe;
+          if (!currentRepository.socket.isConnected ||
+              lastProbe == null ||
+              now.difference(lastProbe) >= healthProbeInterval) {
+            await currentRepository.rest.health().timeout(requestTimeout);
+            _lastHealthProbe = now;
+          }
           if (!currentRepository.socket.isConnected) {
             await currentRepository.connect().timeout(requestTimeout);
           }
@@ -954,6 +965,7 @@ final class DashboardController extends ChangeNotifier {
       }
       _repository = discoveredRepository;
       await discoveredRepository.rest.health().timeout(requestTimeout);
+      _lastHealthProbe = DateTime.now();
       await discoveredRepository.connect().timeout(requestTimeout);
       await _listenToEngineEvents(discoveredRepository);
       chatProvider?.replaceRepository(discoveredRepository);

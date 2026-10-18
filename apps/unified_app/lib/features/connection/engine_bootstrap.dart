@@ -141,13 +141,19 @@ final class EngineBootstrap {
           );
         }
       }
-      final int intervalMicroseconds = pollInterval.inMicroseconds < 1
-          ? 1
-          : pollInterval.inMicroseconds;
-      final int polls = startupTimeout.inMicroseconds ~/ intervalMicroseconds;
-      for (int poll = 0; poll < polls; poll++) {
-        await _delay(pollInterval);
+      // Exponential backoff from pollInterval up to 2s keeps startup quick
+      // without probing the engine several times per second.
+      const Duration maxInterval = Duration(seconds: 2);
+      Duration wait = pollInterval.inMicroseconds < 1
+          ? const Duration(microseconds: 1)
+          : pollInterval;
+      Duration waited = Duration.zero;
+      while (waited < startupTimeout) {
+        await _delay(wait);
+        waited += wait;
         if (await isEngineHealthy()) return EngineStartOutcome.started;
+        wait = wait * 2 > maxInterval ? maxInterval : wait * 2;
+        if (wait < pollInterval) wait = pollInterval;
       }
       throw EngineStartException(
         'The Subconscious engine did not start within '
