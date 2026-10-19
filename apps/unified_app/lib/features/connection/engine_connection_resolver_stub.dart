@@ -38,6 +38,12 @@ Future<Uri?> discoverLocalEngineLanEndpoint({required bool preferDev}) async =>
 
 String? engineDataDirectory({required bool preferDev}) => null;
 
+/// Web and other platforms without a local engine have no profiles.
+Future<void> setActiveEngineProfile({
+  required bool preferDev,
+  required String? profileId,
+}) async {}
+
 Future<void> openEngineDataDirectory(String path) async {
   throw UnsupportedError('Opening the engine data directory is unavailable.');
 }

@@ -10,7 +10,9 @@ from pathlib import Path
 from collections.abc import Sequence
 
 from . import __version__
-from .host import EngineAlreadyRunningError, EngineHost
+from .host import EngineAlreadyRunningError
+from .host import EngineHost
+from .profiles import ProfileManager
 from .logging_setup import configure_engine_logging
 from .runtime import RuntimeInfoWriter
 from .config import EngineConfig
@@ -246,7 +248,7 @@ def _run_start(args: argparse.Namespace) -> int:
         log_path,
     )
     try:
-        run_logged(EngineHost(config).serve())
+        run_logged(ProfileManager(config, host_factory=EngineHost).serve())
     except KeyboardInterrupt:
         _LOG.debug("__main__._run_start: handled KeyboardInterrupt; continuing with fallback", exc_info=True)
         pass

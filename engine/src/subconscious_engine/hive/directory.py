@@ -35,10 +35,13 @@ _MAX_CHAIN_DEPTH = 8
 class HiveApiError(Exception):
     """A safe error from the node registry (never contains tokens)."""
 
-    def __init__(self, message: str, status_code: int = 502) -> None:
+    def __init__(
+        self, message: str, status_code: int = 502, *, reachable: bool = True
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        self.reachable = reachable
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +61,8 @@ class DirectoryNode:
     last_seen_at: str | None = None
     online: bool = False
     proof: str | None = None
+    parent_node_id: str | None = None
+    clients: tuple[str, ...] = ()
 
     @property
     def public_key_b64u(self) -> str:
@@ -94,6 +99,14 @@ class DirectoryNode:
                 last_seen_at=raw.get("last_seen_at"),
                 online=raw.get("online") is True,
                 proof=raw.get("proof") if isinstance(raw.get("proof"), str) else None,
+                parent_node_id=raw.get("parent_node_id")
+                if isinstance(raw.get("parent_node_id"), str)
+                else None,
+                clients=tuple(
+                    c
+                    for c in (raw.get("clients") if isinstance(raw.get("clients"), list) else [])
+                    if isinstance(c, str)
+                ),
             )
         except (KeyError, IdentityError, TypeError):
             _LOG.warning("hive.directory.DirectoryNode.parse: handled (KeyError, IdentityError, TypeError); continuing with fallback", exc_info=True)
@@ -248,7 +261,9 @@ class HiveApi:
                     method, path.lstrip("/"), json=body, headers=headers
                 )
             except httpx.HTTPError as error:
-                raise HiveApiError("Could not reach the hive server.") from error
+                raise HiveApiError(
+                    "Could not reach the hive server.", reachable=False
+                ) from error
             if response.status_code == 401 and attempt == 0 and self._refresh:
                 await self._refresh()
                 continue
@@ -277,6 +292,10 @@ class HiveApi:
 
     async def revoke(self, node_id: str) -> None:
         await self.request("DELETE", f"nodes/{node_id}")
+
+    async def set_parent(self, node_id: str, parent_node_id: str | None) -> None:
+        """Link ``node_id`` under a parent node (server PATCH, WP-A)."""
+        await self.request("PATCH", f"nodes/{node_id}", {"parent_node_id": parent_node_id})
 
     async def create_invite(self, node_id: str) -> dict[str, Any]:
         return _mapping(await self.request("POST", "nodes/invites", {}, node_id=node_id))

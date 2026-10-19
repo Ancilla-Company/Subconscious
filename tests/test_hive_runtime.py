@@ -20,6 +20,7 @@ from subconscious_engine.configuration_file import (
 from subconscious_engine.hive.directory import HiveApiError
 from subconscious_engine.hive.errors import HiveError
 from subconscious_engine.hive.identity import (
+    IdentityError,
     NodeIdentity,
     approval_message,
     b64u_encode,
@@ -474,6 +475,421 @@ def test_pending_local_node_does_not_wait_for_a_trust_root(tmp_path):
     run(scenario())
 
 
+def test_snapshot_reports_signalling_state_and_local_online(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), FakeServerApi()
+        service = _service(tmp_path, account, api)
+        assert service.snapshot()["signalling"] == {
+            "connected": False, "started": False, "reason": None, "failures": 0, "last_error": None}
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        signalling = service.snapshot()["signalling"]
+        assert signalling["connected"] is False and isinstance(signalling["failures"], int)
+        service.signaling._connected.set()
+        assert service.snapshot()["signalling"]["connected"] is True
+        service.signaling._connected.clear()
+        await service.shutdown()
+    run(scenario())
+
+
+def test_snapshot_online_flag_follows_signalling(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), FakeServerApi()
+        service = _service(tmp_path, account, api)
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        local = lambda: next(n for n in service.snapshot()["nodes"] if n["local"])
+        assert local()["online"] is False
+        service.signaling._connected.set()
+        assert local()["online"] is True
+        service.signaling._connected.clear()
+        assert local()["online"] is False
+        await service.shutdown()
+    run(scenario())
+
+
+# --- supervisor, traffic cuts, parent/clients, legacy fold ---------------------------
+
+
+async def _quick_sleep(delay):
+    await asyncio.sleep(0.01 if delay < 100 else 3600)  # >= 100 s is the reconcile tick
+
+
+async def _reconcile_sleep(delay):
+    await asyncio.sleep(0.01)
+
+
+def _supervised(tmp_path, api, *, account=None, auto=False, sleep=_quick_sleep, store=None):
+    service = HiveService(
+        auto_approve_account_devices=auto, account=account or FakeAccount(),
+        credential_store=SimpleNamespace(), data_directory=tmp_path, api=api,
+        identity_store=store or MemoryStore(), node_name="test-node", sleep=sleep,
+    )
+    service.attach(SimpleNamespace(state=SimpleNamespace(client_registry=None)))
+    return service
+
+
+class FlakyApi(FakeServerApi):
+    def __init__(self, errors):
+        super().__init__()
+        self.errors = list(errors)
+        self.list_calls = 0
+
+    async def list_nodes(self):
+        self.list_calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return await super().list_nodes()
+
+
+def test_hive_service_retries_after_transient_error(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), FlakyApi([HiveApiError("down", 503)])
+        service = _supervised(tmp_path, api, account=account)
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        assert api.list_calls >= 2
+        await service.shutdown()
+    run(scenario())
+
+
+def test_hive_service_stops_on_invalid_refresh_token(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), FlakyApi([HiveApiError("expired", 401)])
+        service = _supervised(tmp_path, api, account=account)
+        account.emit(_user())
+        await until(lambda: service.state == "signed_out")
+        await asyncio.sleep(0.1)
+        assert api.list_calls == 1 and service._main.done()
+        await service.shutdown()
+    run(scenario())
+
+
+def test_signed_out_service_restarts_on_account_change(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), FlakyApi([HiveApiError("expired", 401)])
+        service = _supervised(tmp_path, api, account=account)
+        account.emit(_user())
+        await until(lambda: service.state == "signed_out")
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        await service.shutdown()
+    run(scenario())
+
+
+def test_cancel_during_backoff_stops_cleanly(tmp_path):
+    async def scenario():
+        gate = asyncio.Event()
+
+        async def blocked(delay):
+            await gate.wait()
+
+        account, api = FakeAccount(), FlakyApi([HiveApiError("down", 503)])
+        service = _supervised(tmp_path, api, account=account, sleep=blocked)
+        account.emit(_user())
+        await until(lambda: service.state == "retrying")
+        await asyncio.wait_for(service.shutdown(), 5)
+        assert service.state == "stopped"
+    run(scenario())
+
+
+@pytest.mark.parametrize(
+    "error,n404,used,action,state",
+    [
+        (HiveApiError("x", 503), 0, False, "retry", "retrying"),
+        (HiveApiError("x", 429), 0, False, "retry", "retrying"),
+        (HiveApiError("x", 502, reachable=False), 0, False, "retry", "retrying"),
+        (HiveError("x", 502), 0, False, "retry", "retrying"),
+        (HiveApiError("x", 404), 5, False, "retry", "retrying"),
+        (HiveApiError("x", 404), 6, False, "retry", "error"),
+        (HiveApiError("x", 401), 0, False, "stop", "signed_out"),
+        (HiveApiError("x", 400), 0, False, "retry", "error"),
+        (HiveApiError("x", 409), 0, True, "stop", "error"),
+        (IdentityError("bad"), 0, False, "stop", "error"),
+    ],
+)
+def test_supervisor_classification_table(error, n404, used, action, state):
+    from subconscious_engine.hive.service import classify_failure
+
+    verdict = classify_failure(error, consecutive_404=n404, bounded_used=used)
+    assert (verdict.action, verdict.state) == (action, state)
+    if state == "error" and action == "retry":
+        assert verdict.delay == 60.0
+    with pytest.raises(asyncio.CancelledError):
+        classify_failure(asyncio.CancelledError())
+
+
+class CountingApi(FakeServerApi):
+    def __init__(self):
+        super().__init__()
+        self.list_calls = 0
+
+    async def list_nodes(self):
+        self.list_calls += 1
+        return await super().list_nodes()
+
+
+def test_presence_update_does_not_refresh_known_node(tmp_path, monkeypatch):
+    from subconscious_engine.hive import service as service_module
+
+    monkeypatch.setattr(service_module, "REFRESH_DEBOUNCE_SECONDS", 0.01)
+
+    async def scenario():
+        account, api = FakeAccount(), CountingApi()
+        service = _supervised(tmp_path, api, account=account)
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        before = api.list_calls
+        me = service.identity.node_id
+        await service._on_presence({"node_id": me, "online": False, "status": "active"})
+        await service._on_presence({"node_id": me, "online": True, "status": "active"})
+        await asyncio.sleep(0.15)
+        assert api.list_calls == before
+        await service.shutdown()
+    run(scenario())
+
+
+def test_presence_update_refreshes_on_revoked_status_or_parent_change(tmp_path, monkeypatch):
+    from subconscious_engine.hive import service as service_module
+
+    monkeypatch.setattr(service_module, "REFRESH_DEBOUNCE_SECONDS", 0.01)
+
+    async def scenario():
+        account, api = FakeAccount(), CountingApi()
+        service = _supervised(tmp_path, api, account=account)
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        me = service.identity.node_id
+        before = api.list_calls
+        await service._on_presence({"node_id": me, "online": True, "status": "revoked"})
+        await until(lambda: api.list_calls > before)
+        before = api.list_calls
+        await service._on_presence({"node_id": me, "online": True, "status": "active", "parent_node_id": "n_p"})
+        await until(lambda: api.list_calls > before)
+        await service.shutdown()
+    run(scenario())
+
+
+def test_list_nodes_route_throttles_refresh(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), CountingApi()
+        service = _supervised(tmp_path, api, account=account)
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        service._last_refresh = -1e9
+        before = api.list_calls
+        await service.refresh()
+        await service.refresh()
+        assert api.list_calls == before + 1
+        await service.refresh(force=True)
+        assert api.list_calls == before + 2
+        await service.shutdown()
+    run(scenario())
+
+
+def test_auto_approve_gives_up_after_two_attempts(tmp_path):
+    async def scenario():
+        root, phone = NodeIdentity.generate(), NodeIdentity.generate()
+        account, api = FakeAccount(), FakeServerApi()
+        api.nodes = [_entry(root), {**_entry(phone, status="pending"), "kind": "thin"}]
+        service = _supervised(tmp_path, api, account=account, auto=True,
+                              store=MemoryStore(b64u_encode(root.seed())))
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        for _ in range(5):
+            await service._auto_approve_pending()
+        assert len([c for c in api.calls if c[0] == "approve"]) == 2
+        await service.shutdown()
+    run(scenario())
+
+
+def test_reconcile_runs_only_while_signalling_down(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), CountingApi()
+        service = _supervised(tmp_path, api, account=account, sleep=_reconcile_sleep)
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        await until(lambda: api.list_calls >= 4)  # signalling is down: the reconcile ticks
+        real = service.signaling
+        await real.stop()
+        service.signaling = SimpleNamespace(connected=True, failures=0, last_error=None, stop=real.stop)
+        await asyncio.sleep(0.05)
+        settled = api.list_calls
+        await asyncio.sleep(0.2)
+        assert api.list_calls == settled
+        await service.shutdown()
+    run(scenario())
+
+
+def test_snapshot_rows_include_parent_and_clients(tmp_path):
+    async def scenario():
+        root, child = NodeIdentity.generate(), NodeIdentity.generate()
+        account, api = FakeAccount(), FakeServerApi()
+        api.nodes = [
+            {**_entry(root), "clients": ["Local"]},
+            {**_entry(child), "kind": "thin", "parent_node_id": root.node_id},
+        ]
+        service = _supervised(tmp_path, api, account=account, store=MemoryStore(b64u_encode(root.seed())))
+        account.emit(_user())
+        await until(lambda: service.state == "running")
+        service._clients = ("Desktop",)
+        rows = {n["id"]: n for n in service.snapshot()["nodes"]}
+        assert rows[child.node_id]["parent_node_id"] == root.node_id and rows[child.node_id]["clients"] == []
+        assert rows[root.node_id]["parent_node_id"] is None and rows[root.node_id]["clients"] == ["Desktop"]
+        await service.shutdown()
+    run(scenario())
+
+
+class ParentApi(FakeServerApi):
+    def __init__(self, error=None):
+        super().__init__()
+        self.parents = []
+        self.error = error
+
+    async def set_parent(self, node_id, parent):
+        if self.error:
+            raise self.error
+        self.parents.append((node_id, parent))
+
+
+def _thin(identity, name="Phone", **extra):
+    import platform as platform_module
+
+    return {**_entry(identity), "kind": "thin", "name": name,
+            "platform": platform_module.system().lower(), **extra}
+
+
+async def _fold_service(tmp_path, nodes, api=None):
+    root = NodeIdentity.generate()
+    account, api = FakeAccount(), api or ParentApi()
+    api.nodes = [_entry(root)] + nodes
+    service = _supervised(tmp_path, api, account=account, store=MemoryStore(b64u_encode(root.seed())))
+    account.emit(_user())
+    await until(lambda: service.state == "running")
+    return service, api, root
+
+
+def test_set_parent_404_and_405_are_skipped(tmp_path):
+    async def scenario():
+        for status in (404, 405):
+            phone = NodeIdentity.generate()
+            service, api, _ = await _fold_service(
+                tmp_path, [_thin(phone)], ParentApi(HiveApiError("nope", status))
+            )
+            service.note_gui_client("Phone", None)
+            await service._fold_gui_clients()  # must not raise
+            assert service._gui_store.mapping == {}
+            await service.shutdown()
+    run(scenario())
+
+
+def test_engine_parents_matching_thin_client_once(tmp_path):
+    async def scenario():
+        phone = NodeIdentity.generate()
+        service, api, root = await _fold_service(tmp_path, [_thin(phone)])
+        service.note_gui_client("Phone", "cid-1")
+        await service._fold_gui_clients()
+        await service._fold_gui_clients()
+        assert api.parents == [(phone.node_id, root.node_id)]
+        assert service._gui_store.mapping == {"cid-1": phone.node_id}
+        await service.shutdown()
+    run(scenario())
+
+
+def test_fold_skips_ambiguous_match(tmp_path):
+    async def scenario():
+        one, two = NodeIdentity.generate(), NodeIdentity.generate()
+        service, api, _ = await _fold_service(tmp_path, [_thin(one), _thin(two)])
+        service.note_gui_client("Phone", None)
+        await service._fold_gui_clients()
+        assert api.parents == []
+        await service.shutdown()
+    run(scenario())
+
+
+def test_fold_skips_connected_row(tmp_path):
+    async def scenario():
+        phone = NodeIdentity.generate()
+        service, api, _ = await _fold_service(tmp_path, [_thin(phone, online=True)])
+        service.note_gui_client("Phone", None)
+        await service._fold_gui_clients()
+        assert api.parents == []
+        await service.shutdown()
+    run(scenario())
+
+
+def test_fold_uses_stored_client_id_mapping(tmp_path):
+    async def scenario():
+        phone = NodeIdentity.generate()
+        service, api, root = await _fold_service(tmp_path, [_thin(phone, name="Renamed")])
+        service._gui_store.mapping["cid-9"] = phone.node_id
+        service.note_gui_client("Phone", "cid-9")
+        await service._fold_gui_clients()
+        assert api.parents == [(phone.node_id, root.node_id)]
+        await service.shutdown()
+    run(scenario())
+
+
+class LoginAccount:
+    def __init__(self):
+        self.logins = []
+
+    async def login(self, email, password):
+        self.logins.append(email)
+        return _user()
+
+
+def test_login_rejects_bad_device_name_and_client_id(tmp_path):
+    async def scenario():
+        account, hive = LoginAccount(), SimpleNamespace(noted=[])
+        hive.note_gui_client = lambda name, cid: hive.noted.append((name, cid))
+        database = Database(tmp_path / "login.db")
+        await database.initialize()
+        app = create_app(database, EngineAuthToken("secret-token"), account_session_service=account)
+        app.state.hive_service = hive
+        auth = {"Authorization": "Bearer secret-token"}
+        base = {"email": "a@example.test", "password": "pw"}
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+                for extra in (
+                    {"device_name": 5}, {"device_name": "  "}, {"device_name": "x" * 65},
+                    {"client_id": ""}, {"client_id": "a" * 65}, {"client_id": "bad id!"},
+                    {"client_id": 7},
+                ):
+                    response = await client.post("/api/v1/account/login", json={**base, **extra}, headers=auth)
+                    assert response.status_code == 400, extra
+                assert account.logins == []
+                ok = await client.post(
+                    "/api/v1/account/login",
+                    json={**base, "device_name": " Brian-XPS ", "client_id": "abc_DEF-1"}, headers=auth,
+                )
+                assert ok.status_code == 200 and hive.noted == [("Brian-XPS", "abc_DEF-1")]
+        finally:
+            await database.close()
+    run(scenario())
+
+
+def test_login_without_new_fields_unchanged(tmp_path):
+    async def scenario():
+        account, hive = LoginAccount(), SimpleNamespace(noted=[])
+        hive.note_gui_client = lambda name, cid: hive.noted.append((name, cid))
+        database = Database(tmp_path / "login2.db")
+        await database.initialize()
+        app = create_app(database, EngineAuthToken("secret-token"), account_session_service=account)
+        app.state.hive_service = hive
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+                response = await client.post(
+                    "/api/v1/account/login", json={"email": "a@example.test", "password": "pw"},
+                    headers={"Authorization": "Bearer secret-token"},
+                )
+                assert response.status_code == 200 and response.json()["authenticated"] is True
+                assert account.logins == ["a@example.test"] and hive.noted == [(None, None)]
+        finally:
+            await database.close()
+    run(scenario())
+
+
 def test_management_calls_without_a_session_are_rejected(tmp_path):
     async def scenario():
         service = _service(tmp_path, FakeAccount(), FakeServerApi())
@@ -638,3 +1054,4 @@ def test_node_cli_shows_the_short_code_for_pending_nodes(capsys, monkeypatch):
     args = build_parser().parse_args(["node", "list"])
     assert cli._run_node(args) == 0
     assert "code 042517" in capsys.readouterr().out
+

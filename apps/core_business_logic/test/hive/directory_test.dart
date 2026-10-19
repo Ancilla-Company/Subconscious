@@ -126,6 +126,55 @@ void main() {
     expect(chooseHomeEngine(<NodeView>[view(a, trusted: false)]), isNull);
   });
 
+  test('chooseEngine: preferred, single, several, none', () async {
+    final NodeIdentity a = await seededIdentity(1);
+    final NodeIdentity b = await seededIdentity(40);
+    final NodeIdentity off = await seededIdentity(80);
+    final NodeIdentity phone = await seededIdentity(120);
+    NodeView view(
+      NodeIdentity i, {
+      bool online = true,
+      bool trusted = true,
+      bool local = false,
+      String kind = 'engine',
+    }) => NodeView(
+      node: DirectoryNode.tryParse(nodeJson(i, kind: kind))!,
+      trusted: trusted,
+      online: online,
+      isLocal: local,
+    );
+    final List<NodeView> two = <NodeView>[view(a), view(b)];
+    // Preferred online wins among several.
+    final EngineChoice preferred = chooseEngine(two, preferredId: b.nodeId);
+    expect(preferred.kind, EngineChoiceKind.connect);
+    expect(preferred.node!.id, b.nodeId);
+    // Several, no usable preference: the user picks.
+    expect(chooseEngine(two).kind, EngineChoiceKind.pick);
+    expect(
+      chooseEngine(<NodeView>[...two, view(off, online: false)],
+          preferredId: off.nodeId).kind,
+      EngineChoiceKind.pick,
+    );
+    // Single engine connects automatically, also with an offline preference.
+    final EngineChoice single = chooseEngine(
+      <NodeView>[view(a), view(off, online: false)],
+      preferredId: off.nodeId,
+    );
+    expect(single.kind, EngineChoiceKind.connect);
+    expect(single.node!.id, a.nodeId);
+    // None: nothing online, untrusted, local or non-engine.
+    expect(chooseEngine(const <NodeView>[]).kind, EngineChoiceKind.none);
+    expect(
+      chooseEngine(<NodeView>[
+        view(a, trusted: false),
+        view(b, local: true),
+        view(off, online: false),
+        view(phone, kind: 'thin'),
+      ]).kind,
+      EngineChoiceKind.none,
+    );
+  });
+
   test('thin clients are members once active', () async {
     final NodeIdentity phone = await seededIdentity(40);
     final NodeDirectory alone = NodeDirectory(userId: user, localNodeId: phone.nodeId);

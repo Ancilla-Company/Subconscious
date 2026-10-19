@@ -160,22 +160,25 @@ class IdentitySeedStore(Protocol):
 
 
 class KeyringIdentitySeedStore:
+    def __init__(self, namespace: str | None = None) -> None:
+        self._user = _KEYRING_USER if not namespace else f"{_KEYRING_USER}:{namespace}"
+
     def read(self) -> str | None:
         try:
-            value = keyring.get_password(KEYRING_SERVICE, _KEYRING_USER)
+            value = keyring.get_password(KEYRING_SERVICE, self._user)
         except Exception as error:
             raise IdentityError("The node identity could not be read.") from error
         return value.strip() if value and value.strip() else None
 
     def write(self, seed: str) -> None:
         try:
-            keyring.set_password(KEYRING_SERVICE, _KEYRING_USER, seed)
+            keyring.set_password(KEYRING_SERVICE, self._user, seed)
         except Exception as error:
             raise IdentityError("The node identity could not be saved.") from error
 
     def delete(self) -> None:
         try:
-            keyring.delete_password(KEYRING_SERVICE, _KEYRING_USER)
+            keyring.delete_password(KEYRING_SERVICE, self._user)
         except PasswordDeleteError:
             _LOG.warning("hive.identity.KeyringIdentitySeedStore.delete: handled PasswordDeleteError; continuing with fallback", exc_info=True)
             pass
@@ -233,7 +236,11 @@ class ResilientIdentitySeedStore:
         try:
             self._primary.write(seed)
         except IdentityError:
-            _LOG.warning("hive.identity.ResilientIdentitySeedStore.write: handled IdentityError; continuing with fallback", exc_info=True)
+            if not getattr(self, "_warned_write", False):
+                self._warned_write = True
+                _LOG.warning("Keyring write failed; using the encrypted fallback store.")
+            else:
+                _LOG.debug("Keyring write failed again; using the fallback.", exc_info=True)
             self._fallback.write(seed)
         else:
             try:
@@ -256,9 +263,10 @@ class ResilientIdentitySeedStore:
 
 def default_identity_store(
     credential_store: EncryptedModelConfigurationStore,
+    namespace: str | None = None,
 ) -> IdentitySeedStore:
     return ResilientIdentitySeedStore(
-        KeyringIdentitySeedStore(), EncryptedIdentitySeedStore(credential_store)
+        KeyringIdentitySeedStore(namespace), EncryptedIdentitySeedStore(credential_store)
     )
 
 

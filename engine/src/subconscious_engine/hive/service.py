@@ -10,8 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform as platform_module
+import random
 import time
 from collections import deque
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,16 +38,116 @@ from .identity import (
 )
 from .node import HiveNode
 from .peers import DEFAULT_DIRECT_TIMEOUT, PeerManager
-from .signaling import SignalingClient
+from .gui_clients import GuiClientStore
+from .signaling import SignalingClient, backoff_delay
 from ..logging_setup import logged_suppress, spawn_logged
 _LOG = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger("uvicorn.error")
 DIRECTORY_POLL_SECONDS = 15.0
+DIRECTORY_RECONCILE_SECONDS = 120.0
 REFRESH_DEBOUNCE_SECONDS = 1.0
+REFRESH_THROTTLE_SECONDS = 5.0
 AUTO_APPROVE_LIMIT = 5
 AUTO_APPROVE_WINDOW_SECONDS = 60.0
+AUTO_APPROVE_MAX_ATTEMPTS = 2
 AUTO_APPROVE_KINDS = frozenset({"thin", "engine"})
+BOUNDED_RETRY_SECONDS = 60.0
+MAX_BACKOFF_404 = 5
+HIVE_MISMATCH_DETAIL = (
+    "This data directory belongs to a different hive. Use 'Reset local hive data' to back up "
+    "and clear the local hive bookkeeping (your threads and files are kept), then sign in again."
+)
+
+
+def _backup_sqlite(source: Path, target: Path) -> None:
+    """Consistent copy of a (possibly open, WAL mode) SQLite database."""
+    import sqlite3
+
+    src = sqlite3.connect(str(source))
+    try:
+        dst = sqlite3.connect(str(target))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+
+def _seen_before(last_seen: Any, moment: float) -> bool:
+    """True when ``last_seen`` (ISO text) is earlier than ``moment`` (epoch seconds)."""
+    if not isinstance(last_seen, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+    except ValueError:
+        _LOG.debug("Unparseable last_seen_at.", exc_info=True)
+        return False
+    return parsed.timestamp() < moment
+
+
+def _session_is_dead(error: BaseException) -> bool:
+    if isinstance(error, HiveApiError):
+        return error.status_code == 401
+    if isinstance(error, AccountError):
+        return error.status_code in (401, 403)
+    return False
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    action: str  # "retry" or "stop"
+    delay: float
+    state: str
+    detail: str
+
+
+def _status_of(error: BaseException) -> int | None:
+    status = getattr(error, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def classify_failure(
+    error: BaseException,
+    *,
+    consecutive_404: int = 0,
+    bounded_used: bool = False,
+    attempt: int = 0,
+    rng: Callable[[], float] = random.random,
+) -> Verdict:
+    """Pure retry policy for the supervisor (design 4.1). ``consecutive_404`` counts this failure."""
+    if isinstance(error, asyncio.CancelledError):
+        raise error
+    backoff = backoff_delay(attempt, rng=rng)
+    retry = Verdict("retry", backoff, "retrying", "Hive unavailable. Retrying.")
+    if isinstance(error, IdentityError):
+        return Verdict("stop", 0.0, "error", str(error))
+    if isinstance(error, AccountError):
+        if _status_of(error) in (401, 403):
+            return Verdict("stop", 0.0, "signed_out", "Sign in again to link this engine")
+        return retry
+    if isinstance(error, (HiveApiError, HiveError)):
+        status = _status_of(error) or 0
+        if isinstance(error, HiveApiError) and not error.reachable:
+            return retry
+        if status in (0, 408, 429) or status >= 500:
+            return retry
+        if status == 401:
+            return Verdict("stop", 0.0, "signed_out", "Sign in again to link this engine")
+        if status == 404:
+            if consecutive_404 <= MAX_BACKOFF_404:
+                return retry
+            return Verdict(
+                "retry", BOUNDED_RETRY_SECONDS, "error", "The hive server returned status 404."
+            )
+        if status in (400, 403, 409, 422):
+            message = getattr(error, "message", "") or "The hive server refused the request."
+            if bounded_used:
+                return Verdict("stop", 0.0, "error", message)
+            return Verdict("retry", BOUNDED_RETRY_SECONDS, "error", message)
+        return retry
+    return retry
 
 
 class HiveService:
@@ -59,12 +163,24 @@ class HiveService:
         node_name: str | None = None,
         app_version: str = "0",
         identity_store: IdentitySeedStore | None = None,
+        keyring_namespace: str | None = None,
         api: HiveApi | None = None,
         direct_timeout: float = DEFAULT_DIRECT_TIMEOUT,
         relay_enabled: bool = True,
         force_relay: bool = False,
         auto_approve_account_devices: bool = True,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        rng: Callable[[], float] = random.random,
     ) -> None:
+        self._sleep = sleep
+        self._rng = rng
+        self._last_refresh = 0.0
+        self._approve_attempts: dict[str, int] = {}
+        self._gui_name: str | None = None
+        self._gui_client_id: str | None = None
+        self._parented: set[str] = set()
+        self._warned_messages: set[str] = set()
+        self._gui_store = GuiClientStore(data_directory / "hive" / "gui-clients.json")
         self._account = account
         self._data_directory = data_directory
         self._enabled = enabled
@@ -72,7 +188,9 @@ class HiveService:
         self._stun = list(stun_servers)
         self._node_name = node_name or platform_module.node() or "engine"
         self._app_version = app_version
-        self._identity_store = identity_store or default_identity_store(credential_store)
+        self._identity_store = identity_store or default_identity_store(
+            credential_store, keyring_namespace
+        )
         self._api_override = api
         self._direct_timeout = direct_timeout
         self._relay_enabled = relay_enabled
@@ -158,7 +276,8 @@ class HiveService:
         pins = PinStore(self._data_directory / "hive" / f"pins-{user.id}.json")
         self.directory = Directory(user.id, self.identity.node_id, pins)
         self.state, self.detail = "starting", ""
-        self._main = spawn_logged(self._run())
+        self._approve_attempts.clear()
+        self._main = spawn_logged(self._supervise())
 
     async def _stop_locked(self) -> None:
         main, self._main = self._main, None
@@ -197,38 +316,107 @@ class HiveService:
             await node.stop()
 
     # --- main loop ------------------------------------------------------------
-    async def _run(self) -> None:
+    async def _supervise(self) -> None:
+        """Run ``_run_once`` and retry per ``classify_failure`` until it ends or is cancelled."""
+        attempt = consecutive_404 = 0
+        bounded_used = False
+        while True:
+            try:
+                await self._run_once()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if self.state == "running":
+                    attempt = consecutive_404 = 0
+                    bounded_used = False
+                consecutive_404 = consecutive_404 + 1 if _status_of(error) == 404 else 0
+                verdict = classify_failure(
+                    error,
+                    consecutive_404=consecutive_404,
+                    bounded_used=bounded_used,
+                    attempt=attempt,
+                    rng=self._rng,
+                )
+                message = str(error) or type(error).__name__
+                known = isinstance(error, (HiveApiError, HiveError, AccountError, IdentityError))
+                if known:
+                    _LOGGER.info(
+                        "Hive %s (%s: %s); %s",
+                        verdict.state,
+                        type(error).__name__,
+                        message,
+                        f"retry in {verdict.delay:.0f}s" if verdict.action == "retry" else "not retrying",
+                    )
+                elif message not in self._warned_messages:
+                    self._warned_messages.add(message)
+                    _LOGGER.warning("Hive failed to start: %s", message, exc_info=True)
+                self.state, self.detail = verdict.state, verdict.detail
+                if verdict.action == "stop":
+                    return
+                if _status_of(error) in (400, 403, 409, 422):
+                    bounded_used = True
+                attempt += 1
+                await self._teardown_network()
+                await self._sleep(verdict.delay)
+
+    async def retry(self) -> None:
+        """Restart a supervisor that stopped in ``error`` (the GUI's retry button)."""
+        main = self._main
+        if self.state == "error" and self._user is not None and (main is None or main.done()):
+            self.state, self.detail = "starting", ""
+            self._main = spawn_logged(self._supervise())
+
+    async def reset_local_hive_data(self) -> Path:
+        """Back up the database (copy, never delete) then forget local hive bookkeeping.
+
+        Restarts the supervisor so signalling can start under the current account.
+        """
+        engine = getattr(getattr(self.app, "state", None), "sync_engine", None)
+        if engine is None:
+            raise HiveError("The hive is not available.", 503)
+        source = self._data_directory / "subconscious.db"
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        target = self._data_directory / f"subconscious.db.bak-{stamp}"
+        if source.exists():
+            await asyncio.to_thread(_backup_sqlite, source, target)
+        _LOGGER.warning("Hive: local hive data reset; backup=%s", target.name)
+        async with self._lock:
+            user = self._user
+            await self._stop_locked()
+            await engine.reset_local()
+            if user is not None:
+                await self._start_locked(user)
+        return target
+
+    async def _run_once(self) -> None:
         assert self.api and self.directory and self.identity
         enroll_tried = False
-        try:
-            while True:
-                await self._refresh_directory()
-                local = self.directory.get(self.identity.node_id)
-                if local is None:
-                    # Signing in to the account authorizes this engine: register it as a
-                    # full node whether or not other devices (clients) are listed already.
-                    if not enroll_tried:
-                        enroll_tried = True
-                        await self.enroll(None)
-                        continue
-                    self.state = "error"
-                    self.detail = "This engine could not be listed on your account. Retrying."
-                    enroll_tried = False
-                else:
-                    await self._connect_network()
-                    if self._auto_approve and self.state == "running":
-                        await self._auto_approve_loop()
+        while True:
+            await self._refresh_directory()
+            local = self.directory.get(self.identity.node_id)
+            if local is None:
+                # Signing in to the account authorizes this engine: register it as a
+                # full node whether or not other devices (clients) are listed already.
+                if not enroll_tried:
+                    enroll_tried = True
+                    _LOGGER.info("Hive: engine not listed; registering node_id=%s", self.identity.node_id)
+                    await self.enroll(None)
+                    continue
+                self.state = "error"
+                self.detail = "This engine could not be listed on your account. Retrying."
+                enroll_tried = False
+            else:
+                _LOGGER.info(
+                    "Hive: engine listed (status=%s); starting network", local.status
+                )
+                await self._connect_network()
+                if self.state == "hive_mismatch":
+                    _LOGGER.warning("Hive stopped: %s", self.detail)
                     return
-                await asyncio.sleep(DIRECTORY_POLL_SECONDS)
-        except asyncio.CancelledError:
-            raise
-        except (HiveApiError, AccountError) as error:
-            self.state = "error"
-            self.detail = getattr(error, "message", "Hive unavailable.")
-            _LOGGER.info("Hive unavailable: %s", self.detail)
-        except Exception:
-            self.state, self.detail = "error", "Hive failed to start."
-            _LOGGER.warning("Hive failed to start.", exc_info=True)
+                await self._reconcile_loop()
+                return
+            await self._sleep(DIRECTORY_POLL_SECONDS)
 
     async def _connect_network(self) -> None:
         assert self.api and self.directory and self.identity
@@ -237,15 +425,14 @@ class HiveService:
         if self.app is not None and getattr(self.app.state, "sync_engine", None) is not None:
             node = HiveNode(self.app, identity, directory)
             self.node = node
+            # An empty hive id (server did not report one) is never bound or compared.
             if not await node.start(directory.hive_id or ""):
                 # This data directory already belongs to another hive: never merge histories.
                 self.state = "hive_mismatch"
-                self.detail = (
-                    "This data directory belongs to a different hive. Start with a fresh data "
-                    "directory, or run 'subconscious hive reset-local --confirm' to wipe local hive data."
-                )
+                self.detail = HIVE_MISMATCH_DETAIL
+                _LOGGER.warning("Hive: signalling not started: hive mismatch")
                 return
-        self.signaling = SignalingClient(api, identity)
+        self.signaling = SignalingClient(api, identity, on_connected=self._on_signalling_connected)
         ice_cache: dict[str, Any] = {}
 
         async def ice() -> dict[str, Any]:
@@ -276,10 +463,74 @@ class HiveService:
         self.signaling.on("presence.snapshot", self._on_presence)
         self.signaling.on("presence.update", self._on_presence)
         self.signaling.start()
+        _LOGGER.info("Hive: signalling started node_id=%s", identity.node_id)
         registry = getattr(getattr(self.app, "state", None), "client_registry", None)
         if registry is not None:
             self._unsubscribe_clients = registry.subscribe(self._on_local_clients)
         self.state, self.detail = "running", ""
+
+    # --- legacy thin-row fold ----------------------------------------------------
+    def note_gui_client(self, device_name: str | None, client_id: str | None) -> None:
+        """Remember the GUI's device name / client id from the last local login (never logged)."""
+        self._gui_name, self._gui_client_id = device_name, client_id
+
+    async def _on_signalling_connected(self) -> None:
+        _LOGGER.info("Hive: signalling connected; checking legacy client rows")
+        spawn_logged(self._fold_gui_clients())
+
+    def _fold_candidates(self, connected_at: float) -> list[Any]:
+        directory, identity = self.directory, self.identity
+        if directory is None or identity is None:
+            return []
+        mapped = self._gui_store.mapping.get(self._gui_client_id or "")
+        platform_name = (platform_module.system() or "").lower()
+        found: list[Any] = []
+        for node in directory.nodes:
+            if (
+                node.kind != "thin"
+                or node.parent_node_id is not None
+                or node.status != "active"
+                or node.id in self._parented
+            ):
+                continue
+            if mapped is not None:
+                if node.id == mapped:
+                    found.append(node)
+                continue
+            if self._gui_name is None or node.name != self._gui_name:
+                continue
+            if node.platform.lower() != platform_name:
+                continue
+            if self._online.get(node.id, node.online) and not _seen_before(
+                node.last_seen_at, connected_at
+            ):
+                continue
+            found.append(node)
+        return found
+
+    async def _fold_gui_clients(self) -> None:
+        api, identity = self.api, self.identity
+        if api is None or identity is None or (self._gui_name is None and self._gui_client_id is None):
+            return
+        matches = self._fold_candidates(time.time())
+        if len(matches) > 1:
+            _LOGGER.info("legacy_fold_ambiguous count=%d", len(matches))
+            return
+        if not matches:
+            return
+        node = matches[0]
+        self._parented.add(node.id)
+        try:
+            await api.set_parent(node.id, identity.node_id)
+        except HiveApiError as error:
+            _LOGGER.info("legacy_fold skipped node_id=%s status=%s", node.id, error.status_code)
+            return
+        if self._gui_client_id:
+            self._gui_store.mapping[self._gui_client_id] = node.id
+            with logged_suppress(OSError):
+                self._gui_store.save()
+        _LOGGER.info("legacy_fold parented node_id=%s under %s", node.id, identity.node_id)
+        await self.refresh(force=True)
 
     # --- callbacks -------------------------------------------------------------
     def _on_local_clients(self, infos: tuple[Any, ...]) -> None:
@@ -315,11 +566,19 @@ class HiveService:
                 continue
             node_id, online = entry["node_id"], entry.get("online") is True
             self._online[node_id] = online
-            if self.directory is not None and self.directory.get(node_id) is None:
-                unknown = True
+            known = self.directory.get(node_id) if self.directory is not None else None
+            if self.directory is not None:
+                if known is None:
+                    unknown = True
+                else:
+                    status = entry.get("status")
+                    if isinstance(status, str) and status != known.status:
+                        unknown = True
+                    if "parent_node_id" in entry and entry["parent_node_id"] != known.parent_node_id:
+                        unknown = True
             if self.peers is not None:
                 await self.peers.on_presence(node_id, online)
-        if unknown or "nodes" not in data:
+        if unknown:
             self._schedule_refresh()
 
     def _schedule_refresh(self) -> None:
@@ -362,14 +621,18 @@ class HiveService:
             raise HiveError("Sign in to use the hive.", 409)
         return self.api, self.directory, self.identity, self._user
 
-    async def refresh(self) -> None:
-        """Re-read the server's node list (best effort).
+    async def refresh(self, *, force: bool = False) -> None:
+        """Re-read the server's node list (best effort), at most once per 5 s unless forced.
 
         A node that just enrolled is ``pending`` and not on the signalling socket, so no
         presence frame ever tells the others about it; listing and approving must ask.
         """
         if self.api is None or self.directory is None:
             return
+        now = time.monotonic()
+        if not force and now - self._last_refresh < REFRESH_THROTTLE_SECONDS:
+            return
+        self._last_refresh = now
         with logged_suppress(HiveApiError, AccountError):
             await self._refresh_directory()
             await self._auto_approve_pending()
@@ -394,6 +657,7 @@ class HiveService:
             if error.status_code != 409:  # already registered is fine
                 raise HiveError(error.message, error.status_code) from error
         await self._refresh_directory()
+        await self.retry()
         return self.snapshot()
 
     async def create_invite(self) -> dict[str, Any]:
@@ -416,7 +680,7 @@ class HiveService:
     async def approve(self, node_id: str, sas: str) -> None:
         api, directory, identity, user = self._require_running()
         if directory.get(node_id) is None:
-            await self.refresh()  # the pending node may have enrolled after our last listing
+            await self.refresh(force=True)  # the pending node may have enrolled after our last listing
         node = directory.get(node_id)
         if node is None or node.status != "pending":
             raise HiveError("That node is not waiting for approval.", 404)
@@ -437,14 +701,20 @@ class HiveService:
         except HiveApiError as error:
             raise HiveError(error.message, error.status_code) from error
 
-    async def _auto_approve_loop(self) -> None:
+    async def _reconcile_loop(self) -> None:
+        """Safety net only: refresh and auto-approve while signalling is down (0 req/min when up)."""
         while True:
-            await asyncio.sleep(DIRECTORY_POLL_SECONDS)
+            await self._sleep(DIRECTORY_RECONCILE_SECONDS)
+            signaling = self.signaling
+            if signaling is not None and signaling.connected:
+                continue
             try:
                 await self._refresh_directory()
                 await self._auto_approve_pending()
-            except (HiveApiError, AccountError, HiveError):
-                _LOG.warning("hive.service.HiveService._auto_approve_loop: handled; will retry", exc_info=True)
+            except (HiveApiError, AccountError, HiveError) as error:
+                if _session_is_dead(error):
+                    raise
+                _LOG.warning("hive.service.HiveService._reconcile_loop: handled; will retry", exc_info=True)
 
     def _node_passes_ownership(self, node: Any, user_id: str) -> bool:
         if node.kind not in AUTO_APPROVE_KINDS or not node.platform:
@@ -479,6 +749,13 @@ class HiveService:
         for node in directory.nodes:
             if node.status != "pending" or node.id == identity.node_id:
                 continue
+            attempts = self._approve_attempts.get(node.id, 0)
+            if attempts >= AUTO_APPROVE_MAX_ATTEMPTS:
+                if attempts == AUTO_APPROVE_MAX_ATTEMPTS:
+                    _LOGGER.info("Hive auto-approve gave up on node_id=%s", node.id)
+                    self._approve_attempts[node.id] = attempts + 1
+                continue
+            self._approve_attempts[node.id] = attempts + 1
             if not self._node_passes_ownership(node, user.id):
                 _LOG.warning("hive auto-approve skipped node %s: ownership checks failed", node.id)
                 continue
@@ -509,6 +786,8 @@ class HiveService:
     # --- reporting --------------------------------------------------------------
     def snapshot(self) -> dict[str, Any]:
         directory, identity, peers = self.directory, self.identity, self.peers
+        signaling = self.signaling
+        signalling_up = signaling is not None and signaling.connected
         nodes: list[dict[str, Any]] = []
         if directory is not None and identity is not None:
             for node in directory.nodes:
@@ -522,7 +801,13 @@ class HiveService:
                         "status": node.status,
                         "trusted": directory.is_trusted(node.id),
                         "local": node.id == identity.node_id,
-                        "online": self._online.get(node.id, node.online),
+                        "online": signalling_up
+                        if node.id == identity.node_id
+                        else self._online.get(node.id, node.online),
+                        "parent_node_id": node.parent_node_id,
+                        "clients": list(self._clients)
+                        if node.id == identity.node_id
+                        else list(node.clients),
                         "connection": peers.state_of(node.id) if peers else "disconnected",
                         "tier": link.tier if link else None,
                         "sas": None
@@ -535,6 +820,13 @@ class HiveService:
             "state": self.state,
             "detail": self.detail,
             "autoApprove": self._auto_approve,
+            "signalling": {
+                "connected": signalling_up,
+                "started": signaling is not None,
+                "reason": "not started: hive mismatch" if self.state == "hive_mismatch" else None,
+                "failures": signaling.failures if signaling is not None else 0,
+                "last_error": signaling.last_error if signaling is not None else None,
+            },
             "node_id": identity.node_id if identity else None,
             "hive_id": directory.hive_id if directory else None,
             "nodes": nodes,

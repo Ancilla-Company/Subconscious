@@ -4,26 +4,65 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../hive/engine_card_view.dart';
+import '../../hive/hive_runtime.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
 
 /// Height of the custom title bar (matches the native caption height).
 const double kCaptionBarHeight = 32;
 
+/// Chip colour and text. While the engine card is (re)connecting, or the
+/// local engine is still being linked, the chip is amber and never says
+/// "disconnected" (AC-26).
+@visibleForTesting
+(Color, String) captionPresentation(
+  EngineConnectionStatus status,
+  HiveRuntime hive,
+) {
+  final (Color, String) base = switch (status) {
+    EngineConnectionStatus.connected => (Colors.green, 'connected'),
+    EngineConnectionStatus.connecting => (Colors.amber, 'connecting'),
+    EngineConnectionStatus.disconnected => (Colors.red, 'disconnected'),
+  };
+  if (status == EngineConnectionStatus.connected) return base;
+  if (hive.linkingLocalEngine) return (Colors.amber, 'starting engine');
+  if (!hive.hasLocalFullNode &&
+      hive.isSignedIn &&
+      engineCardViewFor(hive).isConnecting) {
+    return (Colors.amber, 'connecting');
+  }
+  return base;
+}
+
 /// Logo, app name and connection status. Shared by the native and web bars.
 final class CaptionTitleContent extends StatelessWidget {
-  const CaptionTitleContent({required this.controller, super.key});
+  const CaptionTitleContent({
+    required this.controller,
+    this.runtime,
+    super.key,
+  });
 
   final DashboardController controller;
 
+  /// Source of the engine card state; defaults to [HiveRuntime.shared].
+  final HiveRuntime? runtime;
+
   @override
   Widget build(BuildContext context) {
+    final HiveRuntime hive = runtime ?? HiveRuntime.shared;
+    return ListenableBuilder(
+      listenable: hive,
+      builder: (BuildContext context, Widget? child) => _content(context, hive),
+    );
+  }
+
+  Widget _content(BuildContext context, HiveRuntime hive) {
     final ThemeData theme = Theme.of(context);
-    final (Color, String) presentation = switch (controller.connectionStatus) {
-      EngineConnectionStatus.connected => (Colors.green, 'connected'),
-      EngineConnectionStatus.connecting => (Colors.amber, 'connecting'),
-      EngineConnectionStatus.disconnected => (Colors.red, 'disconnected'),
-    };
+    final (Color, String) presentation = captionPresentation(
+      controller.connectionStatus,
+      hive,
+    );
     return Row(
       children: <Widget>[
         SizedBox.square(

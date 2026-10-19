@@ -4,6 +4,8 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 
 import '../../account/account_controller.dart';
+import '../device_tree.dart';
+import '../engine_card_view.dart';
 import '../executor_selection.dart';
 import '../hive_runtime.dart';
 
@@ -100,12 +102,19 @@ final class _NodeList extends StatelessWidget {
   Widget build(BuildContext context) {
     final List<NodeView> nodes = runtime.nodes;
     final NodeView? local = runtime.localNode;
+    final ThemeData theme = Theme.of(context);
+    final Object? error = runtime.error;
+    final bool errorIsUnavailable = error != null && _isServerUnavailable(error);
+    final bool showEngineCard =
+        !runtime.hasLocalFullNode &&
+        !runtime.linkingLocalEngine &&
+        !runtime.localEngineMissing;
     return ListView(
       shrinkWrap: embedded,
       physics: embedded ? const NeverScrollableScrollPhysics() : null,
       padding: embedded ? const EdgeInsets.only(top: 12) : const EdgeInsets.all(16),
       children: <Widget>[
-        if (runtime.error case final Object error)
+        if (error != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Row(
@@ -116,7 +125,9 @@ final class _NodeList extends StatelessWidget {
                       error,
                       runtime.account.lastAuthError,
                     ),
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: errorIsUnavailable
+                        ? null
+                        : TextStyle(color: theme.colorScheme.error),
                   ),
                 ),
                 TextButton(
@@ -127,23 +138,198 @@ final class _NodeList extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        if (local != null && local.node.status == 'pending')
-          _PendingBanner(runtime: runtime, nodes: nodes),
-        if (!runtime.canApprove && local != null && local.node.status == 'active')
+          )
+        else if (runtime.serverUnavailable)
           const Padding(
+            key: ValueKey<String>('server-unavailable'),
             padding: EdgeInsets.only(bottom: 12),
-            child: Text(
-              'This device cannot approve other devices.',
+            child: Text(serverUnavailableMessage),
+          ),
+        if (runtime.hasLocalFullNode && runtime.engineHiveState == 'signed_out')
+          Card(
+            key: const ValueKey<String>('engine-signed-out-banner'),
+            color: theme.colorScheme.errorContainer,
+            child: const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Engine is not signed in. Sign out and sign in again to link it.',
+              ),
             ),
           ),
-        if (nodes.isEmpty && runtime.error == null) const Text('No devices yet.'),
-        for (final NodeView view in nodes)
-          _NodeTile(runtime: runtime, view: view),
+        if (runtime.hasLocalFullNode && runtime.engineHiveState == 'hive_mismatch')
+          Card(
+            key: const ValueKey<String>('engine-hive-mismatch'),
+            color: theme.colorScheme.errorContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(runtime.engineHiveDetail ?? hiveMismatchMessage),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton(
+                      key: const ValueKey<String>('engine-reset-local-hive'),
+                      onPressed: () => _confirmResetLocalHive(context, runtime),
+                      child: const Text('Reset local hive data'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (runtime.linkingLocalEngine) const _LinkingCard(),
+        if (runtime.localEngineMissing) _EngineMissingCard(runtime: runtime),
+        if (showEngineCard) _EngineCard(runtime: runtime),
+        if (local != null && local.node.status == 'pending')
+          _PendingBanner(runtime: runtime, nodes: nodes),
+        if (runtime.approvalAbility == ApprovalAbility.engineNotTrusted)
+          const Padding(
+            key: ValueKey<String>('engine-not-trusted-notice'),
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(engineNotTrustedMessage),
+          ),
+        if (runtime.showCannotApprove)
+          Padding(
+            key: const ValueKey<String>('cannot-approve-notice'),
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              runtime.approvalAbility == ApprovalAbility.webBlocked
+                  ? webCannotApproveMessage
+                  : notTrustedMessage,
+            ),
+          ),
+        if (runtime.approvalNote case final String note)
+          Padding(
+            key: const ValueKey<String>('approval-note'),
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(note),
+          ),
+        if (nodes.isEmpty && error == null) const Text('No devices yet.'),
+        for (final DeviceGroup group in buildDeviceTree(nodes)) ...<Widget>[
+          _NodeTile(runtime: runtime, view: group.root),
+          for (final NodeView child in group.children)
+            Padding(
+              padding: const EdgeInsets.only(left: 24),
+              child: _NodeTile(runtime: runtime, view: child),
+            ),
+        ],
         if (runtime.executorCandidates.isNotEmpty) _ExecutorSection(runtime: runtime),
       ],
     );
   }
+}
+
+Future<void> _confirmResetLocalHive(
+  BuildContext context,
+  HiveRuntime runtime,
+) async {
+  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialog) => AlertDialog(
+      key: const ValueKey<String>('engine-reset-local-hive-dialog'),
+      title: const Text('Reset local hive data?'),
+      content: const Text(
+        'The engine backs up its database, then clears its local hive '
+        'bookkeeping. Your threads and files are kept. You will need to sign '
+        'in again.',
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialog).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey<String>('engine-reset-local-hive-confirm'),
+          onPressed: () => Navigator.of(dialog).pop(true),
+          child: const Text('Reset'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  try {
+    await runtime.resetLocalHive();
+  } on Object catch (error) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Could not reset local hive data: $error')),
+    );
+  }
+}
+
+const String hiveMismatchMessage =
+    "This data directory belongs to a different hive. Use 'Reset local hive data' to back up and clear the local hive bookkeeping (your threads and files are kept), then sign in again.";
+const String serverUnavailableMessage = 'Server unavailable, retrying';
+const String engineNotTrustedMessage =
+    'The local engine is not approved. Sign the engine in again.';
+const String webCannotApproveMessage =
+    'Approve new devices from the Subconscious desktop app.';
+const String notTrustedMessage =
+    'This device is not approved yet. Approve it from another signed-in '
+    'device.';
+
+bool _isServerUnavailable(Object error) =>
+    error is HiveApiException &&
+    (error.statusCode == 502 ||
+        error.statusCode == 503 ||
+        error.statusCode == 504);
+
+/// Shown on desktop while the local engine is still starting. No thin device
+/// is registered meanwhile.
+final class _LinkingCard extends StatelessWidget {
+  const _LinkingCard();
+
+  @override
+  Widget build(BuildContext context) => const Card(
+    key: ValueKey<String>('linking-card'),
+    child: Padding(
+      padding: EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('Linking to the engine on this computer...'),
+          SizedBox(height: 8),
+          LinearProgressIndicator(),
+        ],
+      ),
+    ),
+  );
+}
+
+/// The wait for the local engine expired.
+final class _EngineMissingCard extends StatelessWidget {
+  const _EngineMissingCard({required this.runtime});
+  final HiveRuntime runtime;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    key: const ValueKey<String>('engine-missing-card'),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text('Engine did not start. Retry, or check the engine log.'),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: <Widget>[
+              FilledButton(
+                onPressed: runtime.retryLocalEngineLink,
+                child: const Text('Retry'),
+              ),
+              TextButton(
+                onPressed: runtime.useThisPcAsRemoteClient,
+                child: const Text('Use this PC as a remote client'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Where tasks can run: the connected engine plus other online full nodes.
@@ -197,6 +383,11 @@ final class _NodeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final DirectoryNode node = view.node;
+    final String? home = runtime.homeEngineId;
+    final String? preferred = runtime.preferredEngineId;
+    final bool isHome = home != null && nodeIdsEqual(node.id, home);
+    final bool isPreferred =
+        preferred != null && nodeIdsEqual(node.id, preferred);
     final bool canApprove =
         runtime.canApprove && node.status == 'pending' && !view.isLocal;
     final List<String> details = <String>[
@@ -205,25 +396,158 @@ final class _NodeTile extends StatelessWidget {
       if (node.status != 'active') node.status,
       if (view.online && view.tier != null) view.tier!,
     ].where((String s) => s.isNotEmpty).toList();
+    final String subtitle = <String>[
+      view.online ? 'Online' : 'Offline',
+      ...details,
+    ].join(', ');
+    final bool canRemove = node.status == 'pending' && !view.isLocal;
+    final Widget? action = canApprove
+        ? FilledButton.tonal(
+            onPressed: () => _showApproval(context, runtime, node),
+            child: const Text('Approve'),
+          )
+        : (node.isEngine && view.trusted && !view.isLocal)
+        ? _engineAction(isHome, isPreferred)
+        : null;
+    final Widget? removeButton = canRemove
+        ? TextButton(
+            onPressed: () => _confirmRemove(context, runtime, node),
+            child: const Text('Remove'),
+          )
+        : null;
     return Card(
       child: ListTile(
         title: Text(view.isLocal ? '${node.name} (this device)' : node.name),
-        subtitle: Text(
-          <String>[view.online ? 'Online' : 'Offline', ...details].join(', '),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(subtitle),
+            if (node.isEngine && view.clients.isNotEmpty)
+              Text('Clients: ${view.clients.join(', ')}'),
+          ],
         ),
-        trailing: canApprove
-            ? FilledButton.tonal(
-                onPressed: () => _showApproval(context, runtime, node),
-                child: const Text('Approve'),
+        trailing: (action != null && removeButton != null)
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[action, removeButton],
               )
-            : (node.isEngine && view.trusted && view.online && !view.isLocal)
-            ? TextButton(
-                onPressed: () => runtime.setHomeEngine(node.id),
-                child: const Text('Use as home'),
-              )
-            : null,
+            : (action ?? removeButton),
       ),
     );
+  }
+
+  Future<void> _confirmRemove(
+    BuildContext context,
+    HiveRuntime runtime,
+    DirectoryNode node,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text('Remove ${node.name}?'),
+        content: const Text(
+          'This device is removed from your account. It can sign in again.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await runtime.revoke(node);
+  }
+
+  Widget? _engineAction(bool isHome, bool isPreferred) {
+    if (isHome) return const Chip(label: Text('Connected'));
+    if (!view.online) {
+      return isPreferred ? const Chip(label: Text('Preferred')) : null;
+    }
+    // While the card says it is (re)connecting, no Connect is offered.
+    if (engineCardViewFor(runtime).showProgress) return null;
+    return TextButton(
+      onPressed: () => runtime.selectEngine(view.node.id),
+      child: Text(isPreferred ? 'Connect (preferred)' : 'Connect'),
+    );
+  }
+}
+
+/// Remote engine connection: status, Connect/Disconnect, and the choice of
+/// engine (the tiles below) when several are online.
+final class _EngineCard extends StatelessWidget {
+  const _EngineCard({required this.runtime});
+  final HiveRuntime runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final EngineCardView view = engineCardViewFor(runtime);
+    return Card(
+      key: const ValueKey<String>('engine-card'),
+      color: theme.colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Semantics(
+              liveRegion: true,
+              child: Text(view.title, style: theme.textTheme.titleMedium),
+            ),
+            const SizedBox(height: 4),
+            Text(view.detail),
+            if (view.showProgress) ...<Widget>[
+              const SizedBox(height: 8),
+              const LinearProgressIndicator(),
+            ],
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                for (final CardAction action in view.actions)
+                  _cardButton(action),
+              ],
+            ),
+            if (view.caption case final String caption) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(caption, style: theme.textTheme.bodySmall),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Primary actions are filled, except Disconnect and Cancel which are
+  /// outlined; secondary actions (Pause) are text buttons. A disabled action
+  /// has a null `onPressed`, so it renders in the disabled style.
+  Widget _cardButton(CardAction action) {
+    final VoidCallback? onPressed = action.enabled
+        ? () => unawaited(switch (action.command) {
+            CardCommand.connect ||
+            CardCommand.retry => runtime.reconnectEngine(),
+            CardCommand.disconnect ||
+            CardCommand.cancel ||
+            CardCommand.pause => runtime.disconnectEngine(),
+          })
+        : null;
+    final Widget label = Text(action.label);
+    if (action.kind == CardActionKind.secondary) {
+      return TextButton(onPressed: onPressed, child: label);
+    }
+    return switch (action.command) {
+      CardCommand.disconnect || CardCommand.cancel => OutlinedButton(
+        onPressed: onPressed,
+        child: label,
+      ),
+      _ => FilledButton(onPressed: onPressed, child: label),
+    };
   }
 }
 
@@ -434,6 +758,7 @@ String devicesLoadFailedMessage(Object error, [String? lastAuthError]) {
     return 'Your session expired or was rejected by the server. '
         'Sign in again.$detail';
   }
+  if (_isServerUnavailable(error)) return serverUnavailableMessage;
   if (error is HiveApiException && error.statusCode >= 400) {
     return 'The server returned ${error.statusCode}. Try again later.';
   }

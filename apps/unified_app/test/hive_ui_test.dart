@@ -244,6 +244,61 @@ void main() {
       expect(find.textContaining('Code with Desk'), findsOneWidget);
     });
 
+    testWidgets('hive-mismatch card resets local hive data after confirmation', (
+      WidgetTester tester,
+    ) async {
+      final HiveRuntime runtime = await signedIn(<http.Request>[]);
+      final AccountController account = accountFor(runtime);
+      final List<http.Request> engineRequests = <http.Request>[];
+      bool mismatch = true;
+      runtime.localEngineClient = () async => RestEngineClient(
+        baseUri: Uri.parse('http://engine.test/api/v1/'),
+        token: 't',
+        client: MockClient((http.Request r) async {
+          engineRequests.add(r);
+          if (r.method == 'POST') {
+            mismatch = false;
+            return http.Response(
+              jsonEncode(<String, dynamic>{'reset': true, 'backup': 'subconscious.db.bak-1'}),
+              200,
+            );
+          }
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'state': mismatch ? 'hive_mismatch' : 'signed_out',
+              'detail': 'different hive',
+              'nodes': <Map<String, dynamic>>[],
+            }),
+            200,
+          );
+        }),
+      );
+      runtime.hasLocalFullNode = true;
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SingleChildScrollView(child: DevicesSection(account: account)))),
+      );
+      await tester.pump();
+      final Finder button = find.byKey(const ValueKey<String>('engine-reset-local-hive'));
+      expect(button, findsOneWidget);
+
+      // Cancel leaves the engine untouched.
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(engineRequests.where((http.Request r) => r.method == 'POST'), isEmpty);
+
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('engine-reset-local-hive-confirm')));
+      await tester.pumpAndSettle();
+      final http.Request post = engineRequests.singleWhere((http.Request r) => r.method == 'POST');
+      expect(post.url.path, '/api/v1/hive/reset-local');
+      expect(jsonDecode(post.body), <String, dynamic>{'confirm': true});
+      expect(find.byKey(const ValueKey<String>('engine-reset-local-hive')), findsNothing);
+    });
+
     test('a local full node skips thin registration', () async {
       final List<http.Request> requests = <http.Request>[];
       final HiveRuntime runtime = await signedIn(requests);

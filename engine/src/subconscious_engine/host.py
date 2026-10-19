@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Callable
 import errno
+from typing import TYPE_CHECKING, Any
 import ipaddress
 import logging
 import os
@@ -35,6 +36,11 @@ from .storage import Database
 from .tools import ToolRegistry
 from .logging_setup import logged_suppress, spawn_logged
 
+from .profiles import DEFAULT_PROFILE_ID
+
+if TYPE_CHECKING:
+    from .profiles import Profile, ProfileManager
+
 StatusIndicatorFactory = Callable[..., BackgroundStatusIndicator]
 
 logger = logging.getLogger(__name__)
@@ -62,11 +68,16 @@ class EngineHost:
         self,
         config: EngineConfig,
         status_indicator_factory: StatusIndicatorFactory = SystemTrayStatusIndicator,
+        *,
+        profiles: "ProfileManager | None" = None,
+        profile: "Profile | None" = None,
     ) -> None:
         self.config = config
+        self.profiles = profiles
+        self.profile_id = profile.id if profile is not None else (config.profile_id or DEFAULT_PROFILE_ID)
         self.token = (
             EngineAuthToken(self.DEVELOPMENT_TOKEN)
-            if config.dev
+            if config.dev and config.profile_id is None
             else EngineAuthToken.generate()
         )
         self.database = Database(config.resolved_data_directory / "subconscious.db")
@@ -76,7 +87,7 @@ class EngineHost:
         self.event_bus = EventBus()
         self.tool_registry = ToolRegistry()
         self.rag_service = WorkspaceRagService(
-            model_cache_directory=config.resolved_data_directory / "models"
+            model_cache_directory=config.resolved_model_directory
         )
         self.agent_manager = AgentManager()
         self.telemetry = TelemetryStore(config.resolved_data_directory / "telemetry.db")
@@ -133,6 +144,7 @@ class EngineHost:
         self.account_session_service = AccountSessionService(
             AccountServerClient(config.resolved_account_server_url),
             credential_store=self.model_configuration_store,
+            keyring_namespace=config.profile_id,
         )
         self.app = create_app(
             self.database,
@@ -161,6 +173,7 @@ class EngineHost:
             account=self.account_session_service,
             credential_store=self.model_configuration_store,
             data_directory=config.resolved_data_directory,
+            keyring_namespace=config.profile_id,
             enabled=hive.enabled,
             server_url=hive.server_url,
             stun_servers=hive.stun_servers,
@@ -172,6 +185,8 @@ class EngineHost:
             auto_approve_account_devices=hive.auto_approve_account_devices,
         )
         self.app.state.hive_service = self.hive_service
+        self.app.state.profile_manager = profiles
+        self.app.state.profile_id = self.profile_id
         self.hive_service.attach(self.app)
         self._status_indicator_factory = status_indicator_factory
         self._status_indicator: BackgroundStatusIndicator | None = None
@@ -213,6 +228,12 @@ class EngineHost:
 
     async def wait_until_ready(self, timeout: float = 10.0) -> None:
         await asyncio.wait_for(self._ready.wait(), timeout)
+
+    def set_tray_clients(self, clients: tuple[Any, ...]) -> None:
+        """Show these clients in the tray menu (no-op when there is no tray)."""
+        indicator = self._status_indicator
+        if indicator is not None:
+            indicator.set_clients(clients)
 
     def request_stop(self) -> None:
         """Request graceful shutdown; safe to call from a tray callback thread."""
@@ -313,10 +334,14 @@ class EngineHost:
                     lan_enabled=self.config.lan_enabled,
                     dev=self.config.dev,
                 )
-                unsubscribe_clients = self.app.state.client_registry.subscribe(
-                    self._status_indicator.set_clients
-                )
+                # With profiles, the manager feeds the tray the clients of every instance.
+                if self.profiles is None:
+                    unsubscribe_clients = self.app.state.client_registry.subscribe(
+                        self._status_indicator.set_clients
+                    )
                 self._status_indicator.start(self.request_stop, self.token.value)
+                if self.profiles is not None:
+                    self.profiles.push_clients()
             self._ready.set()
             # Resume an existing account session and start the hive only if the
             # user is signed in; failures never block the local engine.

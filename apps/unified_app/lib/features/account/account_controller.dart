@@ -23,6 +23,7 @@ final class AccountController extends ChangeNotifier {
     required this.clientProvider,
     this.thinClient = false,
     this.onSessionChanged,
+    this.onEngineProfile,
   }) {
     session.addListener(_syncFromSession);
   }
@@ -38,6 +39,10 @@ final class AccountController extends ChangeNotifier {
 
   /// Called after a sign-in, sign-up or sign-out so the app can reconnect.
   final FutureOr<void> Function()? onSessionChanged;
+
+  /// Called with the engine profile that now holds the account's session. Each
+  /// account has its own engine instance, so the app must follow it.
+  final FutureOr<void> Function(String profileId)? onEngineProfile;
 
   /// The server session when this device uses a remote engine, else null.
   HiveRuntime? get serverRuntime => thinClient ? session : null;
@@ -76,10 +81,25 @@ final class AccountController extends ChangeNotifier {
     final String address = email.trim();
     return _performAction(
       () => session.account.loginWithEmail(email: address, password: password),
-      linkEngine: (RestEngineClient client) async {
-        await client.login(email: address, password: password);
-      },
+      linkEngine: (RestEngineClient client) => _loginEngine(client, address, password),
     );
+  }
+
+  /// Signs the local engine in. The device name and per-install client id let
+  /// the engine fold this GUI under itself instead of listing a second device.
+  Future<void> _loginEngine(
+    RestEngineClient client,
+    String address,
+    String password,
+  ) async {
+    final AccountSession result = await client.login(
+      email: address,
+      password: password,
+      deviceName: session.deviceName,
+      clientId: await session.clientId(),
+    );
+    final EngineProfile? profile = result.profile;
+    if (profile != null) await onEngineProfile?.call(profile.id);
   }
 
   Future<String?> requestSignupCode({required String email}) async {
@@ -113,9 +133,7 @@ final class AccountController extends ChangeNotifier {
         password: password,
         displayName: displayName,
       ),
-      linkEngine: (RestEngineClient client) async {
-        await client.login(email: address, password: password);
-      },
+      linkEngine: (RestEngineClient client) => _loginEngine(client, address, password),
     );
   }
 
@@ -150,9 +168,7 @@ final class AccountController extends ChangeNotifier {
         code: code.trim(),
         newPassword: newPassword,
       ),
-      linkEngine: (RestEngineClient client) async {
-        await client.login(email: address, password: newPassword);
-      },
+      linkEngine: (RestEngineClient client) => _loginEngine(client, address, newPassword),
       messageFor: _resetMessageFor,
     );
   }

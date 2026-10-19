@@ -148,8 +148,23 @@ async def sync_status(request: Request) -> Response:
     return JSONResponse(status)
 
 
+async def reset_local(request: Request) -> Response:
+    service = _service(request)
+    if service is None:
+        return _unavailable()
+    if (await _body(request)).get("confirm") is not True:
+        return JSONResponse({"error": "Confirmation is required."}, 400)
+    try:
+        backup = await service.reset_local_hive_data()
+    except HiveError as error:
+        _LOG.warning("api.hive_routes.reset_local: handled HiveError; continuing with fallback", exc_info=True)
+        return JSONResponse({"error": error.message}, error.status_code)
+    return JSONResponse({"reset": True, "backup": backup.name})
+
+
 def hive_routes() -> list[Route]:
     return [
+        Route("/api/v1/hive/reset-local", reset_local, methods=["POST"]),
         Route("/api/v1/hive/tasks", list_tasks, methods=["GET"]),
         Route("/api/v1/hive/sync/status", sync_status, methods=["GET"]),
         # Local bearer only: authz.py has no rule for these, so peers always get a denial.

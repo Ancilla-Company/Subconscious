@@ -23,6 +23,7 @@ export 'hive/identity.dart';
 export 'hive/peer_connector.dart';
 export 'hive/peer_engine_socket.dart';
 export 'hive/peer_link.dart';
+export 'hive/presence_book.dart';
 export 'hive/relay.dart';
 export 'hive/server_account_client.dart';
 export 'hive/signaling_client.dart';

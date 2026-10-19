@@ -149,6 +149,9 @@ class EngineConfig:
     capabilities_url: str | None = None
     capabilities_token: str | None = None
     hive: HiveConfig = HiveConfig()
+    # Set for secondary profile instances; `data_directory` is then used exactly as given.
+    profile_id: str | None = None
+    root_directory: Path | None = None
 
     @property
     def resolved_hive_server_url(self) -> str:
@@ -182,6 +185,19 @@ class EngineConfig:
 
     @property
     def resolved_data_directory(self) -> Path:
+        if self.profile_id is not None and self.data_directory is not None:
+            return self.data_directory
+        return self.resolved_root_directory
+
+    @property
+    def resolved_model_directory(self) -> Path:
+        # Downloaded models are large and not account data: shared by all profiles.
+        return self.resolved_root_directory / "models"
+
+    @property
+    def resolved_root_directory(self) -> Path:
+        if self.root_directory is not None:
+            return self.root_directory
         if self.data_directory is not None:
             base = self.data_directory
         elif sys.platform == "win32":

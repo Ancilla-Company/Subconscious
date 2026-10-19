@@ -71,21 +71,31 @@ Future<void> main() async {
     session: HiveRuntime.shared,
     clientProvider: () => controller.repository?.rest,
     thinClient: !_hasLocalEngine,
+    onEngineProfile: (String profileId) => setActiveEngineProfile(
+      preferDev: preferDev,
+      profileId: profileId,
+    ),
     onSessionChanged: () async {
       await controller.reconnectNow();
       if (!HiveRuntime.shared.hasLocalFullNode) return;
       // The engine lists itself on the account a moment after it is signed in.
       await HiveRuntime.shared.refresh();
+      // 6 s, so this refresh is not swallowed by the engine's own 5 s
+      // refresh throttle.
       unawaited(
         Future<void>.delayed(
-          const Duration(seconds: 4),
+          const Duration(seconds: 6),
           HiveRuntime.shared.refresh,
         ),
       );
     },
   );
+  HiveRuntime.shared.expectsLocalEngine = _hasLocalEngine;
+  HiveRuntime.shared.probeLocalEngine = () async =>
+      await discoverLocalEnginePort(preferDev: preferDev) != null;
   HiveRuntime.shared.localEngineClient = () async =>
       controller.repository?.rest;
+  HiveRuntime.shared.onEngineAvailable = controller.reconnectNow;
   unawaited(_loadEngineAndRestoreAccount(controller, accountController));
   runApp(
     SubconsciousApp(

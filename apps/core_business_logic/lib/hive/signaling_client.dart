@@ -89,6 +89,7 @@ final class SignalingClient implements SignalSender, RelaySender {
     Future<void> Function(Duration)? sleep,
     double Function()? random,
     this.authTimeout = signalAuthTimeout,
+    this.heartbeatInterval = const Duration(seconds: 25),
   }) : _connect = connect ?? connectWebSocket,
        _sleep = sleep ?? Future<void>.delayed,
        _random = random;
@@ -98,6 +99,10 @@ final class SignalingClient implements SignalSender, RelaySender {
   final SignalConnect _connect;
   final Duration refreshInterval;
   final Duration authTimeout;
+
+  /// Application-level ping so the server's idle timeout never fires on a
+  /// healthy connection (a quiet node would otherwise flap offline).
+  final Duration heartbeatInterval;
   final Future<void> Function(Duration) _sleep;
   final double Function()? _random;
 
@@ -232,6 +237,14 @@ final class SignalingClient implements SignalSender, RelaySender {
       final Timer refresher = Timer.periodic(refreshInterval, (Timer _) {
         unawaited(refreshAuth().catchError((Object _) {}));
       });
+      final Timer heartbeat = Timer.periodic(heartbeatInterval, (Timer _) {
+        try {
+          unawaited(ping().catchError((Object _) => _closeSocket()));
+        } on Object {
+          // Not connected any more; the session loop is already reconnecting.
+          unawaited(_closeSocket());
+        }
+      });
       try {
         while (_running) {
           final Map<String, dynamic> frame = await _next(iterator);
@@ -239,6 +252,7 @@ final class SignalingClient implements SignalSender, RelaySender {
         }
       } finally {
         refresher.cancel();
+        heartbeat.cancel();
       }
     } finally {
       await iterator.cancel();

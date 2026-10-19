@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:core_business_logic/core_business_logic.dart';
+import 'package:flutter/foundation.dart';
 
 import '../hive/hive_repository_resolver.dart';
 import '../hive/hive_runtime.dart';
@@ -23,16 +24,19 @@ Future<EngineRepository?> resolveEngineRepository({
   Object? discoveryError;
   final String? directory = engineDataDirectory(preferDev: preferDev);
   if (directory != null) {
-    try {
-      final EngineRuntimeInfo runtime = await EngineDiscovery(
-        loader: _FileRuntimeInfoLoader(directory),
-        healthProbe: _isReachable,
-      ).discover();
-      // The local engine is the full node; this GUI is only its client.
-      HiveRuntime.shared.hasLocalFullNode = true;
-      return _repositoryFromRuntime(runtime);
-    } on Object catch (error) {
-      discoveryError = error;
+    // The active account's profile engine first, then the default engine.
+    for (final String candidate in await _discoveryDirectories(directory)) {
+      try {
+        final EngineRuntimeInfo runtime = await EngineDiscovery(
+          loader: _FileRuntimeInfoLoader(candidate),
+          healthProbe: _isReachable,
+        ).discover();
+        // The local engine is the full node; this GUI is only its client.
+        HiveRuntime.shared.markLocalEngineFound();
+        return _repositoryFromRuntime(runtime);
+      } on Object catch (error) {
+        discoveryError = error;
+      }
     }
   }
 
@@ -175,6 +179,46 @@ String? engineDataDirectory({required bool preferDev}) {
   }
   if (baseDirectory == null) return null;
   return dev ? '$baseDirectory-dev' : baseDirectory;
+}
+
+
+const String _activeProfileFile = 'gui-active-profile.txt';
+final RegExp _profileIdPattern = RegExp(r'^[A-Za-z0-9_-]+$');
+
+/// Engine profiles: each account has its own data directory and engine
+/// instance inside the one engine process. The default profile lives in the
+/// root data directory; the others in the `profiles` subdirectory, one folder per profile id.
+Future<List<String>> _discoveryDirectories(String root) async {
+  final List<String> directories = <String>[];
+  try {
+    final String id = (await File(_join(root, _activeProfileFile)).readAsString())
+        .trim();
+    if (id != 'default' && _profileIdPattern.hasMatch(id)) {
+      directories.add(_join(_join(root, 'profiles'), id));
+    }
+  } on FileSystemException {
+    // No active profile recorded: use the default engine.
+  }
+  directories.add(root);
+  return directories;
+}
+
+/// Remembers which account profile this GUI talks to (null or 'default' for
+/// the default profile) so the next discovery finds that profile's engine.
+Future<void> setActiveEngineProfile({
+  required bool preferDev,
+  required String? profileId,
+}) async {
+  final String? root = engineDataDirectory(preferDev: preferDev);
+  if (root == null) return;
+  final String id = profileId ?? 'default';
+  if (!_profileIdPattern.hasMatch(id)) return;
+  try {
+    await Directory(root).create(recursive: true);
+    await File(_join(root, _activeProfileFile)).writeAsString(id);
+  } on FileSystemException catch (error) {
+    debugPrint('Could not record the active engine profile: $error');
+  }
 }
 
 String _join(String parent, String child) =>

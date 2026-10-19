@@ -25,13 +25,19 @@ final class RestEngineClient {
     await _getMap('account/session', authenticate: true),
   );
 
+  /// [deviceName] and [clientId] are optional and only understood by engines
+  /// that fold GUI clients under themselves; older engines ignore them.
   Future<AccountSession> login({
     required String email,
     required String password,
+    String? deviceName,
+    String? clientId,
   }) async => AccountSession.fromJson(
     await _sendMap('POST', 'account/login', <String, dynamic>{
       'email': email,
       'password': password,
+      'device_name': ?deviceName,
+      'client_id': ?clientId,
     }),
   );
 
@@ -230,16 +236,40 @@ final class RestEngineClient {
   /// (raw snapshot rows: id, name, kind, platform, status, trusted, local,
   /// online, tier). Empty when the engine's hive is not running.
   Future<List<Map<String, dynamic>>> listHiveNodes() async {
-    final Map<String, dynamic> body = await _getMap(
-      'hive/nodes',
-      authenticate: true,
-    );
+    final Map<String, dynamic> body = await getHiveSnapshot();
     final Object? nodes = body['nodes'];
     if (nodes is! List) return const <Map<String, dynamic>>[];
     return <Map<String, dynamic>>[
       for (final Object? raw in nodes)
         if (raw is Map<String, dynamic>) raw,
     ];
+  }
+
+  /// The whole `GET /api/v1/hive/nodes` body: `nodes` plus the engine's hive
+  /// `state`, `detail` and `signalling` fields.
+  Future<Map<String, dynamic>> getHiveSnapshot() =>
+      _getMap('hive/nodes', authenticate: true);
+
+  /// `POST /api/v1/hive/nodes/{id}/approve` with the confirmed code.
+  Future<void> approveHiveNode(String id, String sas) async {
+    await _sendMap('POST', 'hive/nodes/${_segment(id)}/approve', <String, dynamic>{
+      'sas': sas,
+    });
+  }
+
+  /// `DELETE /api/v1/hive/nodes/{id}`.
+  Future<void> revokeHiveNode(String id) => _delete('hive/nodes/${_segment(id)}');
+
+  /// `POST /api/v1/hive/reset-local` with `confirm: true`. The engine backs up
+  /// its database and forgets local hive bookkeeping (threads and files are
+  /// kept). Returns the backup file name.
+  Future<String?> resetLocalHive() async {
+    final Map<String, dynamic> body = await _sendMap(
+      'POST',
+      'hive/reset-local',
+      <String, dynamic>{'confirm': true},
+    );
+    return body['backup'] as String?;
   }
 
   Future<List<ModelInfo>> listModels() async =>

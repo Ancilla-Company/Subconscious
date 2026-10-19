@@ -39,6 +39,7 @@ from subconscious_engine.hive.tasks import TaskManager
 
 from .hive_routes import hive_routes
 from .model_routes import model_routes
+from .profile_routes import profile_routes
 from .rag_routes import rag_routes
 from .settings_routes import settings_routes
 from .thread_routes import (
@@ -136,6 +137,7 @@ def create_app(
         Route("/api/v1/health", health),
         *account_routes(),
         *hive_routes(),
+        *profile_routes(),
         Route("/api/v1/workspaces", list_workspaces, methods=["GET"]),
         Route("/api/v1/workspaces", create_workspace, methods=["POST"]),
         Route("/api/v1/workspaces/{uuid}", get_workspace, methods=["GET"]),

@@ -19,6 +19,8 @@ final class DirectoryNode {
     this.capabilities = const <String, dynamic>{},
     this.online = false,
     this.lastSeenAt,
+    this.parentNodeId,
+    this.clients = const <String>[],
   });
 
   final String id;
@@ -38,6 +40,12 @@ final class DirectoryNode {
   final bool online;
   final String? lastSeenAt;
 
+  /// Engine this client folds under (`parent_node_id`), if any.
+  final String? parentNodeId;
+
+  /// Names of the clients attached to this engine.
+  final List<String> clients;
+
   String get publicKeyB64u => b64uEncode(publicKey);
   bool get isEngine => kind == 'engine';
 
@@ -53,6 +61,8 @@ final class DirectoryNode {
       final Object? approvedBy = raw['approved_by'];
       final Object? approvalSig = raw['approval_sig'];
       final Object? capabilities = raw['capabilities'];
+      final Object? parent = raw['parent_node_id'];
+      final Object? clients = raw['clients'];
       return DirectoryNode(
         id: id,
         kind: '${raw['kind'] ?? ''}',
@@ -68,6 +78,13 @@ final class DirectoryNode {
             : const <String, dynamic>{},
         online: raw['online'] == true,
         lastSeenAt: raw['last_seen_at'] as String?,
+        parentNodeId: parent is String && parent.isNotEmpty ? parent : null,
+        clients: clients is List
+            ? <String>[
+                for (final Object? c in clients)
+                  if (c is String) c,
+              ]
+            : const <String>[],
       );
     } on Object {
       return null;

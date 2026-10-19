@@ -1010,7 +1010,9 @@ final class DashboardController extends ChangeNotifier {
   Future<void> _listenToEngineEvents(EngineRepository eventRepository) async {
     if (identical(_engineEventRepository, eventRepository) &&
         _engineEventSubscription != null) {
-      eventRepository.socket.registerUiTools();
+      // Already registered when this socket was first subscribed; the socket
+      // has no internal reconnect (a new socket means a new repository), so
+      // re-sending tool.register on every connection check was pure spam.
       return;
     }
     await _engineEventSubscription?.cancel();

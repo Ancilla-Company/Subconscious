@@ -329,6 +329,10 @@ class SyncEngine:
     async def check_hive(self, hive_id: str) -> bool:
         """Bind to ``hive_id`` or refuse when this database belongs to another hive."""
         stored = await self.get_meta("hive_id")
+        if not hive_id:
+            # The server reported no hive id: neither bind nor compare (a legacy/unset id).
+            self.hive_id = stored
+            return True
         if stored is None:
             await self.set_meta("hive_id", hive_id)
         elif stored != hive_id:

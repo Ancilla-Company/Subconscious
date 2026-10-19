@@ -8,7 +8,7 @@ from subconscious_engine.__main__ import LOGO, build_parser, main
 class FakeHost:
     instances = []
 
-    def __init__(self, config):
+    def __init__(self, config, **_profile_context):
         self.config = config
         self.served = False
         self.instances.append(self)

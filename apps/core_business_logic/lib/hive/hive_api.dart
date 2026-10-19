@@ -20,8 +20,11 @@ final class HiveApi {
     this.refreshAccessToken,
     this.onUnauthorized,
     http.Client? client,
+    this.retryDelays = defaultRetryDelays,
+    Future<void> Function(Duration)? retrySleep,
   }) : baseUri = _withSlash(baseUri),
-       _client = client ?? createLoggingClient();
+       _client = client ?? createLoggingClient(),
+       _retrySleep = retrySleep ?? Future<void>.delayed;
 
   final Uri baseUri;
   final String? Function() accessToken;
@@ -32,6 +35,18 @@ final class HiveApi {
   /// Called when the server still answers 401 after a refresh attempt.
   final Future<void> Function(String reason)? onUnauthorized;
 
+  /// 1, 2 and 4 seconds.
+  static const List<Duration> defaultRetryDelays = <Duration>[
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+  ];
+
+  /// Waits between retries of an idempotent GET on 502/503/504 or a network
+  /// error. Non-GET requests are never retried.
+  final List<Duration> retryDelays;
+  final Future<void> Function(Duration) _retrySleep;
+
   final http.Client _client;
 
   Future<void> close() async => _client.close();
@@ -40,6 +55,13 @@ final class HiveApi {
       _map('POST', 'nodes', body);
 
   Future<Map<String, dynamic>> listNodes() => _map('GET', 'nodes');
+
+  /// Folds [nodeId] under an engine ([parentNodeId]) or clears the link when
+  /// null. Old servers answer 404/405.
+  Future<Map<String, dynamic>> setParent(String nodeId, String? parentNodeId) =>
+      _map('PATCH', 'nodes/$nodeId', <String, dynamic>{
+        'parent_node_id': parentNodeId,
+      });
 
   Future<void> approve({
     required String nodeId,
@@ -73,6 +95,27 @@ final class HiveApi {
     Map<String, dynamic>? body,
     String? nodeId,
   ]) async {
+    final List<Duration> delays = method == 'GET' ? retryDelays : const <Duration>[];
+    for (int retry = 0; ; retry++) {
+      try {
+        return await _send(method, path, body, nodeId);
+      } on HiveApiException catch (caught) {
+        final bool transient =
+            caught.statusCode == 502 ||
+            caught.statusCode == 503 ||
+            caught.statusCode == 504;
+        if (!transient || retry >= delays.length) rethrow;
+        await _retrySleep(delays[retry]);
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>> _send(
+    String method,
+    String path,
+    Map<String, dynamic>? body,
+    String? nodeId,
+  ) async {
     for (int attempt = 0; attempt < 2; attempt++) {
       final String? token = accessToken();
       if (token == null || token.isEmpty) {

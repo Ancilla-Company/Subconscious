@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:developer' as developer;
+
+import 'package:http/http.dart' as http;
 
 import 'directory.dart';
+import 'presence_book.dart';
 import 'encoding.dart';
 import 'hive_api.dart';
 import 'identity.dart';
@@ -45,8 +49,20 @@ final class NodeView {
     required this.online,
     required this.isLocal,
     this.tier,
+    this.parentId,
+    this.clients = const <String>[],
+    this.sas,
   });
   final DirectoryNode node;
+
+  /// Engine node id this client is folded under, if any.
+  final String? parentId;
+
+  /// Names of the clients attached to this engine.
+  final List<String> clients;
+
+  /// Short authentication string for an engine row from the local engine.
+  final String? sas;
 
   /// Approval chain verified locally (not merely "active" on the server).
   final bool trusted;
@@ -76,6 +92,46 @@ DirectoryNode? chooseHomeEngine(
   return usable.first.node;
 }
 
+/// Outcome of [chooseEngine].
+enum EngineChoiceKind {
+  /// Connect to [EngineChoice.node] now.
+  connect,
+
+  /// Several engines are online and none is preferred: the user picks.
+  pick,
+
+  /// No usable engine is online yet: keep watching.
+  none,
+}
+
+final class EngineChoice {
+  const EngineChoice(this.kind, [this.node]);
+  final EngineChoiceKind kind;
+  final DirectoryNode? node;
+}
+
+/// Picks the remote engine to connect to. Candidates are trusted, online,
+/// non-local engines. An online [preferredId] wins; otherwise a single
+/// candidate is chosen automatically; several candidates need the user.
+EngineChoice chooseEngine(Iterable<NodeView> nodes, {String? preferredId}) {
+  final List<NodeView> usable = <NodeView>[
+    for (final NodeView v in nodes)
+      if (v.trusted && v.online && v.node.isEngine && !v.isLocal) v,
+  ];
+  if (usable.isEmpty) return const EngineChoice(EngineChoiceKind.none);
+  if (preferredId != null) {
+    for (final NodeView v in usable) {
+      if (nodeIdsEqual(v.node.id, preferredId)) {
+        return EngineChoice(EngineChoiceKind.connect, v.node);
+      }
+    }
+  }
+  if (usable.length == 1) {
+    return EngineChoice(EngineChoiceKind.connect, usable.first.node);
+  }
+  return const EngineChoice(EngineChoiceKind.pick);
+}
+
 /// Orchestrates identity, registration, directory, signalling and peers for a
 /// thin node.
 final class HiveClient {
@@ -89,7 +145,15 @@ final class HiveClient {
     required this.appVersion,
     SignalConnect? signalConnect,
     this.directTimeout = const Duration(seconds: 8),
+    this.httpClient,
+    this.apiRetryDelays,
   }) : _signalConnect = signalConnect;
+
+  /// HTTP client for the `/nodes` API (a mock in tests; default when null).
+  final http.Client? httpClient;
+
+  /// Overrides the GET retry delays of the `/nodes` API (empty in tests).
+  final List<Duration>? apiRetryDelays;
 
   /// How long a direct WebRTC attempt runs before the socket relay is tried.
   final Duration directTimeout;
@@ -111,13 +175,34 @@ final class HiveClient {
   HiveApi? api;
   SignalingClient? signaling;
   PeerConnector? connector;
-  final Map<String, bool> _presence = <String, bool>{};
+  final PresenceBook _book = PresenceBook();
   final StreamController<List<NodeView>> _views =
       StreamController<List<NodeView>>.broadcast();
+  final StreamController<bool> _connectionChanges =
+      StreamController<bool>.broadcast();
   StreamSubscription<SignalFrame>? _frameSubscription;
+  StreamSubscription<bool>? _connectionSubscription;
+  Timer? _unknownNodeTimer;
+  bool _connectedOnce = false;
 
   Stream<List<NodeView>> get nodeViews => _views.stream;
+
+  /// Signalling connect/disconnect events. Owned by this client, so it
+  /// survives [stop] and [start] cycles.
+  Stream<bool> get connectionChanges => _connectionChanges.stream;
+
+  /// True while the signalling socket is authenticated.
+  bool get signalConnected => signaling?.connected ?? false;
   bool get started => connector != null;
+
+  HiveApi _newApi() => HiveApi(
+    baseUri: account.baseUri,
+    accessToken: () => account.accessToken,
+    refreshAccessToken: account.forceRefresh,
+    onUnauthorized: (String reason) => account.expireSession(reason),
+    client: httpClient,
+    retryDelays: apiRetryDelays ?? HiveApi.defaultRetryDelays,
+  );
 
   /// Registers this device, loads the directory and starts signalling.
   /// Requires a signed-in [account].
@@ -135,13 +220,10 @@ final class HiveClient {
     }
     final NodeIdentity self = await loadOrCreateIdentity(seedStore);
     identity = self;
-    final HiveApi hiveApi = HiveApi(
-      baseUri: account.baseUri,
-      accessToken: () => account.accessToken,
-      refreshAccessToken: account.forceRefresh,
-      onUnauthorized: (String reason) => account.expireSession(reason),
-    );
+    final HiveApi hiveApi = _newApi();
     api = hiveApi;
+    _connectedOnce = false;
+    _book.clear();
     await _register(hiveApi, self, userId);
     final NodeDirectory dir = NodeDirectory(
       userId: userId,
@@ -185,23 +267,44 @@ final class HiveClient {
         case 'presence.snapshot':
           final Object? nodes = frame.data['nodes'];
           if (nodes is List) {
-            _presence.clear();
-            for (final Object? n in nodes) {
-              _applyPresence(n);
-            }
+            _book.applySnapshot(nodes);
             _emit();
           }
         case 'presence.update':
-          _applyPresence(frame.data);
+          _book.applyFrame(frame.data);
           _emit();
+          _refreshIfUnknown(frame.data['node_id']);
+        case 'node.changed':
+          _refreshIfUnknown(frame.data['node_id'], force: true);
       }
+    });
+    _connectionSubscription = signals.connectionChanges.listen((bool up) {
+      if (!_connectionChanges.isClosed) _connectionChanges.add(up);
+      if (up && _connectedOnce) {
+        // Anything may have changed while the socket was down.
+        unawaited(_safeRefresh());
+      }
+      if (up) _connectedOnce = true;
     });
     signals.start();
   }
 
-  void _applyPresence(Object? raw) {
-    if (raw is Map && raw['node_id'] is String) {
-      _presence[raw['node_id'] as String] = raw['online'] == true;
+  /// One refresh, debounced by 1 s, when a frame names a node the directory
+  /// does not know yet (a device that just signed in).
+  void _refreshIfUnknown(Object? nodeId, {bool force = false}) {
+    if (nodeId is! String) return;
+    if (!force && directory?.get(nodeId) != null) return;
+    _unknownNodeTimer?.cancel();
+    _unknownNodeTimer = Timer(const Duration(seconds: 1), () {
+      unawaited(_safeRefresh());
+    });
+  }
+
+  Future<void> _safeRefresh() async {
+    try {
+      await refreshDirectory();
+    } on Object catch (caught) {
+      developer.log('Directory refresh failed: $caught', name: 'hive');
     }
   }
 
@@ -221,6 +324,7 @@ final class HiveClient {
     final HiveApi? hiveApi = api;
     final NodeDirectory? dir = directory;
     if (hiveApi == null || dir == null) return const <NodeView>[];
+    final int startSequence = _book.beginRequest();
     final Map<String, dynamic> response = await hiveApi.listNodes();
     final Object? nodes = response['nodes'];
     final Object? hive = response['hive_id'];
@@ -228,6 +332,7 @@ final class HiveClient {
       nodes is List ? nodes : const <Object?>[],
       hiveId: hive is String ? hive : null,
     );
+    _book.mergeRest(startSequence, dir.nodes);
     final List<NodeView> views = currentViews();
     if (!_views.isClosed) _views.add(views);
     return views;
@@ -242,9 +347,11 @@ final class HiveClient {
         NodeView(
           node: n,
           trusted: dir.isTrusted(n.id),
-          online: _presence[n.id] ?? n.online,
+          online: _book.onlineOf(n.id, n.online),
           isLocal: nodeIdsEqual(n.id, self.nodeId),
           tier: connector?.linkFor(n.id)?.tier,
+          parentId: _book.parentOf(n.id, n.parentNodeId),
+          clients: _book.clientsOf(n.id, n.clients),
         ),
     ];
   }
@@ -299,7 +406,40 @@ final class HiveClient {
     return peers.connect(nodeId);
   }
 
+  /// Folds this device's registered thin node under the local engine
+  /// ([engineNodeId]) so it is not listed as a second device. Returns false
+  /// when there is nothing to link or the server does not support it (404,
+  /// 405, 422); other errors are rethrown.
+  Future<bool> linkLegacyThinToEngine(String engineNodeId) async {
+    final String? seed = await seedStore.read();
+    if (seed == null || seed.isEmpty) return false;
+    final NodeIdentity self = await NodeIdentity.fromSeed(b64uDecode(seed));
+    if (nodeIdsEqual(self.nodeId, engineNodeId)) return false;
+    final HiveApi linkApi = _newApi();
+    try {
+      await linkApi.setParent(self.nodeId, engineNodeId);
+      return true;
+    } on HiveApiException catch (caught) {
+      if (caught.statusCode == 404 ||
+          caught.statusCode == 405 ||
+          caught.statusCode == 422) {
+        developer.log(
+          'Legacy device link skipped (${caught.statusCode}).',
+          name: 'hive',
+        );
+        return false;
+      }
+      rethrow;
+    } finally {
+      await linkApi.close();
+    }
+  }
+
   Future<void> stop() async {
+    _unknownNodeTimer?.cancel();
+    _unknownNodeTimer = null;
+    await _connectionSubscription?.cancel();
+    _connectionSubscription = null;
     await _frameSubscription?.cancel();
     _frameSubscription = null;
     await signaling?.dispose();
@@ -314,5 +454,6 @@ final class HiveClient {
   Future<void> dispose() async {
     await stop();
     await _views.close();
+    await _connectionChanges.close();
   }
 }

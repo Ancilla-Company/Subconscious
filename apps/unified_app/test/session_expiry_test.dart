@@ -63,7 +63,12 @@ void main() {
       '401: Invalid or expired refresh token',
     );
     final String server = devicesLoadFailedMessage(
-      HiveApiException('boom', 503),
+      HiveApiException('boom', 500),
+    );
+    // 502/503/504 are a temporary outage, not an error to act on.
+    expect(
+      devicesLoadFailedMessage(HiveApiException('boom', 503)),
+      'Server unavailable, retrying',
     );
     final String offline = devicesLoadFailedMessage(
       HiveApiException('Could not reach the server.', 0),
@@ -71,7 +76,7 @@ void main() {
     expect(session, contains('session expired'));
     expect(session, contains('401: Invalid or expired refresh token'));
     expect(session, isNot(contains('Check your connection')));
-    expect(server, contains('503'));
+    expect(server, contains('500'));
     expect(server, isNot(contains('Check your connection')));
     expect(offline, contains('Check your connection'));
     for (final String s in <String>[session, server, offline]) {

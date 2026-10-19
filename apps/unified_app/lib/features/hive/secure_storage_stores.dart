@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -39,6 +40,29 @@ final class SecureIdentitySeedStore implements IdentitySeedStore {
       _storage.write(key: _identityKey, value: seed);
   @override
   Future<void> delete() => _storage.delete(key: _identityKey);
+}
+
+const String _clientIdKey = 'subconscious.hive.clientId.v1';
+
+/// A random per-install id (32 hex characters) sent only to the local engine,
+/// so it can recognise this GUI exactly. Created on first use.
+final class SecureClientIdStore {
+  SecureClientIdStore([FlutterSecureStorage? storage, Random? random])
+    : _storage = storage ?? defaultSecureStorage(),
+      _random = random ?? Random.secure();
+  final FlutterSecureStorage _storage;
+  final Random _random;
+
+  Future<String> readOrCreate() async {
+    final String? existing = await _storage.read(key: _clientIdKey);
+    if (existing != null && existing.length == 32) return existing;
+    final String created = <String>[
+      for (int i = 0; i < 16; i++)
+        _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ].join();
+    await _storage.write(key: _clientIdKey, value: created);
+    return created;
+  }
 }
 
 /// Pinned node keys and trust roots, one JSON blob per account.

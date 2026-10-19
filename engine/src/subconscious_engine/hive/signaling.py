@@ -78,7 +78,9 @@ class SignalingClient:
         heartbeat_interval: float = HEARTBEAT_SECONDS,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         rng: Callable[[], float] = random.random,
+        on_connected: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
+        self.on_connected = on_connected
         self._api = api
         self._identity = identity
         self._connect = connect
@@ -94,6 +96,7 @@ class SignalingClient:
         self._presence: dict[str, Any] = {"clients": [], "capabilities": {}}
         self.hive_id: str | None = None
         self.failures = 0
+        self.last_error: str | None = None
 
     # --- public -----------------------------------------------------------
     def on(self, frame_type: str, handler: FrameHandler) -> None:
@@ -153,14 +156,19 @@ class SignalingClient:
         loop = asyncio.get_running_loop()
         while True:
             started = loop.time()
+            reason = "closed"
             try:
                 await self._session()
             except asyncio.CancelledError:
                 raise
             except HiveApiError as error:
-                _LOGGER.info("Signalling unavailable (status %s).", error.status_code)
+                reason = f"HiveApiError:{error.status_code}"
+                self.last_error = reason
+                _LOGGER.debug("Signalling unavailable (%s).", reason)
             except Exception as error:  # reconnect on anything transient
-                _LOGGER.info("Signalling disconnected (%s).", type(error).__name__)
+                reason = type(error).__name__
+                self.last_error = reason
+                _LOGGER.debug("Signalling disconnected (%s).", reason, exc_info=True)
             finally:
                 self._connected.clear()
                 await self._close_socket()
@@ -168,6 +176,7 @@ class SignalingClient:
                 self.failures = 0
             delay = backoff_delay(self.failures, rng=self._rng)
             self.failures += 1
+            _LOGGER.info("Signalling closed (%s) retry in %.0fs", reason, delay)
             await self._sleep(delay)
 
     async def _session(self) -> None:
@@ -183,7 +192,16 @@ class SignalingClient:
             hive = data.get("hive_id")
             self.hive_id = hive if isinstance(hive, str) else None
         self._connected.set()
+        self.last_error = None
+        _LOGGER.info("Signalling connected node_id=%s", self._identity.node_id)
         await self.send("presence.set", self._presence)
+        if self.on_connected is not None:
+            try:
+                await self.on_connected()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _LOGGER.warning("Signalling on_connected callback failed.", exc_info=True)
         background = [
             spawn_logged(self._refresh_loop()),
             spawn_logged(self._heartbeat_loop()),

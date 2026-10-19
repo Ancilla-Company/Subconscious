@@ -833,12 +833,34 @@ final class AccountUser {
   );
 }
 
-final class AccountSession {
-  const AccountSession({required this.authenticated, this.user, this.notice});
+/// The engine profile (one data directory and engine instance per account) that
+/// holds a signed-in session. When [switched] the caller was talking to another
+/// profile's engine and must reconnect.
+final class EngineProfile {
+  const EngineProfile({required this.id, this.switched = false});
+
+  final String id;
+  final bool switched;
+
+  static EngineProfile? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final Object? id = value['id'];
+    if (id is! String || id.isEmpty) return null;
+    return EngineProfile(id: id, switched: value['switched'] == true);
+  }
+}
+ class AccountSession {
+  const AccountSession({
+    required this.authenticated,
+    this.user,
+    this.notice,
+    this.profile,
+  });
 
   final bool authenticated;
   final AccountUser? user;
   final String? notice;
+  final EngineProfile? profile;
 
   factory AccountSession.fromJson(Map<String, dynamic> json) {
     final Object? rawUser = json['user'];
@@ -854,6 +876,7 @@ final class AccountSession {
       authenticated: authenticated,
       user: user,
       notice: _stringValue(json, 'notice', 'notice'),
+      profile: EngineProfile.fromJson(json['profile']),
     );
   }
 }

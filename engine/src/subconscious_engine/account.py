@@ -79,11 +79,17 @@ class RefreshTokenStore(Protocol):
 
 
 class KeyringRefreshTokenStore:
-    """Keeps the cloud refresh token in the current user's OS keyring."""
+    """Keeps the cloud refresh token in the current user's OS keyring.
+
+    ``namespace`` separates profiles; ``None`` keeps the original (default profile) entry.
+    """
+
+    def __init__(self, namespace: str | None = None) -> None:
+        self._user = _KEYRING_USER if not namespace else f"{_KEYRING_USER}:{namespace}"
 
     def read(self) -> str | None:
         try:
-            token = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER)
+            token = keyring.get_password(_KEYRING_SERVICE, self._user)
         except Exception as error:
             raise AccountError(
                 "The engine could not access the saved account session."
@@ -92,7 +98,7 @@ class KeyringRefreshTokenStore:
 
     def write(self, token: str) -> None:
         try:
-            keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER, token)
+            keyring.set_password(_KEYRING_SERVICE, self._user, token)
         except Exception as error:
             raise AccountError(
                 "The engine could not save the account session."
@@ -100,7 +106,7 @@ class KeyringRefreshTokenStore:
 
     def delete(self) -> None:
         try:
-            keyring.delete_password(_KEYRING_SERVICE, _KEYRING_USER)
+            keyring.delete_password(_KEYRING_SERVICE, self._user)
         except PasswordDeleteError:
             # There is no local session to clear.
             _LOG.warning("account.KeyringRefreshTokenStore.delete: handled PasswordDeleteError; continuing with fallback", exc_info=True)
@@ -163,7 +169,11 @@ class ResilientRefreshTokenStore:
         try:
             self._primary.write(token)
         except AccountError:
-            _LOG.warning("account.ResilientRefreshTokenStore.write: handled AccountError; continuing with fallback", exc_info=True)
+            if not getattr(self, "_warned_write", False):
+                self._warned_write = True
+                _LOG.warning("Keyring write failed; using the encrypted fallback store.")
+            else:
+                _LOG.debug("Keyring write failed again; using the fallback.", exc_info=True)
             self._fallback.write(token)
         else:
             try:
@@ -315,15 +325,16 @@ class AccountSessionService:
         server: AccountServerClient,
         store: RefreshTokenStore | None = None,
         credential_store: EncryptedModelConfigurationStore | None = None,
+        keyring_namespace: str | None = None,
     ) -> None:
         self._server = server
         self._store = store or (
             ResilientRefreshTokenStore(
-                KeyringRefreshTokenStore(),
+                KeyringRefreshTokenStore(keyring_namespace),
                 EncryptedRefreshTokenStore(credential_store),
             )
             if credential_store is not None
-            else KeyringRefreshTokenStore()
+            else KeyringRefreshTokenStore(keyring_namespace)
         )
         self._refresh_token: str | None = None
         self._access_token: str | None = None

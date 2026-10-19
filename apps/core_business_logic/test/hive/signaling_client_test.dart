@@ -209,6 +209,47 @@ void main() {
       await client.dispose();
     });
 
+    test('sends a ping every interval while connected', () async {
+      final FakeSignalSocket socket = FakeSignalSocket();
+      final SignalingClient client = SignalingClient(
+        api: api,
+        identity: me,
+        connect: (Uri _) async => socket,
+        sleep: (Duration _) async {},
+        heartbeatInterval: const Duration(milliseconds: 20),
+      );
+      client.start();
+      await until(() => socket.sent.isNotEmpty);
+      socket.server('auth.ok', <String, dynamic>{'hive_id': 'h'});
+      await client.waitConnected(const Duration(seconds: 2));
+      int pings() => socket.sent.where((Map<String, dynamic> f) => f['type'] == 'ping').length;
+      await until(() => pings() >= 2);
+      expect(pings(), greaterThanOrEqualTo(2));
+      await client.dispose();
+    });
+
+    test('stops pinging after disconnect', () async {
+      final FakeSignalSocket socket = FakeSignalSocket();
+      final SignalingClient client = SignalingClient(
+        api: api,
+        identity: me,
+        connect: (Uri _) async => socket,
+        sleep: (Duration _) => Completer<void>().future, // park the reconnect loop
+        heartbeatInterval: const Duration(milliseconds: 20),
+      );
+      client.start();
+      await until(() => socket.sent.isNotEmpty);
+      socket.server('auth.ok', <String, dynamic>{'hive_id': 'h'});
+      await client.waitConnected(const Duration(seconds: 2));
+      await until(() => socket.sent.any((Map<String, dynamic> f) => f['type'] == 'ping'));
+      await socket.controller.close();
+      await until(() => !client.connected);
+      final int before = socket.sent.length;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(socket.sent.length, before);
+      await client.dispose();
+    });
+
     test('sending while disconnected throws', () async {
       final SignalingClient client = SignalingClient(api: api, identity: me);
       expect(
