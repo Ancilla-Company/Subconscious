@@ -16,7 +16,7 @@ import re
 import socket
 from typing import Any
 _LOG = logging.getLogger(__name__)
-CLIENT_TYPES = ("desktop", "mobile", "tui", "browser_extension", "cli", "web")
+CLIENT_TYPES = ("desktop", "mobile", "tui", "browser_extension", "cli", "web", "vscode")
 UNKNOWN_TYPE = "unknown"
 CLIENT_DISPLAY = {
     "desktop": "Desktop",
@@ -25,6 +25,7 @@ CLIENT_DISPLAY = {
     "browser_extension": "Browser extension",
     "cli": "CLI",
     "web": "Web UI",
+    "vscode": "VS Code",
     UNKNOWN_TYPE: "Unknown",
 }
 NO_CLIENTS_LABEL = "No clients connected"

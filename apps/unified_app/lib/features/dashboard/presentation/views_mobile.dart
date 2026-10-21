@@ -97,26 +97,23 @@ final class MobileDashboardView extends StatelessWidget {
         !controller.isLoading) {
       return AccountPanel(controller: accountController);
     }
-    // The spinner only covers the initial load; loaded content is never
-    // replaced by it.
-    if (provider == null &&
-        (controller.isLoading || controller.isLoadingChat)) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    final Object? chatError = controller.chatError;
-    if (provider == null && chatError != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text('$chatError'),
-        ),
-      );
-    }
-    if (provider != null) {
+    // The composer is never hidden: while nothing is loaded (or loading
+    // failed) the panel is shown with a disabled composer and the reason in a
+    // popup above it.
+    {
+      final bool loading = controller.isLoading || controller.isLoadingChat;
+      final bool hasProvider = provider != null;
       return EngineChatPanel(
         key: ValueKey<int>(controller.chatSessionVersion),
-        provider: provider,
-        isComposerEnabled: controller.isConnected,
+        provider: provider ?? controller.fallbackChatProvider,
+        isComposerEnabled: hasProvider && controller.isConnected,
+        errorMessage: loading && !hasProvider
+            ? null
+            : controller.chatError ??
+                  (hasProvider
+                      ? null
+                      : controller.error ??
+                            'Select a workspace to start chatting.'),
         borderlessComposer: true,
         onOpenDevices: controller.openAccountShortcut,
         workspace: controller.threadsWorkspace,
@@ -155,15 +152,6 @@ final class MobileDashboardView extends StatelessWidget {
             controller.settings.accentTheme == AppAccentTheme.neutral,
       );
     }
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          controller.error?.toString() ??
-              'Select a workspace to start chatting.',
-        ),
-      ),
-    );
   }
 }
 

@@ -255,21 +255,25 @@ final class _DesktopWebDashboardViewState
         child: AnimatedBuilder(
           animation: widget.controller,
           builder: (BuildContext context, Widget? child) {
-            if (widget.controller.isLoading ||
-                widget.controller.isLoadingChat) {
-              return const Center(child: CircularProgressIndicator());
-            }
             final EngineLlmProvider? provider = widget.controller.chatProvider;
-            // The composer never gives way to an error.
-            final Object? chatError = widget.controller.chatError;
-            if (provider == null && chatError != null) {
-              return _Unavailable(error: chatError);
-            }
-            if (provider != null) {
+            // The composer is never hidden: with nothing loaded (or a failed
+            // load) the panel shows a disabled composer and the reason in a
+            // popup above it.
+            final bool loading =
+                widget.controller.isLoading || widget.controller.isLoadingChat;
+            {
               return EngineChatPanel(
                 key: ValueKey<int>(widget.controller.chatSessionVersion),
-                provider: provider,
-                isComposerEnabled: widget.controller.isConnected,
+                provider: provider ?? widget.controller.fallbackChatProvider,
+                isComposerEnabled:
+                    provider != null && widget.controller.isConnected,
+                errorMessage: loading && provider == null
+                    ? null
+                    : widget.controller.chatError ??
+                          (provider == null
+                              ? widget.controller.error ??
+                                    'Select a workspace to start chatting.'
+                              : null),
                 workspace: widget.controller.threadsWorkspace,
                 activeFile: widget.controller.activeFileReference == null
                     ? null
@@ -312,7 +316,6 @@ final class _DesktopWebDashboardViewState
                     AppAccentTheme.neutral,
               );
             }
-            return _Unavailable(error: widget.controller.error);
           },
         ),
       ),
@@ -503,19 +506,5 @@ final class _SidebarDivider extends StatelessWidget {
     indent: 4,
     endIndent: 4,
     color: Theme.of(context).colorScheme.outlineVariant,
-  );
-}
-
-final class _Unavailable extends StatelessWidget {
-  const _Unavailable({this.error});
-
-  final Object? error;
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Text(error?.toString() ?? 'Engine unavailable.'),
-    ),
   );
 }

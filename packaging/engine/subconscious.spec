@@ -38,6 +38,16 @@ for package in ("aiortc", "aioice", "av", "pylibsrtp", "OpenSSL", "cffi", "crypt
     binaries += package_binaries
     hiddenimports += package_hidden
 hiddenimports += ["_cffi_backend", "subconscious_engine.hive.service"]
+# The collect_all("subconscious_engine") above only finds data files when the engine is
+# pip-installed; Analysis(pathex=...) is applied later, so a source-tree build gets none
+# and the frozen app crashes on graphs/conscious.json. Bundle the package data straight
+# from the source tree, mirroring [tool.setuptools.package-data] in engine/pyproject.toml.
+engine_pkg = engine_src / "subconscious_engine"
+for graph_file in sorted((engine_pkg / "graphs").glob("*.json")):
+    datas.append((str(graph_file), "subconscious_engine/graphs"))
+for icon_file in sorted(engine_pkg.glob("*.ico")):
+    datas.append((str(icon_file), "subconscious_engine"))
+assert any(Path(src).name == "conscious.json" for src, _ in datas), "graphs/conscious.json missing"
 for package in ("genai_prices", "logfire"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas

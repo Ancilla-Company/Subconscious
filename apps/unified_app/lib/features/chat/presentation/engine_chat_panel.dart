@@ -29,12 +29,20 @@ typedef UpdateThreadCallback = Future<void> Function({
   required bool clearToolsConfig,
 });
 
+/// A user-facing sentence for a chat failure: drops the `Bad state: ` /
+/// `Exception: ` prefixes Dart adds to [StateError] / [Exception] strings.
+String describeChatError(Object error) {
+  final String text = error is StateError ? error.message.toString() : '$error';
+  return text.replaceFirst(RegExp(r'^(Bad state|Exception|Error): '), '').trim();
+}
+
 final class EngineChatPanel extends StatefulWidget {
   const EngineChatPanel({
     required this.provider,
     required this.isComposerEnabled,
     this.borderlessComposer = false,
     this.onOpenDevices,
+    this.errorMessage,
     this.workspace,
     this.activeFile,
     this.thread,
@@ -63,6 +71,10 @@ final class EngineChatPanel extends StatefulWidget {
   /// When set and the composer is disabled, a notice offers this shortcut to
   /// the Account/Devices page.
   final VoidCallback? onOpenDevices;
+
+  /// A load/connection failure shown in a popup above the composer. The
+  /// composer itself stays on screen and never gives way to an error.
+  final Object? errorMessage;
   final Workspace? workspace;
   final ChatFileReference? activeFile;
   final ThreadInfo? thread;
@@ -732,10 +744,18 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                     ),
                   ),
               if (!_showThreadSettings &&
-                  !widget.isComposerEnabled &&
-                  widget.onOpenDevices != null)
+                  (widget.errorMessage != null ||
+                      (!widget.isComposerEnabled &&
+                          widget.onOpenDevices != null)))
                 gutter(
-                  _EngineUnreachableNotice(onOpenDevices: widget.onOpenDevices!),
+                  _EngineUnreachableNotice(
+                    message: widget.errorMessage == null
+                        ? 'No engine is reachable'
+                        : describeChatError(widget.errorMessage!),
+                    onOpenDevices: widget.isComposerEnabled
+                        ? null
+                        : widget.onOpenDevices,
+                  ),
                 ),
               if (!_showThreadSettings && widget.executors != null)
                 gutter(TaskStatusBar(provider: widget.provider)),
@@ -788,9 +808,10 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
 }
 
 final class _EngineUnreachableNotice extends StatelessWidget {
-  const _EngineUnreachableNotice({required this.onOpenDevices});
+  const _EngineUnreachableNotice({required this.message, this.onOpenDevices});
 
-  final VoidCallback onOpenDevices;
+  final String message;
+  final VoidCallback? onOpenDevices;
 
   @override
   Widget build(BuildContext context) {
@@ -809,14 +830,15 @@ final class _EngineUnreachableNotice extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'No engine is reachable',
+              message,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
-          TextButton(
-            onPressed: onOpenDevices,
-            child: const Text('Devices'),
-          ),
+          if (onOpenDevices != null)
+            TextButton(
+              onPressed: onOpenDevices,
+              child: const Text('Devices'),
+            ),
         ],
       ),
     );

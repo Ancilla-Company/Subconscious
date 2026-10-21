@@ -61,6 +61,30 @@ void main() {
     });
   }
 
+  testWidgets('a load failure keeps a disabled composer and shows the reason '
+      'without the "Bad state" prefix', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EngineChatPanel(
+            provider: EngineLlmProvider(),
+            isComposerEnabled: false,
+            errorMessage: StateError('The Subconscious engine is not connected.'),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.text('The Subconscious engine is not connected.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Bad state'), findsNothing);
+    final TextField input = tester.widget<TextField>(
+      find.byType(TextField).last,
+    );
+    expect(input.enabled, isFalse);
+  });
+
   testWidgets('reconnect re-enables the composer and hides the notice', (
     WidgetTester tester,
   ) async {

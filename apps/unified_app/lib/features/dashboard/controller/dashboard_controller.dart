@@ -231,6 +231,10 @@ final class DashboardController extends ChangeNotifier {
   Object? workspacesError;
   Object? threadsError;
   Object? chatError;
+
+  /// Stand-in for [chatProvider] while no thread is loaded (or it failed to
+  /// load), so the chat panel and its disabled composer are always shown.
+  final EngineLlmProvider fallbackChatProvider = EngineLlmProvider();
   Object? filesError;
   Object? navigationError;
   ToolApprovalRequest? pendingToolApproval;
@@ -2540,6 +2544,7 @@ final class DashboardController extends ChangeNotifier {
     _engineEventSubscription = null;
     unawaited(subscription?.cancel() ?? Future<void>.value());
     chatProvider?.dispose();
+    fallbackChatProvider.dispose();
     for (final EngineLlmProvider provider in _runningProviders.values) {
       if (!identical(provider, chatProvider)) provider.dispose();
     }
