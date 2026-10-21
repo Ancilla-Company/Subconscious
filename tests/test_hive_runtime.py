@@ -480,7 +480,8 @@ def test_snapshot_reports_signalling_state_and_local_online(tmp_path):
         account, api = FakeAccount(), FakeServerApi()
         service = _service(tmp_path, account, api)
         assert service.snapshot()["signalling"] == {
-            "connected": False, "started": False, "reason": None, "failures": 0, "last_error": None}
+            "connected": False, "started": False, "reason": None, "failures": 0, "last_error": None,
+            "last_error_detail": None}
         account.emit(_user())
         await until(lambda: service.state == "running")
         signalling = service.snapshot()["signalling"]
@@ -1055,3 +1056,129 @@ def test_node_cli_shows_the_short_code_for_pending_nodes(capsys, monkeypatch):
     assert cli._run_node(args) == 0
     assert "code 042517" in capsys.readouterr().out
 
+
+
+# --- connectivity: TLS trust, visible failures, forced refresh ----------------------
+
+
+def test_outbound_tls_uses_the_certifi_bundle_for_wss_and_https_only():
+    import ssl
+
+    from subconscious_engine.tls import client_ssl_context, ssl_for_url
+
+    context = client_ssl_context()
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+    assert context.cert_store_stats()["x509_ca"] > 0  # certifi roots, not the OS fallback
+    assert ssl_for_url("wss://api.example.test/signal") is context
+    assert ssl_for_url("https://api.example.test/") is context
+    assert ssl_for_url("ws://127.0.0.1:5050/signal") is None
+    assert ssl_for_url("http://127.0.0.1:5050/") is None
+
+
+def test_signalling_failures_are_logged_at_warning_with_the_cause(caplog):
+    async def scenario():
+        identity = NodeIdentity.generate()
+        attempts = []
+
+        async def connect(url):
+            attempts.append(url)
+            raise ConnectionError("certificate verify failed: certificate has expired")
+
+        sleeps = []
+
+        async def sleep(delay):
+            if delay == 3600:
+                await asyncio.Event().wait()
+            sleeps.append(delay)
+            await asyncio.sleep(0)
+
+        client = SignalingClient(
+            FakeTicketApi(), identity, connect=connect, refresh_interval=3600, sleep=sleep,
+            rng=lambda: 0.5,
+        )
+        with caplog.at_level("WARNING", logger="uvicorn.error"):
+            client.start()
+            try:
+                await until(lambda: len(attempts) >= 3)
+            finally:
+                await client.stop()
+        assert client.last_error == "ConnectionError"
+        assert "certificate has expired" in (client.last_error_detail or "")
+        warnings = [r for r in caplog.records if r.levelname == "WARNING" and "Signalling" in r.message]
+        assert warnings and "certificate has expired" in warnings[0].getMessage()
+        assert "shows offline" in warnings[0].getMessage()
+        # The same cause repeating is condensed, not logged at WARNING every attempt.
+        assert len(warnings) < len(attempts)
+    run(scenario())
+
+
+def test_signalling_wake_skips_the_reconnect_backoff():
+    async def scenario():
+        identity = NodeIdentity.generate()
+        attempts = []
+
+        async def connect(url):
+            attempts.append(url)
+            raise ConnectionError("down")
+
+        async def sleep(delay):
+            await asyncio.Event().wait()  # backoff never ends on its own
+
+        client = SignalingClient(
+            FakeTicketApi(), identity, connect=connect, refresh_interval=3600, sleep=sleep
+        )
+        client.start()
+        try:
+            await until(lambda: len(attempts) == 1)
+            await asyncio.sleep(0.05)
+            assert len(attempts) == 1  # parked in backoff
+            client.wake()
+            await until(lambda: len(attempts) == 2)
+        finally:
+            await client.stop()
+    run(scenario())
+
+
+class CallerAwareServerApi(FakeServerApi):
+    """A registry that answers ``caller_online`` when the caller names itself."""
+
+    def __init__(self):
+        super().__init__()
+        self.callers = []
+
+    async def list_nodes(self, caller_node_id=None):
+        listing = await super().list_nodes()
+        if caller_node_id is not None:
+            self.callers.append(caller_node_id)
+            listing["caller_online"] = False
+        return listing
+
+
+def test_force_refresh_reports_and_logs_why_this_engine_is_offline(tmp_path, caplog):
+    async def scenario():
+        account, api = FakeAccount(), CallerAwareServerApi()
+        service = _service(tmp_path, account, api)
+        account.emit(_user("user-1"))
+        await until(lambda: service.state == "running")
+        with caplog.at_level("WARNING", logger="uvicorn.error"):
+            snapshot = await service.force_refresh(wait=0.3)
+        try:
+            assert snapshot["signalling"]["connected"] is False
+            problem = snapshot["problem"]
+            assert problem and "not connected" in problem and "offline" in problem
+            assert api.callers == [service.identity.node_id]  # the server was asked about us
+            assert any("not online" in r.getMessage() for r in caplog.records)
+            assert snapshot["signalling"]["last_error_detail"] == "offline"
+        finally:
+            await service.shutdown()
+    run(scenario())
+
+
+def test_force_refresh_without_a_session_says_the_engine_is_not_signed_in(tmp_path):
+    async def scenario():
+        account, api = FakeAccount(), CallerAwareServerApi()
+        service = _service(tmp_path, account, api)
+        snapshot = await service.force_refresh(wait=0.1)
+        assert snapshot["problem"] == "The engine is not signed in to your account."
+        await service.shutdown()
+    run(scenario())

@@ -761,6 +761,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                             directory: widget.executors!,
                             onSelected: _selectExecutor,
                             enabled: widget.isComposerEnabled && !_isSending,
+                            style: _compactControlStyle(context),
                           ),
                     onModelSelected: (String modelId) =>
                         unawaited(_selectModel(modelId)),

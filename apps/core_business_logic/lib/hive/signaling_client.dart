@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -120,6 +121,15 @@ final class SignalingClient implements SignalSender, RelaySender {
   String? hiveId;
   int failures = 0;
 
+  /// Why the last signalling session failed (null once connected).
+  String? lastError;
+
+  /// Receives one line per failed session (a changed cause, then every 10th
+  /// repeat). Defaults to `dart:developer` plus stdout so release builds log it.
+  void Function(String line)? onLog;
+  String? _lastReported;
+  Completer<void>? _waker;
+
   /// Frames received after authentication (presence, signal, relay, ...).
   Stream<SignalFrame> get frames => _frames.stream;
   Stream<bool> get connectionChanges => _connection.stream;
@@ -205,8 +215,10 @@ final class SignalingClient implements SignalSender, RelaySender {
       final Stopwatch watch = Stopwatch()..start();
       try {
         await _session();
-      } on Object {
-        // Reconnect on anything transient.
+      } on Object catch (caught) {
+        // Reconnect on anything transient, but keep (and log) the cause: while
+        // signalling is down this device is offline for every other device.
+        lastError = _describe(caught);
       } finally {
         _setConnected(false);
         await _closeSocket();
@@ -215,8 +227,48 @@ final class SignalingClient implements SignalSender, RelaySender {
       if (watch.elapsed >= _stableAfter) failures = 0;
       final Duration delay = backoffDelay(failures, random: _random);
       failures++;
-      await _sleep(delay);
+      _reportFailure(delay);
+      await _backoff(delay);
     }
+  }
+
+  /// Skips the current reconnect backoff (the user pressed Refresh).
+  void wake() {
+    final Completer<void>? waker = _waker;
+    if (waker != null && !waker.isCompleted) waker.complete();
+  }
+
+  Future<void> _backoff(Duration delay) async {
+    final Completer<void> waker = Completer<void>();
+    _waker = waker;
+    try {
+      await Future.any(<Future<void>>[_sleep(delay), waker.future]);
+    } finally {
+      if (identical(_waker, waker)) _waker = null;
+    }
+  }
+
+  void _reportFailure(Duration delay) {
+    final String cause = lastError ?? 'closed';
+    if (cause == _lastReported && failures % 10 != 1) return;
+    _lastReported = cause;
+    final String line =
+        'Signalling to ${signalUrl(api.baseUri)} failed ($cause); this device '
+        'shows offline. Attempt $failures, retry in ${delay.inSeconds}s.';
+    (onLog ?? _defaultLog)(line);
+  }
+
+  static void _defaultLog(String line) {
+    developer.log(line, name: 'hive.signalling', level: 900);
+    // ignore: avoid_print
+    print('hive.signalling: $line'); // reaches logcat / the console in release
+  }
+
+  static String _describe(Object caught) {
+    final String text = caught is HiveApiException
+        ? 'HTTP ${caught.statusCode}: ${caught.message}'
+        : '${caught.runtimeType}: $caught';
+    return text.length > 300 ? text.substring(0, 300) : text;
   }
 
   Future<void> _session() async {
@@ -232,6 +284,11 @@ final class SignalingClient implements SignalSender, RelaySender {
       }
       final Object? data = reply['data'];
       if (data is Map && data['hive_id'] is String) hiveId = data['hive_id'] as String;
+      lastError = null;
+      if (_lastReported != null) {
+        _lastReported = null;
+        (onLog ?? _defaultLog)('Signalling recovered after $failures failed attempts.');
+      }
       _setConnected(true);
       _send('presence.set', _presence);
       final Timer refresher = Timer.periodic(refreshInterval, (Timer _) {

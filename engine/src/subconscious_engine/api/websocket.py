@@ -961,9 +961,23 @@ class WebSocketSession:
                 running = self._turn_for_id(turn_id)
                 if running is not None:
                     running.thread_uuid = thread_uuid
+                # Echo is a dev-only test model: production never defaults to it or serves it.
+                dev_models = getattr(self.app.state, "dev_models", False) is True
+
+                def usable(candidate: object) -> str | None:
+                    if not isinstance(candidate, str) or not candidate:
+                        return None
+                    return candidate if dev_models or candidate.casefold() != "echo" else None
+
                 selected_model = model_id if isinstance(model_id, str) else (
-                    thread.default_model_id or workspace.default_model_id or "echo")
-                config = ModelConfig(id="echo", provider="subconscious", model="echo") if selected_model.casefold() == "echo" \
+                    usable(thread.default_model_id) or usable(workspace.default_model_id)
+                    or ("echo" if dev_models else None))
+                if selected_model is None:
+                    message = "No model is configured. Add a model in Settings, then try again."
+                    await self._send("chat.error", {"thread_uuid": thread_uuid, "error": message}, turn_id)
+                    return "failed", message
+                config = ModelConfig(id="echo", provider="subconscious", model="echo") \
+                    if dev_models and selected_model.casefold() == "echo" \
                     else await self.app.state.model_configuration_store.resolve(selected_model)
                 if config is None:
                     message = f"Model configuration '{selected_model}' was not found."

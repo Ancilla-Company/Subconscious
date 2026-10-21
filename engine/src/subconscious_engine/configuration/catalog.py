@@ -17,8 +17,14 @@ ECHO_MODEL = ModelDto(
 )
 
 
-def build_model_catalog(configurations: Iterable[ModelConfigurationDto]) -> list[ModelDto]:
-    """Project redacted configurations into the chat model catalog."""
+def build_model_catalog(
+    configurations: Iterable[ModelConfigurationDto], *, include_dev_models: bool = False
+) -> list[ModelDto]:
+    """Project redacted configurations into the chat model catalog.
+
+    ``Echo (dev)`` exists only to exercise the chat panel; it is listed only by a
+    development engine (``--dev``), never by a production build.
+    """
 
     result = [
         ModelDto(
@@ -29,12 +35,16 @@ def build_model_catalog(configurations: Iterable[ModelConfigurationDto]) -> list
         )
         for item in configurations
     ]
-    result.append(ECHO_MODEL)
+    if include_dev_models:
+        result.append(ECHO_MODEL)
     return result
 
 
 async def build_model_catalog_with_capabilities(
-    configurations: Iterable[ModelConfigurationDto], resolver: CapabilityResolver
+    configurations: Iterable[ModelConfigurationDto],
+    resolver: CapabilityResolver,
+    *,
+    include_dev_models: bool = False,
 ) -> list[ModelDto]:
     """The catalog with each model's resolved capabilities attached."""
 
@@ -44,12 +54,12 @@ async def build_model_catalog_with_capabilities(
     )
     return [
         model.model_copy(update={"capabilities": capabilities})
-        for model, capabilities in zip(build_model_catalog(items)[: len(items)], resolved)
-    ] + [ECHO_MODEL]
+        for model, capabilities in zip(build_model_catalog(items), resolved)
+    ] + ([ECHO_MODEL] if include_dev_models else [])
 
 
-async def model_catalog(store: object) -> list[ModelDto]:
+async def model_catalog(store: object, *, include_dev_models: bool = False) -> list[ModelDto]:
     """Build a catalog from any store implementing the asynchronous list method."""
 
     configurations = await store.list()  # type: ignore[attr-defined]
-    return build_model_catalog(configurations)
+    return build_model_catalog(configurations, include_dev_models=include_dev_models)

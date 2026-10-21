@@ -25,7 +25,7 @@
       "console": "internalConsole"
     },
     {
-      "name": "GUI (Desktop)",
+      "name": "GUI",
       "type": "dart",
       "request": "launch",
       "program": "${workspaceFolder}/apps/unified_app/lib/main.dart",
@@ -35,7 +35,6 @@
         "--dart-define=SUBCONSCIOUS_ENGINE_DEV=true",
         "--dart-define=SUBCONSCIOUS_ENGINE_PORT=51515",
         "--dart-define=SUBCONSCIOUS_WORKSPACE_UUID=default",
-        // "--dart-define=SUBCONSCIOUS_SERVER_URL=https://api.subconscious.chat/",
         "--dart-define=SUBCONSCIOUS_SERVER_URL=http://127.0.0.1:5050/",
         "--dart-define=SUBCONSCIOUS_ENGINE_TOKEN=subconscious-dev-token",
       ],

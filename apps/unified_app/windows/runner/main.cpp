@@ -32,7 +32,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // engine tray's "Open Desktop") brings the running window to the front and
   // exits. This is after the firewall helper above, which is the same exe
   // started elevated with its own arguments.
-  if (!single_instance::AcquireSingleInstance()) {
+#ifdef _DEBUG
+  // A debug build gets its own instance name. Without it, an installed release
+  // app that is already running owns the mutex, the debug build cannot find a
+  // window of its own executable to hand off to, and exits with code 0, which
+  // `flutter run` reports as "The log reader stopped unexpectedly".
+  const wchar_t *instance_profile = L"debug";
+#else
+  const wchar_t *instance_profile = L"";
+#endif
+  if (!single_instance::AcquireSingleInstance(instance_profile)) {
     if (SUCCEEDED(com_result)) {
       ::CoUninitialize();
     }

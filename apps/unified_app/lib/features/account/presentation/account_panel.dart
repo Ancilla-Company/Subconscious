@@ -2,16 +2,22 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:core_business_logic/core_business_logic.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../hive/presentation/nodes_page.dart';
+import '../../settings/presentation/settings_main_panel.dart'
+    show settingsFormTheme;
 import '../account_controller.dart';
 
 final class AccountPanel extends StatelessWidget {
-  const AccountPanel({required this.controller, super.key});
+  const AccountPanel({required this.controller, this.lanAccess, super.key});
 
   final AccountController controller;
+
+  /// Optional LAN joining and management sub-section, shown below the account.
+  final Widget? lanAccess;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -26,7 +32,7 @@ final class AccountPanel extends StatelessWidget {
       };
       final ThemeData theme = Theme.of(context);
       return Theme(
-        data: _accountPanelTheme(theme),
+        data: _accountPanelTheme(settingsFormTheme(context)),
         child: ColoredBox(
           color: theme.colorScheme.surface,
           child: Column(
@@ -61,7 +67,16 @@ final class AccountPanel extends StatelessWidget {
                     alignment: Alignment.topCenter,
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 750),
-                      child: content,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          content,
+                          if (lanAccess != null) ...<Widget>[
+                            const SizedBox(height: 24),
+                            lanAccess!,
+                          ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -74,17 +89,42 @@ final class AccountPanel extends StatelessWidget {
   );
 }
 
+/// The account page and every dialog opened from it (reset, remove, approve)
+/// share the app's form template ([settingsFormTheme]); this only fills the
+/// gaps on platforms where that template leaves the stock Material theme.
 ThemeData _accountPanelTheme(ThemeData base) => base.copyWith(
   filledButtonTheme: FilledButtonThemeData(
     style: _rectangularControlStyle(base.filledButtonTheme.style),
   ),
+  outlinedButtonTheme: OutlinedButtonThemeData(
+    style: _rectangularControlStyle(base.outlinedButtonTheme.style),
+  ),
   textButtonTheme: TextButtonThemeData(
     style: _rectangularControlStyle(base.textButtonTheme.style),
+  ),
+  iconButtonTheme: IconButtonThemeData(
+    style: _rectangularControlStyle(base.iconButtonTheme.style),
   ),
   segmentedButtonTheme: SegmentedButtonThemeData(
     style: _rectangularControlStyle(base.segmentedButtonTheme.style),
   ),
+  dialogTheme: base.dialogTheme.copyWith(
+    shape: RoundedRectangleBorder(
+      borderRadius: platformSurfaceRadius(base.platform),
+    ),
+  ),
 );
+
+/// Corner radius for larger surfaces (avatar, dialogs), following each
+/// platform's design language: Fluent uses 8 for cards and overlays, Material
+/// 3 and Apple platforms use a larger radius.
+BorderRadius platformSurfaceRadius(TargetPlatform platform) =>
+    BorderRadius.circular(switch (platform) {
+      TargetPlatform.windows => 8,
+      TargetPlatform.linux => 6,
+      TargetPlatform.macOS || TargetPlatform.iOS => 12,
+      TargetPlatform.android || TargetPlatform.fuchsia => 12,
+    });
 
 ButtonStyle _rectangularControlStyle(ButtonStyle? inherited) =>
     (inherited ?? const ButtonStyle()).copyWith(
@@ -105,11 +145,19 @@ final class _SignedInAccount extends StatelessWidget {
     final AccountUser user = controller.user!;
     final String displayName = user.displayName?.trim() ?? '';
     final ThemeData theme = Theme.of(context);
-    final Widget avatar = CircleAvatar(
-      radius: 28,
-      backgroundColor: theme.colorScheme.secondaryContainer,
-      foregroundColor: theme.colorScheme.onSecondaryContainer,
-      child: const Icon(Icons.person_outline, size: 30),
+    final Widget avatar = DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: platformSurfaceRadius(theme.platform),
+      ),
+      child: SizedBox.square(
+        dimension: 56,
+        child: Icon(
+          FluentIcons.person_24_regular,
+          size: 30,
+          color: theme.colorScheme.onSecondaryContainer,
+        ),
+      ),
     );
     final Widget details = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -132,7 +180,7 @@ final class _SignedInAccount extends StatelessWidget {
     );
     final Widget signOutButton = FilledButton.tonalIcon(
       onPressed: controller.isBusy ? null : controller.signOut,
-      icon: const Icon(Icons.logout),
+      icon: const Icon(FluentIcons.sign_out_20_regular),
       label: const Text('Sign out'),
     );
 
@@ -181,7 +229,14 @@ final class _SignedInAccount extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 24),
-        Text('Devices', style: theme.textTheme.titleMedium),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text('Devices', style: theme.textTheme.titleMedium),
+            ),
+            DevicesRefreshButton(account: controller),
+          ],
+        ),
         DevicesSection(account: controller),
       ],
     );
@@ -755,7 +810,7 @@ final class _PasswordField extends StatelessWidget {
         tooltip: obscure ? 'Show password' : 'Hide password',
         onPressed: enabled ? onToggleObscure : null,
         icon: Icon(
-          obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+          obscure ? FluentIcons.eye_20_regular : FluentIcons.eye_off_20_regular,
         ),
       ),
     ),

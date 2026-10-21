@@ -117,6 +117,7 @@ async def api_client(tmp_path, *, store=None, rag=None):
         model_configuration_store=store or FakeStore(),
         rag_service=rag or FakeRag(),
         tool_registry=FakeBuiltinTools(),
+        dev_models=True,
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

@@ -257,5 +257,65 @@ void main() {
         throwsStateError,
       );
     });
+
+    test('a failed session keeps and logs its cause, cleared once connected', () async {
+      final List<String> lines = <String>[];
+      final List<FakeSignalSocket> sockets = <FakeSignalSocket>[];
+      int attempts = 0;
+      final SignalingClient client = SignalingClient(
+        api: api,
+        identity: me,
+        connect: (Uri _) async {
+          attempts++;
+          if (attempts == 1) {
+            throw const HandshakeLikeError('certificate has expired');
+          }
+          final FakeSignalSocket s = FakeSignalSocket();
+          sockets.add(s);
+          return s;
+        },
+        sleep: (Duration _) async {},
+        random: () => 0,
+      )..onLog = lines.add;
+      client.start();
+      await until(() => sockets.isNotEmpty && sockets[0].sent.isNotEmpty);
+      expect(lines, hasLength(1));
+      expect(lines.single, contains('certificate has expired'));
+      expect(lines.single, contains('shows offline'));
+      expect(client.lastError, contains('certificate has expired'));
+      sockets[0].server('auth.ok', <String, dynamic>{'hive_id': 'h'});
+      await client.waitConnected(const Duration(seconds: 2));
+      expect(client.lastError, isNull);
+      expect(lines.last, contains('recovered'));
+      await client.dispose();
+    });
+
+    test('wake() skips the reconnect backoff', () async {
+      int attempts = 0;
+      final SignalingClient client = SignalingClient(
+        api: api,
+        identity: me,
+        connect: (Uri _) async {
+          attempts++;
+          throw StateError('down');
+        },
+        sleep: (Duration _) => Completer<void>().future, // backoff never ends alone
+      )..onLog = (String _) {};
+      client.start();
+      await until(() => attempts == 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(attempts, 1);
+      client.wake();
+      await until(() => attempts == 2);
+      await client.dispose();
+    });
   });
+}
+
+/// Stands in for a TLS handshake failure (the engine hit an expired root).
+final class HandshakeLikeError implements Exception {
+  const HandshakeLikeError(this.message);
+  final String message;
+  @override
+  String toString() => 'HandshakeLikeError: $message';
 }

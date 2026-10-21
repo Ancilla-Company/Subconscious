@@ -80,8 +80,12 @@ class WebsocketsUpstream:
     async def connect(cls, url: str, api_key: str | None) -> "WebsocketsUpstream":
         from websockets.asyncio.client import connect
 
+        from ..tls import ssl_for_url
+
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        return cls(await connect(url, additional_headers=headers, max_size=None))
+        return cls(
+            await connect(url, additional_headers=headers, max_size=None, ssl=ssl_for_url(url))
+        )
 
     async def send(self, event: dict[str, Any]) -> None:
         await self._connection.send(json.dumps(event))

@@ -108,9 +108,16 @@ async def list_models(request: Request) -> Response:
     try:
         configurations = await _request_store(request).list()
         resolver = getattr(request.app.state, "capability_resolver", None)
+        dev_models = getattr(request.app.state, "dev_models", False) is True
         if resolver is None:
-            return _json_model(build_model_catalog(configurations))
-        return _json_model(await build_model_catalog_with_capabilities(configurations, resolver))
+            return _json_model(
+                build_model_catalog(configurations, include_dev_models=dev_models)
+            )
+        return _json_model(
+            await build_model_catalog_with_capabilities(
+                configurations, resolver, include_dev_models=dev_models
+            )
+        )
     except ModelConfigurationStoreError as error:
         _LOG.warning("api.model_routes.list_models: handled ModelConfigurationStoreError; continuing with fallback", exc_info=True)
         return _storage_problem(error)

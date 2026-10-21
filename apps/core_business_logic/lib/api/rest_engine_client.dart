@@ -250,6 +250,12 @@ final class RestEngineClient {
   Future<Map<String, dynamic>> getHiveSnapshot() =>
       _getMap('hive/nodes', authenticate: true);
 
+  /// `POST /api/v1/hive/refresh`: the engine reconnects signalling now (no
+  /// backoff), re-lists the devices and returns the snapshot. `problem` is
+  /// non-null whenever the engine is still not online, with the cause.
+  Future<Map<String, dynamic>> refreshHive() =>
+      _sendMap('POST', 'hive/refresh', <String, dynamic>{});
+
   /// `POST /api/v1/hive/nodes/{id}/approve` with the confirmed code.
   Future<void> approveHiveNode(String id, String sas) async {
     await _sendMap('POST', 'hive/nodes/${_segment(id)}/approve', <String, dynamic>{

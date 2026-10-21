@@ -338,6 +338,58 @@ final class HiveClient {
     return views;
   }
 
+  /// The Refresh button for a thin node: skips the signalling backoff, waits
+  /// up to [wait] for the socket, then re-lists naming this node so the
+  /// server checks it is online. Returns null when this device is online,
+  /// otherwise the cause (also logged): signed in and talking to the server
+  /// while shown offline is always a fault.
+  Future<String?> forceRefresh({
+    Duration wait = const Duration(seconds: 10),
+  }) async {
+    final SignalingClient? signals = signaling;
+    final NodeIdentity? self = identity;
+    final HiveApi? hiveApi = api;
+    final NodeDirectory? dir = directory;
+    if (signals == null || self == null || hiveApi == null || dir == null) {
+      return 'This device has not joined the hive yet.';
+    }
+    if (!signals.connected) {
+      signals.wake();
+      try {
+        await signals.waitConnected(wait);
+      } on TimeoutException {
+        // Reported below with the signalling cause.
+      }
+    }
+    final int startSequence = _book.beginRequest();
+    final Map<String, dynamic> response = await hiveApi.listNodes(
+      callerNodeId: self.nodeId,
+    );
+    final Object? nodes = response['nodes'];
+    final Object? hive = response['hive_id'];
+    await dir.update(
+      nodes is List ? nodes : const <Object?>[],
+      hiveId: hive is String ? hive : null,
+    );
+    _book.mergeRest(startSequence, dir.nodes);
+    if (!_views.isClosed) _views.add(currentViews());
+    final String? problem = !signals.connected
+        ? 'Signalling to the server is not connected '
+              '(${signals.lastError ?? 'no response yet'}); '
+              '${signals.failures} failed attempts.'
+        : response['caller_online'] == false
+        ? 'Signalling is connected, but the server still lists this device '
+              'offline.'
+        : null;
+    if (problem != null) {
+      developer.log('Refresh: this device is not online: $problem',
+          name: 'hive', level: 900);
+      // ignore: avoid_print
+      print('hive: Refresh: this device is not online: $problem');
+    }
+    return problem;
+  }
+
   List<NodeView> currentViews() {
     final NodeDirectory? dir = directory;
     final NodeIdentity? self = identity;

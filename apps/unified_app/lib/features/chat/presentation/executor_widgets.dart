@@ -1,4 +1,5 @@
 import 'package:core_business_logic/core_business_logic.dart' as core;
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 
 import '../../hive/executor_selection.dart';
@@ -29,8 +30,12 @@ final class ExecutorPicker extends StatelessWidget {
     required this.directory,
     required this.onSelected,
     this.enabled = true,
+    this.style,
     super.key,
   });
+
+  /// The composer's compact control style, so this matches the other buttons.
+  final ButtonStyle? style;
 
   final EngineLlmProvider provider;
   final ExecutorDirectory directory;
@@ -58,9 +63,12 @@ final class ExecutorPicker extends StatelessWidget {
           key: const ValueKey<String>('executor-picker'),
           tooltip: 'Run on: $name',
           enabled: enabled && (options.length > 1 || selected != null),
+          style: style,
           icon: Icon(
-            selected == null ? Icons.computer_outlined : Icons.devices,
-            size: 18,
+            selected == null
+                ? FluentIcons.laptop_20_regular
+                : FluentIcons.phone_laptop_20_regular,
+            size: 19,
           ),
           padding: EdgeInsets.zero,
           onSelected: (String value) =>

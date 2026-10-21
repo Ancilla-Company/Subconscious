@@ -430,7 +430,9 @@ async def engine_app(tmp_path, name="engine.db"):
         return None
 
     store.resolve = resolve
-    app = create_app(database, EngineAuthToken("secret-token"), model_configuration_store=store)
+    app = create_app(
+        database, EngineAuthToken("secret-token"), model_configuration_store=store, dev_models=True
+    )
     try:
         yield app
     finally:

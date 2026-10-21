@@ -297,6 +297,35 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   /// Node id of the home engine this app is connected to, once resolved.
   String? homeEngineId;
 
+  /// Node id of an engine this app reaches directly over REST (a LAN or 
+  /// explicit URL, with no hive link), read from that engine. It is the same
+  /// machine as one of the account's listed full nodes, so it must not be
+  /// offered a second time as another device.
+  String? directEngineNodeId;
+
+  /// The engine tasks run on by default: the home engine, else the directly
+  /// connected one.
+  String? get connectedNodeId => homeEngineId ?? directEngineNodeId;
+
+  @visibleForTesting
+  Future<void> resolveDirectEngine() async {
+    String? resolved;
+    if (!hasLocalFullNode && homeEngineId == null) {
+      try {
+        final RestEngineClient? client = await localEngineClient?.call();
+        final Object? id = client == null
+            ? null
+            : (await client.getHiveSnapshot())['node_id'];
+        resolved = id is String && id.isNotEmpty ? id : null;
+      } on Object catch (caught) {
+        debugPrint('Could not read the connected engine id: $caught');
+      }
+    }
+    if (resolved == directEngineNodeId) return;
+    directEngineNodeId = resolved;
+    notifyListeners();
+  }
+
   /// Engine the user explicitly chose; connected to whenever it is online.
   String? preferredEngineId;
 
@@ -373,6 +402,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
 
   void _onSignalChanged(bool up) {
     signalConnected = up;
+    offlineProblem = up ? null : _thinOfflineProblem();
     if (up) _backoff.reset();
     _scheduleReconcile();
     notifyListeners();
@@ -521,6 +551,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     thinActive = false;
     signalConnected = false;
     serverUnavailable = false;
+    offlineProblem = null;
     homeEngineId = null;
     engineState = EngineLinkState.disconnected;
   }
@@ -536,7 +567,10 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       tier: _homeView()?.tier,
     ),
     for (final NodeView v in executorCandidates)
-      if (homeEngineId == null || !nodeIdsEqual(v.node.id, homeEngineId!))
+      // The first option already is the connected engine. With a local full
+      // node there is no home id, so also skip that engine's own directory row.
+      if (!v.isLocal &&
+          (connectedNodeId == null || !nodeIdsEqual(v.node.id, connectedNodeId!)))
         ExecutorOption(
           nodeId: v.node.id,
           name: v.node.name.isEmpty ? v.node.id : v.node.name,
@@ -546,7 +580,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   ];
 
   NodeView? _homeView() {
-    final String? id = homeEngineId;
+    final String? id = connectedNodeId;
     if (id == null) return null;
     for (final NodeView v in nodes) {
       if (nodeIdsEqual(v.node.id, id)) return v;
@@ -664,6 +698,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     status = HiveStatus.ready;
     notifyListeners();
     _scheduleReconcile();
+    unawaited(resolveDirectEngine());
     unawaited(maybeAutoConnect());
   }
 
@@ -804,18 +839,89 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     try {
       final RestEngineClient? client = await localEngineClient?.call();
       if (client == null) return;
-      final Map<String, dynamic> snapshot = await client.getHiveSnapshot();
-      engineHiveState = snapshot['state'] as String?;
-      engineHiveDetail = snapshot['detail'] as String?;
-      final Object? rows = snapshot['nodes'];
-      nodes = <NodeView>[
-        if (rows is List)
-          for (final Object? row in rows)
-            if (row is Map<String, dynamic>)
-              if (_viewFromEngineRow(row) case final NodeView view) view,
-      ];
+      _applyEngineSnapshot(await client.getHiveSnapshot());
     } on Object catch (caught) {
+      offlineProblem = 'Could not reach the engine on this computer: $caught';
       debugPrint('Could not list devices from the local engine: $caught');
+    }
+  }
+
+  void _applyEngineSnapshot(Map<String, dynamic> snapshot) {
+    engineHiveState = snapshot['state'] as String?;
+    engineHiveDetail = snapshot['detail'] as String?;
+    final Object? rows = snapshot['nodes'];
+    nodes = <NodeView>[
+      if (rows is List)
+        for (final Object? row in rows)
+          if (row is Map<String, dynamic>)
+            if (_viewFromEngineRow(row) case final NodeView view) view,
+    ];
+    offlineProblem = engineOfflineProblem(snapshot);
+    if (offlineProblem case final String problem) {
+      debugPrint('Local engine is offline: $problem');
+    }
+  }
+
+  /// Plain-language reason the user is looking at an offline device while
+  /// signed in, or null when this device is online. Never silent.
+  String? offlineProblem;
+
+  /// A thin node's signalling cause while it is down after a failure.
+  String? _thinOfflineProblem() {
+    final SignalingClient? signals = hive.signaling;
+    if (signals == null || signals.connected) return null;
+    final String? cause = signals.lastError;
+    if (cause == null) return null;
+    return 'This device is not connected to the server ($cause); '
+        '${signals.failures} failed attempts.';
+  }
+
+  /// True while [forceRefresh] runs (the Refresh button shows progress).
+  bool refreshing = false;
+
+  /// The Refresh button. The only good outcome is this device (or, with a
+  /// local engine, that engine) shown online; anything else lands in
+  /// [offlineProblem] with the cause and is logged.
+  Future<void> forceRefresh() async {
+    if (refreshing) return;
+    refreshing = true;
+    notifyListeners();
+    try {
+      if (hasLocalFullNode) {
+        final RestEngineClient? client = await localEngineClient?.call();
+        if (client == null) {
+          offlineProblem = 'The engine on this computer is not reachable.';
+        } else {
+          _applyEngineSnapshot(await client.refreshHive());
+        }
+        return;
+      }
+      if (!hive.started) {
+        await adoptSession();
+        if (!hive.started) {
+          offlineProblem = 'This device could not join the hive. '
+              '${error == null ? '' : 'Cause: $error'}'.trim();
+          return;
+        }
+      }
+      offlineProblem = await hive.forceRefresh();
+      nodes = hive.currentViews();
+      error = null;
+      serverUnavailable = false;
+      unawaited(maybeAutoConnect());
+    } on HiveApiException catch (caught) {
+      offlineProblem = 'The server refused the refresh '
+          '(HTTP ${caught.statusCode}: ${caught.message}).';
+      _fail(caught);
+    } on Object catch (caught) {
+      offlineProblem = 'Refresh failed: $caught';
+      _fail(caught);
+    } finally {
+      refreshing = false;
+      if (offlineProblem case final String problem) {
+        debugPrint('Devices refresh: this device is not online: $problem');
+      }
+      notifyListeners();
     }
   }
 
@@ -829,8 +935,10 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       nodes = await hive.refreshDirectory();
       error = null;
       serverUnavailable = false;
+      offlineProblem = _thinOfflineProblem();
       _backoff.reset();
       notifyListeners();
+      unawaited(resolveDirectEngine());
       unawaited(maybeAutoConnect());
     } on HiveApiException catch (caught) {
       if (caught.statusCode == 502 ||
@@ -1054,6 +1162,25 @@ NodeView? _viewFromEngineRow(Map<String, dynamic> row) {
     ],
     sas: row['sas'] is String ? row['sas'] as String : null,
   );
+}
+
+/// Why the local engine is offline, from its `/hive/nodes` or `/hive/refresh`
+/// body, or null when it is online. The engine's own `problem` wins; the
+/// signed-out and hive-mismatch states have their own banners.
+@visibleForTesting
+String? engineOfflineProblem(Map<String, dynamic> snapshot) {
+  final Object? problem = snapshot['problem'];
+  if (problem is String && problem.isNotEmpty) return problem;
+  final Object? signalling = snapshot['signalling'];
+  if (snapshot['state'] != 'running' || signalling is! Map) return null;
+  if (signalling['connected'] == true) return null;
+  final Object? cause = signalling['last_error_detail'] ?? signalling['last_error'];
+  final Object? failures = signalling['failures'];
+  // Not connected yet and nothing failed: the first attempt is still running.
+  if ((failures is! int || failures == 0) && cause == null) return null;
+  return 'The engine is not connected to the server'
+      '${cause is String && cause.isNotEmpty ? ' ($cause)' : ''}'
+      '${failures is int && failures > 0 ? '; $failures failed attempts' : ''}.';
 }
 
 String _deviceName() {

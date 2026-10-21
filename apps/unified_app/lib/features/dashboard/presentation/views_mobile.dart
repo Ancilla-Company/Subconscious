@@ -13,6 +13,8 @@ import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
 import '../../hive/hive_runtime.dart';
 import '../../settings/controller/settings_controller.dart';
+import '../../settings/presentation/settings_main_panel.dart'
+    show settingsFormTheme;
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
 
@@ -29,7 +31,17 @@ final class MobileDashboardView extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge(<Listenable>[controller, accountController]),
-    builder: (BuildContext context, Widget? child) => Scaffold(
+    builder: (BuildContext context, Widget? child) => Theme(
+      // The app bar, drawer and every panel share the form template, as on the
+      // wide layout.
+      data: settingsFormTheme(context),
+      child: _scaffold(context),
+    ),
+  );
+
+  Widget _scaffold(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Scaffold(
       drawer: Drawer(
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         child: SafeArea(
@@ -40,6 +52,11 @@ final class MobileDashboardView extends StatelessWidget {
         ),
       ),
       appBar: AppBar(
+        // Flat and on the surface colour with a hairline, like the desktop top bar.
+        backgroundColor: colors.surface,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        shape: Border(bottom: BorderSide(color: colors.outlineVariant)),
         leading: Builder(
           builder: (BuildContext context) => IconButton(
             tooltip: 'Open navigation menu',
@@ -56,8 +73,8 @@ final class MobileDashboardView extends StatelessWidget {
         ],
       ),
       body: _body(),
-    ),
-  );
+    );
+  }
 
   Widget _body() {
     // The chat only has room under Threads on mobile, so show it while a tool

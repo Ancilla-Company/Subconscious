@@ -44,6 +44,18 @@ async def list_nodes(request: Request) -> Response:
     return JSONResponse(service.snapshot())
 
 
+async def force_refresh(request: Request) -> Response:
+    """Refresh button: reconnect signalling now, re-list, and report why if still offline."""
+    service = _service(request)
+    if service is None:
+        _LOG.warning("api.hive_routes.force_refresh: the hive service is not running")
+        return JSONResponse(
+            {"enabled": False, "state": "stopped", "detail": "", "node_id": None,
+             "hive_id": None, "nodes": [], "problem": "The hive service is not running."}
+        )
+    return JSONResponse(await service.force_refresh())
+
+
 async def enroll(request: Request) -> Response:
     service = _service(request)
     if service is None:
@@ -171,6 +183,7 @@ def hive_routes() -> list[Route]:
         Route("/api/v1/hive/remote-tools", get_remote_tools, methods=["GET"]),
         Route("/api/v1/hive/remote-tools", put_remote_tools, methods=["PUT"]),
         Route("/api/v1/hive/nodes", list_nodes, methods=["GET"]),
+        Route("/api/v1/hive/refresh", force_refresh, methods=["POST"]),
         Route("/api/v1/hive/enroll", enroll, methods=["POST"]),
         Route("/api/v1/hive/invites", create_invite, methods=["POST"]),
         Route("/api/v1/hive/nodes/{node_id}/approve", approve_node, methods=["POST"]),

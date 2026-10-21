@@ -107,7 +107,8 @@ def make_store(models):
 
 def build_app(tmp_path, models, audio):
     return create_app(Database(tmp_path / "t.db"), EngineAuthToken("tok"),
-                      model_configuration_store=make_store(models), audio_services=audio)
+                      model_configuration_store=make_store(models), audio_services=audio,
+                      dev_models=True)
 
 
 def client_for(app):

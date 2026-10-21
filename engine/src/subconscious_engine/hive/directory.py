@@ -280,8 +280,10 @@ class HiveApi:
     async def register(self, body: dict[str, Any]) -> dict[str, Any]:
         return _mapping(await self.request("POST", "nodes", body))
 
-    async def list_nodes(self) -> dict[str, Any]:
-        return _mapping(await self.request("GET", "nodes"))
+    async def list_nodes(self, caller_node_id: str | None = None) -> dict[str, Any]:
+        """List the account's nodes. Naming the caller makes the server check (and log)
+        that it is online; send it only once signalling had its chance to connect."""
+        return _mapping(await self.request("GET", "nodes", node_id=caller_node_id))
 
     async def approve(self, node_id: str, approver_node_id: str, sig: str) -> None:
         await self.request(

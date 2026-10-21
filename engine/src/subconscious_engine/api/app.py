@@ -87,7 +87,9 @@ def create_app(
     remote_tools_config: RemoteToolsConfig | None = None,
     capability_resolver: CapabilityResolver | None = None,
     audio_services: AudioServices | None = None,
+    dev_models: bool = False,
 ) -> Starlette:
+    """Build the engine API. ``dev_models`` lists test-only models (Echo); dev engines only."""
     store = model_configuration_store or EncryptedModelConfigurationStore(
         database.path.parent
     )
@@ -190,6 +192,7 @@ def create_app(
             "hive_service": None,
             "sync_engine": SyncEngine(database),
             "task_manager": TaskManager(app),
+            "dev_models": dev_models,
         }
     )
     # Remote tools (webrtc.md section 8): both halves are inert until a peer asks or a

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:core_business_logic/core_business_logic.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 
 import '../../account/account_controller.dart';
@@ -39,8 +40,8 @@ final class _NodesPageState extends State<NodesPage> {
             if (runtime.isSignedIn) ...<Widget>[
               IconButton(
                 tooltip: 'Refresh',
-                icon: const Icon(Icons.refresh),
-                onPressed: runtime.refresh,
+                icon: const Icon(FluentIcons.arrow_clockwise_20_regular),
+                onPressed: runtime.refreshing ? null : runtime.forceRefresh,
               ),
               TextButton(
                 onPressed: runtime.signOut,
@@ -91,6 +92,62 @@ final class DevicesSection extends StatelessWidget {
       );
     },
   );
+}
+
+/// Refresh for the Account page's Devices heading. Reconnects this device (or
+/// the local engine) to the server now and re-reads the list; if this device
+/// is still offline afterwards the cause is shown under the heading. Styled by
+/// the surrounding settings form theme, like the other settings Reload buttons.
+final class DevicesRefreshButton extends StatelessWidget {
+  const DevicesRefreshButton({required this.account, super.key});
+
+  final AccountController account;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge(<Listenable>[account, account.session]),
+    builder: (BuildContext context, Widget? child) {
+      final HiveRuntime runtime = account.session;
+      if (!account.isAuthenticated) return const SizedBox.shrink();
+      final bool busy = runtime.refreshing;
+      return OutlinedButton.icon(
+        key: const ValueKey<String>('devices-refresh'),
+        onPressed: busy ? null : () => unawaited(runtime.forceRefresh()),
+        icon: busy
+            ? const SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(FluentIcons.arrow_clockwise_20_regular, size: 16),
+        label: Text(busy ? 'Refreshing' : 'Refresh'),
+      );
+    },
+  );
+}
+
+/// Why this device is offline while signed in. Shown until it is online.
+final class _OfflineProblemNotice extends StatelessWidget {
+  const _OfflineProblemNotice({required this.problem});
+  final String problem;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Card(
+      key: const ValueKey<String>('devices-offline-problem'),
+      color: theme.colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Semantics(
+          liveRegion: true,
+          child: Text(
+            'This device is offline. $problem',
+            style: TextStyle(color: theme.colorScheme.onErrorContainer),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 final class _NodeList extends StatelessWidget {
@@ -144,6 +201,11 @@ final class _NodeList extends StatelessWidget {
             key: ValueKey<String>('server-unavailable'),
             padding: EdgeInsets.only(bottom: 12),
             child: Text(serverUnavailableMessage),
+          ),
+        if (runtime.offlineProblem case final String problem)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _OfflineProblemNotice(problem: problem),
           ),
         if (runtime.hasLocalFullNode && runtime.engineHiveState == 'signed_out')
           Card(
@@ -363,7 +425,9 @@ final class _ExecutorSection extends StatelessWidget {
               dense: true,
               contentPadding: EdgeInsets.zero,
               leading: Icon(
-                option.isHome ? Icons.computer_outlined : Icons.devices,
+                option.isHome
+                    ? FluentIcons.laptop_20_regular
+                    : FluentIcons.phone_laptop_20_regular,
               ),
               title: Text(option.name),
               subtitle: option.subtitle.isEmpty ? null : Text(option.subtitle),

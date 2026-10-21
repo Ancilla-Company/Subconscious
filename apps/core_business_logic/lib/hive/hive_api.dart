@@ -54,7 +54,12 @@ final class HiveApi {
   Future<Map<String, dynamic>> register(Map<String, dynamic> body) =>
       _map('POST', 'nodes', body);
 
-  Future<Map<String, dynamic>> listNodes() => _map('GET', 'nodes');
+  /// Lists the account's nodes. With [callerNodeId] the server also answers
+  /// `caller_online` (and logs a warning when the caller has no live
+  /// signalling socket); send it only on a user refresh, after signalling had
+  /// its chance to connect.
+  Future<Map<String, dynamic>> listNodes({String? callerNodeId}) =>
+      _map('GET', 'nodes', null, callerNodeId);
 
   /// Folds [nodeId] under an engine ([parentNodeId]) or clears the link when
   /// null. Old servers answer 404/405.

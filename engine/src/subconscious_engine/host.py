@@ -167,6 +167,7 @@ class EngineHost:
                 if capabilities_url
                 else None
             ),
+            dev_models=config.dev,
         )
         hive = config.hive
         self.hive_service = HiveService(

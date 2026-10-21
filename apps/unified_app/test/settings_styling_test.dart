@@ -8,6 +8,9 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.iOS,
       TargetPlatform.windows,
+      // Web reports its host platform, so these cover web as well.
+      TargetPlatform.macOS,
+      TargetPlatform.linux,
     ]) {
       testWidgets('form controls use the app template on ${platform.name} '
           '(${brightness.name})', (WidgetTester tester) async {
@@ -41,24 +44,4 @@ void main() {
       }, variant: TargetPlatformVariant.only(platform));
     }
   }
-
-  testWidgets('web-like desktops keep the stock theme', (
-    WidgetTester tester,
-  ) async {
-    late ThemeData form;
-    late ThemeData base;
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: ThemeData(platform: TargetPlatform.macOS),
-        home: Builder(
-          builder: (BuildContext context) {
-            base = Theme.of(context);
-            form = settingsFormTheme(context);
-            return const SizedBox();
-          },
-        ),
-      ),
-    );
-    expect(form.inputDecorationTheme, base.inputDecorationTheme);
-  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 }

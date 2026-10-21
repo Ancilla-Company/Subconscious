@@ -42,7 +42,12 @@ final class SettingsMainPanel extends StatelessWidget {
             SettingsPage.models => _ModelsSettingsPage(controller: controller),
             SettingsPage.tools => _ToolsSettingsPage(controller: controller),
             SettingsPage.skills => const _SkillsSettingsPage(),
-            SettingsPage.account => AccountPanel(controller: accountController),
+            SettingsPage.account => AccountPanel(
+              controller: accountController,
+              lanAccess: _supportsRemoteEngineConnection
+                  ? null
+                  : _LanAccessSection(token: controller.joiningToken),
+            ),
             SettingsPage.about => const _AboutSettingsPage(),
           },
         ),
@@ -188,11 +193,28 @@ final class _GeneralSettingsPage extends StatelessWidget {
       if (!_supportsRemoteEngineConnection) ...<Widget>[
         const _FieldLabel('Data Folder'),
         const _DataDirectoryField(),
-        const _FieldLabel('Joining Token'),
-        _JoiningTokenField(token: controller.joiningToken),
-        if (_supportsWindowsFirewall) const _WindowsFirewallSettings(),
       ],
   ];
+}
+
+/// LAN joining and management for this computer's engine: the joining token
+/// other devices need, plus the Windows firewall rule. Shown on the Account
+/// page, below the account itself.
+final class _LanAccessSection extends StatelessWidget {
+  const _LanAccessSection({required this.token});
+
+  final String? token;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      Text('LAN access', style: Theme.of(context).textTheme.titleMedium),
+      const _FieldLabel('Joining Token'),
+      _JoiningTokenField(token: token),
+      if (_supportsWindowsFirewall) const _WindowsFirewallSettings(),
+    ],
+  );
 }
 
 /// Plain-language text for an engine problem; the raw error goes to the log.
@@ -580,29 +602,26 @@ final class _LabeledDropdown extends StatelessWidget {
   final bool enabled;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 18),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _FieldLabel(label),
-        DropdownButtonFormField<String>(
-          key: ValueKey<String>('$label:$value'),
-          initialValue: options.contains(value) ? value : options.first,
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(fontWeight: FontWeight.normal),
-          items: <DropdownMenuItem<String>>[
-            for (final String option in options)
-              DropdownMenuItem<String>(value: option, child: Text(option)),
-          ],
-          onChanged: !enabled
-              ? null
-              : (String? next) {
-                  if (next != null) onChanged(next);
-                },
-        ),
-      ],
-    ),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      _FieldLabel(label),
+      DropdownButtonFormField<String>(
+        key: ValueKey<String>('$label:$value'),
+        initialValue: options.contains(value) ? value : options.first,
+        style: Theme.of(context).textTheme.bodyMedium
+            ?.copyWith(fontWeight: FontWeight.normal),
+        items: <DropdownMenuItem<String>>[
+          for (final String option in options)
+            DropdownMenuItem<String>(value: option, child: Text(option)),
+        ],
+        onChanged: !enabled
+            ? null
+            : (String? next) {
+                if (next != null) onChanged(next);
+              },
+      ),
+    ],
   );
 }
 
@@ -1850,16 +1869,11 @@ String? _nullIfEmpty(String value) {
   return trimmed.isEmpty ? null : trimmed;
 }
 
-/// Flat, compact form controls shared with the Windows build. Mobile uses the
-/// same template so its buttons and fields match the app's styling; web and
-/// the other desktops keep the stock Material theme.
+/// Flat, compact form controls: the app's one template for buttons, fields and
+/// popups. It applies on every platform (web, desktop and mobile) so a screen
+/// looks the same wherever it runs.
 ThemeData settingsFormTheme(BuildContext context) =>
-    !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.windows ||
-            defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS)
-    ? _windowsSettingsTheme(context)
-    : Theme.of(context);
+    _windowsSettingsTheme(context);
 
 ThemeData _windowsSettingsTheme(BuildContext context) {
   final ThemeData base = Theme.of(context);

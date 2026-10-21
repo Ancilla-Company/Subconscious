@@ -48,6 +48,7 @@ DIRECTORY_POLL_SECONDS = 15.0
 DIRECTORY_RECONCILE_SECONDS = 120.0
 REFRESH_DEBOUNCE_SECONDS = 1.0
 REFRESH_THROTTLE_SECONDS = 5.0
+FORCE_REFRESH_WAIT_SECONDS = 10.0
 AUTO_APPROVE_LIMIT = 5
 AUTO_APPROVE_WINDOW_SECONDS = 60.0
 AUTO_APPROVE_MAX_ATTEMPTS = 2
@@ -175,6 +176,7 @@ class HiveService:
         self._sleep = sleep
         self._rng = rng
         self._last_refresh = 0.0
+        self._server_sees_online: bool | None = None
         self._approve_attempts: dict[str, int] = {}
         self._gui_name: str | None = None
         self._gui_client_id: str | None = None
@@ -341,7 +343,7 @@ class HiveService:
                 message = str(error) or type(error).__name__
                 known = isinstance(error, (HiveApiError, HiveError, AccountError, IdentityError))
                 if known:
-                    _LOGGER.info(
+                    _LOGGER.warning(
                         "Hive %s (%s: %s); %s",
                         verdict.state,
                         type(error).__name__,
@@ -606,9 +608,17 @@ class HiveService:
                 await peers.on_presence(node_id, True)
 
     # --- directory + commands ---------------------------------------------------
-    async def _refresh_directory(self) -> None:
+    async def _refresh_directory(self, *, name_caller: bool = False) -> None:
         assert self.api and self.directory
-        listing = await self.api.list_nodes()
+        caller = self.identity.node_id if name_caller and self.identity else None
+        listing = (
+            await self.api.list_nodes(caller) if caller else await self.api.list_nodes()
+        )
+        self._server_sees_online = listing.get("caller_online") if caller else None
+        if self._server_sees_online is False:
+            _LOGGER.warning(
+                "Hive: the server reports this engine offline (node_id=%s).", caller
+            )
         raw = listing.get("nodes")
         hive_id = listing.get("hive_id")
         self.directory.update(
@@ -636,6 +646,79 @@ class HiveService:
         with logged_suppress(HiveApiError, AccountError):
             await self._refresh_directory()
             await self._auto_approve_pending()
+
+    async def force_refresh(self, *, wait: float = FORCE_REFRESH_WAIT_SECONDS) -> dict[str, Any]:
+        """The GUI's Refresh: bring this engine online now and re-read the device list.
+
+        Restores a missing session, restarts a supervisor stopped in ``error``, skips the
+        signalling backoff and waits up to ``wait`` seconds for the socket. The only good
+        outcome is this engine shown online; anything else is logged at WARNING and
+        returned as ``problem`` so the GUI can show it.
+        """
+        problems: list[str] = []
+        if self._enabled and self._user is None:
+            try:
+                await self._account.restore()
+            except AccountError as error:
+                problems.append(f"Could not restore the account session: {error}")
+            if self._pending_apply is not None:
+                with logged_suppress(Exception):
+                    await self._pending_apply
+            user = self._account.current_account_user
+            if user is not None and self.state == "stopped":
+                await self._apply(user)
+        if self.state == "error":
+            await self.retry()
+        deadline = time.monotonic() + max(0.0, wait)
+        woken: SignalingClient | None = None
+        while True:
+            signaling = self.signaling
+            if signaling is not None and signaling.connected:
+                break
+            if signaling is not None and signaling is not woken:
+                signaling.wake()  # once per client: retrying faster would hammer the server
+                woken = signaling
+            if self.state in ("stopped", "signed_out", "hive_mismatch") or time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.25)
+        if self.api is not None and self.directory is not None:
+            self._last_refresh = time.monotonic()
+            try:
+                await self._refresh_directory(name_caller=True)
+                await self._auto_approve_pending()
+            except (HiveApiError, HiveError, AccountError) as error:
+                problems.append(f"Could not list devices: {getattr(error, 'message', None) or error}")
+        snapshot = self.snapshot()
+        if not snapshot["signalling"]["connected"]:
+            problems.insert(0, self._offline_reason())
+        elif self._server_sees_online is False:
+            problems.insert(
+                0,
+                "Signalling is connected, but the server still lists this engine offline.",
+            )
+        problem = " ".join(problems) or None
+        if problem is not None:
+            _LOGGER.warning("Hive refresh: this engine is not online: %s", problem)
+        snapshot["problem"] = problem
+        return snapshot
+
+    def _offline_reason(self) -> str:
+        """Plain-language cause for this engine not being on the signalling server."""
+        if not self._enabled:
+            return "The hive is turned off in the engine configuration."
+        if self._user is None:
+            return "The engine is not signed in to your account."
+        if self.state != "running":
+            detail = f" {self.detail}" if self.detail else ""
+            return f"The engine hive is {self.state.replace('_', ' ')}.{detail}"
+        signaling = self.signaling
+        if signaling is None:
+            return "Signalling has not started."
+        cause = signaling.last_error_detail or signaling.last_error or "no response yet"
+        return (
+            f"Signalling to the server is not connected ({cause}); "
+            f"{signaling.failures} failed attempts."
+        )
 
     async def enroll(self, invite_code: str | None) -> dict[str, Any]:
         api, directory, identity, user = self._require_running()
@@ -826,6 +909,7 @@ class HiveService:
                 "reason": "not started: hive mismatch" if self.state == "hive_mismatch" else None,
                 "failures": signaling.failures if signaling is not None else 0,
                 "last_error": signaling.last_error if signaling is not None else None,
+                "last_error_detail": getattr(signaling, "last_error_detail", None),
             },
             "node_id": identity.node_id if identity else None,
             "hive_id": directory.hive_id if directory else None,

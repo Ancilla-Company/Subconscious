@@ -222,6 +222,108 @@ void main() {
       );
     });
 
+    testWidgets('Refresh asks the local engine to reconnect and shows why it is still offline', (
+      WidgetTester tester,
+    ) async {
+      final HiveRuntime runtime = await signedIn(<http.Request>[]);
+      final AccountController account = accountFor(runtime);
+      runtime.hasLocalFullNode = true;
+      final List<String> paths = <String>[];
+      bool online = false;
+      runtime.localEngineClient = () async => RestEngineClient(
+        baseUri: Uri.parse('http://engine.test/api/v1/'),
+        token: 't',
+        client: MockClient((http.Request r) async {
+          paths.add('${r.method} ${r.url.path}');
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'state': 'running',
+              'signalling': <String, dynamic>{
+                'connected': online,
+                'failures': online ? 0 : 3,
+                'last_error': online ? null : 'SSLCertVerificationError',
+                'last_error_detail': online ? null : 'certificate has expired',
+              },
+              'problem': r.url.path.endsWith('/refresh') && !online
+                  ? 'Signalling to the server is not connected (certificate has expired).'
+                  : null,
+              'nodes': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 'n_eng', 'name': 'Laptop', 'kind': 'engine', 'platform': 'windows',
+                  'status': 'active', 'trusted': true, 'local': true, 'online': online,
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      account.status = AccountStatus.authenticated;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Column(
+                children: <Widget>[
+                  DevicesRefreshButton(account: account),
+                  DevicesSection(account: account),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      // The passive load already says why (never silent).
+      expect(find.byKey(const ValueKey<String>('devices-offline-problem')), findsOneWidget);
+      expect(find.textContaining('certificate has expired'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey<String>('devices-refresh')));
+      await tester.pumpAndSettle();
+      expect(paths.last, 'POST /api/v1/hive/refresh');
+      expect(find.textContaining('Signalling to the server is not connected'), findsOneWidget);
+
+      online = true;
+      await tester.tap(find.byKey(const ValueKey<String>('devices-refresh')));
+      await tester.pumpAndSettle();
+      expect(runtime.offlineProblem, isNull);
+      expect(find.byKey(const ValueKey<String>('devices-offline-problem')), findsNothing);
+      expect(find.text('Online, Full node, windows'), findsOneWidget);
+    });
+
+    test('engineOfflineProblem is quiet while the first attempt runs', () {
+      expect(
+        engineOfflineProblem(<String, dynamic>{
+          'state': 'running',
+          'signalling': <String, dynamic>{'connected': false, 'failures': 0},
+        }),
+        isNull,
+      );
+      expect(
+        engineOfflineProblem(<String, dynamic>{
+          'state': 'running',
+          'signalling': <String, dynamic>{'connected': true},
+        }),
+        isNull,
+      );
+      expect(
+        engineOfflineProblem(<String, dynamic>{
+          'state': 'running',
+          'signalling': <String, dynamic>{
+            'connected': false,
+            'failures': 2,
+            'last_error': 'SSLCertVerificationError',
+          },
+        }),
+        'The engine is not connected to the server (SSLCertVerificationError); 2 failed attempts.',
+      );
+      expect(
+        engineOfflineProblem(<String, dynamic>{'problem': 'Not signed in.'}),
+        'Not signed in.',
+      );
+    });
+
     testWidgets('signed-in pending device shows no code until the grace period', (
       WidgetTester tester,
     ) async {

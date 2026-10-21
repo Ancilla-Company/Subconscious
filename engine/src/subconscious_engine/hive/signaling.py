@@ -17,6 +17,7 @@ from . import PROTOCOL_VERSION
 from .directory import HiveApi, HiveApiError
 from .identity import NodeIdentity, signal_auth_message
 from ..logging_setup import logged_suppress, spawn_logged
+from ..tls import ssl_for_url
 
 _LOGGER = logging.getLogger("uvicorn.error")
 MAX_FRAME_BYTES = 64 * 1024
@@ -29,6 +30,8 @@ DEFAULT_REFRESH_INTERVAL_SECONDS = 12 * 60.0
 # The server closes a socket that sends nothing for 60 s (webrtc.md 4.3), and WebSocket
 # protocol pings are invisible to its handler, so an application level ping is required.
 HEARTBEAT_SECONDS = 25.0
+# A persistent failure with an unchanged cause is logged at WARNING once per this many attempts.
+FAILURE_LOG_EVERY = 10
 
 
 class SignalSocket(Protocol):
@@ -52,7 +55,9 @@ def signal_url(base_url: str) -> str:
 async def default_connect(url: str) -> SignalSocket:
     from websockets.asyncio.client import connect
 
-    return await connect(url, max_size=MAX_FRAME_BYTES, open_timeout=15)  # type: ignore[return-value]
+    return await connect(  # type: ignore[return-value]
+        url, max_size=MAX_FRAME_BYTES, open_timeout=15, ssl=ssl_for_url(url)
+    )
 
 
 def backoff_delay(
@@ -97,6 +102,9 @@ class SignalingClient:
         self.hive_id: str | None = None
         self.failures = 0
         self.last_error: str | None = None
+        self.last_error_detail: str | None = None
+        self._last_reported: tuple[str, str] | None = None
+        self._wake = asyncio.Event()
 
     # --- public -----------------------------------------------------------
     def on(self, frame_type: str, handler: FrameHandler) -> None:
@@ -164,10 +172,11 @@ class SignalingClient:
             except HiveApiError as error:
                 reason = f"HiveApiError:{error.status_code}"
                 self.last_error = reason
-                _LOGGER.debug("Signalling unavailable (%s).", reason)
+                self.last_error_detail = error.message
             except Exception as error:  # reconnect on anything transient
                 reason = type(error).__name__
                 self.last_error = reason
+                self.last_error_detail = str(error)[:300] or reason
                 _LOGGER.debug("Signalling disconnected (%s).", reason, exc_info=True)
             finally:
                 self._connected.clear()
@@ -176,8 +185,50 @@ class SignalingClient:
                 self.failures = 0
             delay = backoff_delay(self.failures, rng=self._rng)
             self.failures += 1
+            self._report_failure(reason, delay)
+            await self._backoff(delay)
+
+    def wake(self) -> None:
+        """Skip the current reconnect backoff (a user asked to refresh now)."""
+        self._wake.set()
+
+    async def _backoff(self, delay: float) -> None:
+        """Sleep ``delay`` unless :meth:`wake` is called first."""
+        self._wake.clear()
+        sleeper = asyncio.ensure_future(self._sleep(delay))
+        waker = asyncio.ensure_future(self._wake.wait())
+        try:
+            await asyncio.wait({sleeper, waker}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in (sleeper, waker):
+                task.cancel()
+                with logged_suppress(asyncio.CancelledError, Exception):
+                    await task
+        if waker.done() and not waker.cancelled():
+            _LOGGER.warning("Signalling retry requested; reconnecting now.")
+
+    def _report_failure(self, reason: str, delay: float) -> None:
+        """Every failed signalling session reaches the production log (WARNING).
+
+        While signalling is down this node is offline for every other device, so a
+        failure here is never silent. Repeats of the same cause are condensed to one
+        line per ``FAILURE_LOG_EVERY`` attempts to keep the log readable.
+        """
+        detail = self.last_error_detail or reason
+        changed = (reason, detail) != self._last_reported
+        if changed or self.failures % FAILURE_LOG_EVERY == 1:
+            self._last_reported = (reason, detail)
+            _LOGGER.warning(
+                "Signalling to %s failed (%s: %s); this node shows offline. "
+                "Attempt %d, retry in %.0fs.",
+                signal_url(self._api.base_url),
+                reason,
+                detail,
+                self.failures,
+                delay,
+            )
+        else:
             _LOGGER.info("Signalling closed (%s) retry in %.0fs", reason, delay)
-            await self._sleep(delay)
 
     async def _session(self) -> None:
         ticket = await self._api.signal_ticket(self._identity.node_id)
@@ -193,7 +244,17 @@ class SignalingClient:
             self.hive_id = hive if isinstance(hive, str) else None
         self._connected.set()
         self.last_error = None
-        _LOGGER.info("Signalling connected node_id=%s", self._identity.node_id)
+        self.last_error_detail = None
+        if self._last_reported is not None:
+            # Pair the earlier failure warnings with their recovery in the production log.
+            _LOGGER.warning(
+                "Signalling recovered node_id=%s after %d failed attempts.",
+                self._identity.node_id,
+                self.failures,
+            )
+            self._last_reported = None
+        else:
+            _LOGGER.info("Signalling connected node_id=%s", self._identity.node_id)
         await self.send("presence.set", self._presence)
         if self.on_connected is not None:
             try:
@@ -272,7 +333,9 @@ class SignalingClient:
         frame_type = frame["type"]
         if frame_type == "error":
             code = frame.get("data", {}).get("code") if isinstance(frame.get("data"), dict) else None
-            _LOGGER.info("Signalling error: %s", code if isinstance(code, str) else "unknown")
+            _LOGGER.warning(
+                "Signalling server error: %s", code if isinstance(code, str) else "unknown"
+            )
             return
         handler = self._handlers.get(frame_type)
         if handler is None:
@@ -283,7 +346,7 @@ class SignalingClient:
         except asyncio.CancelledError:
             raise
         except Exception:
-            _LOGGER.debug("Signalling handler failed for %s.", frame_type, exc_info=True)
+            _LOGGER.warning("Signalling handler failed for %s.", frame_type, exc_info=True)
 
     async def _close_socket(self) -> None:
         socket, self._socket = self._socket, None

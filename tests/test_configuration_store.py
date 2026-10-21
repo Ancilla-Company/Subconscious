@@ -87,14 +87,17 @@ def test_invalid_requests_are_rejected_without_creating_data(tmp_path, payload):
     assert not (tmp_path / "data.enc").exists()
 
 
-def test_catalog_uses_alias_without_exposing_credentials_and_always_adds_echo(tmp_path):
+def test_catalog_uses_alias_without_exposing_credentials_and_adds_echo_only_for_dev(tmp_path):
     store, _ = store_at(tmp_path)
     configured = run(store.create({"provider": "p", "model": "model-x", "alias": "Friendly"}))
-    catalog = build_model_catalog(run(store.list()))
+    catalog = build_model_catalog(run(store.list()), include_dev_models=True)
     assert [(item.name, item.provider) for item in catalog] == [
         ("Friendly", "p"), ("Echo (dev)", "subconscious")
     ]
     assert catalog[0].id == configured.id and catalog[0].description == "model-x"
+    # A production engine never lists the dev-only Echo model.
+    production = build_model_catalog(run(store.list()))
+    assert [(item.name, item.provider) for item in production] == [("Friendly", "p")]
 
 
 def test_wrong_key_tampering_and_invalid_plaintext_fail_safely(tmp_path):

@@ -122,7 +122,8 @@ class MemEngine:
 
         store.resolve, store.list = resolve, listing
         self.app = create_app(self.database, EngineAuthToken("secret-token"),
-                              model_configuration_store=store, agent_manager=agent_manager)
+                              model_configuration_store=store, agent_manager=agent_manager,
+                              dev_models=True)
         if ttl is not None:
             self.app.state.task_manager.ttl_seconds = ttl
         self.directory = directory_for(identity, entries, hive_id)

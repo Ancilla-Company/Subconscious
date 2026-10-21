@@ -106,7 +106,10 @@ class LiveEngine:
             return []
 
         store.resolve, store.list = resolve, listing
-        self.app = create_app(self.database, EngineAuthToken(LOCAL_TOKEN), model_configuration_store=store)
+        self.app = create_app(
+            self.database, EngineAuthToken(LOCAL_TOKEN), model_configuration_store=store,
+            dev_models=True,
+        )
         self.service = HiveService(
             account=self.account, credential_store=SimpleNamespace(), data_directory=self.tmp_path / f"{self.name}-data",
             server_url=self.server_url, node_name=self.name, identity_store=MemStore(),
