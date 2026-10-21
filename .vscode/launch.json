@@ -16,7 +16,7 @@
         "51515"
       ],
       "env": {
-        // "PYTHONPATH": "${workspaceFolder}/engine/src",
+        "PYTHONPATH": "${workspaceFolder}/engine/src",
         "SUBCONSCIOUS_SERVER_URL": "http://127.0.0.1:5050/",
         // "SUBCONSCIOUS_SERVER_URL" :"https://api.subconscious.chat/",
         "SUBCONSCIOUS_FERNET_KEY": "IqweDE7oO7LVqmt-4m6JT2tFPyFcMk_qjpSokXmlUnY=",

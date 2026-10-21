@@ -104,7 +104,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   void initState() {
     super.initState();
     _composer = _ComposerTextController()..addListener(_onComposerChanged);
-    _voice = VoiceController(repository: () => widget.provider.repository)
+    _voice = VoiceController(repository: () => widget.provider.engine)
       ..onError = (String message) {
         if (mounted) _showErrorToast(context, message);
       }
@@ -206,7 +206,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   Future<void> _loadModels() async {
     final int version = ++_modelLoadVersion;
     try {
-      final List<ModelInfo> loaded = await widget.provider.repository
+      final List<ModelInfo> loaded = await widget.provider.engine
           .listModels();
       if (!mounted || version != _modelLoadVersion) return;
       setState(() => _models = loaded);
@@ -222,7 +222,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     if (workspace == null) return;
     final int version = ++_workspaceDefaultLoadVersion;
     try {
-      final Workspace refreshed = await widget.provider.repository.rest
+      final Workspace refreshed = await widget.provider.engine.rest
           .getWorkspace(workspace.uuid);
       final String? modelId = _normalizedModelId(refreshed.defaultModelId);
       if (!mounted ||
@@ -398,7 +398,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     try {
       final List<WorkspaceFileMatch> matches = await widget
           .provider
-          .repository
+          .engine
           .rest
           .searchFiles(
             workspaceUuid: workspace.uuid,
@@ -668,10 +668,12 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                 ),
               ),
               Expanded(
-                child: _showThreadSettings && widget.workspace != null
+                child: _showThreadSettings &&
+                        widget.workspace != null &&
+                        widget.provider.repository != null
                     ? gutter(
                         _ThreadSettingsPanel(
-                          repository: widget.provider.repository,
+                          repository: widget.provider.repository!,
                           workspace: widget.workspace!,
                           initialTitle: widget.title,
                           initialToolsConfig:

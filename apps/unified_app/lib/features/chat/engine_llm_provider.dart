@@ -48,6 +48,9 @@ final class EngineLlmProvider extends ChangeNotifier {
   /// loaded earlier and the composer is disabled.
   core.EngineRepository? repository;
 
+  /// The connected repository; throws [StateError] while disconnected.
+  core.EngineRepository get engine => _engine;
+
   core.EngineRepository get _engine =>
       repository ??
       (throw StateError('The Subconscious engine is not connected.'));

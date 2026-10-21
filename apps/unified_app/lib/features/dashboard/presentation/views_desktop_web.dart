@@ -261,9 +261,9 @@ final class _DesktopWebDashboardViewState
             }
             final EngineLlmProvider? provider = widget.controller.chatProvider;
             // The composer never gives way to an error.
-            if (provider == null &&
-                widget.controller.chatError case final Object error) {
-              return _Unavailable(error: error);
+            final Object? chatError = widget.controller.chatError;
+            if (provider == null && chatError != null) {
+              return _Unavailable(error: chatError);
             }
             if (provider != null) {
               return EngineChatPanel(
