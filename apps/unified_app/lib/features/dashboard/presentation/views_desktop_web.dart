@@ -259,10 +259,12 @@ final class _DesktopWebDashboardViewState
                 widget.controller.isLoadingChat) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (widget.controller.chatError case final Object error) {
+            final EngineLlmProvider? provider = widget.controller.chatProvider;
+            // The composer never gives way to an error.
+            if (provider == null &&
+                widget.controller.chatError case final Object error) {
               return _Unavailable(error: error);
             }
-            final EngineLlmProvider? provider = widget.controller.chatProvider;
             if (provider != null) {
               return EngineChatPanel(
                 key: ValueKey<int>(widget.controller.chatSessionVersion),

@@ -117,6 +117,7 @@ final class MobileDashboardView extends StatelessWidget {
         key: ValueKey<int>(controller.chatSessionVersion),
         provider: provider,
         isComposerEnabled: controller.isConnected,
+        borderlessComposer: true,
         onOpenDevices: controller.openAccountShortcut,
         workspace: controller.threadsWorkspace,
         activeFile: controller.activeFileReference == null

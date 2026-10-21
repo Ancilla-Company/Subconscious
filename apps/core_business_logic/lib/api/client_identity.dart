@@ -7,6 +7,7 @@ abstract final class ClientType {
   static const String browserExtension = 'browser_extension';
   static const String cli = 'cli';
   static const String web = 'web';
+  static const String vscode = 'vscode';
 }
 
 /// Who this client tells the engine it is (shown in the engine tray menu).

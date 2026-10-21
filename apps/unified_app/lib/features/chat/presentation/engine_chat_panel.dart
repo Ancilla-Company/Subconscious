@@ -33,6 +33,7 @@ final class EngineChatPanel extends StatefulWidget {
   const EngineChatPanel({
     required this.provider,
     required this.isComposerEnabled,
+    this.borderlessComposer = false,
     this.onOpenDevices,
     this.workspace,
     this.activeFile,
@@ -55,6 +56,9 @@ final class EngineChatPanel extends StatefulWidget {
   final ExecutorDirectory? executors;
   final EngineLlmProvider provider;
   final bool isComposerEnabled;
+
+  /// Mobile layout: the composer has no outline.
+  final bool borderlessComposer;
 
   /// When set and the composer is disabled, a notice offers this shortcut to
   /// the Account/Devices page.
@@ -738,6 +742,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
               if (!_showThreadSettings)
                 gutter(
                   _Composer(
+                    borderless: widget.borderlessComposer,
                     controller: _composer,
                     focusNode: _composerFocusNode,
                     models: _models
@@ -1150,7 +1155,11 @@ final class _Composer extends StatelessWidget {
     required this.onToggleDictation,
     required this.onToggleRealtime,
     this.executorPicker,
+    this.borderless = false,
   });
+
+  /// Drops the outline around the composer (mobile layout).
+  final bool borderless;
 
   /// Optional "run on" control shown next to the send button.
   final Widget? executorPicker;
@@ -1201,7 +1210,7 @@ final class _Composer extends StatelessWidget {
       margin: const EdgeInsets.only(top: 4, bottom: 10),
       decoration: BoxDecoration(
         color: colors.surfaceContainerLowest,
-        border: Border.all(color: colors.outlineVariant),
+        border: borderless ? null : Border.all(color: colors.outlineVariant),
         borderRadius: BorderRadius.circular(6),
         boxShadow: const <BoxShadow>[
           BoxShadow(

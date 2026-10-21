@@ -38,13 +38,19 @@ final class EngineChatMessage {
 
 final class EngineLlmProvider extends ChangeNotifier {
   EngineLlmProvider({
-    required this.repository,
+    this.repository,
     this.threadUuid,
     this.workspaceUuid,
     this.modelId,
   });
 
-  core.EngineRepository repository;
+  /// Null while no engine is connected: the thread is shown from what was
+  /// loaded earlier and the composer is disabled.
+  core.EngineRepository? repository;
+
+  core.EngineRepository get _engine =>
+      repository ??
+      (throw StateError('The Subconscious engine is not connected.'));
   String? threadUuid;
   String? workspaceUuid;
   String? modelId;
@@ -93,7 +99,7 @@ final class EngineLlmProvider extends ChangeNotifier {
     final String? id = activeTaskId;
     if (id == null || !hasActiveTask) return;
     try {
-      repository.socket.cancelTask(id);
+      repository?.socket.cancelTask(id);
     } on Object {
       // The connection may be gone; the status stays until the next frame.
     }
@@ -105,7 +111,9 @@ final class EngineLlmProvider extends ChangeNotifier {
     final String? thread = threadUuid;
     if (thread == null) return;
     try {
-      final List<core.TaskRecord> tasks = await repository.listTasks(
+      final core.EngineRepository? engine = repository;
+      if (engine == null) return;
+      final List<core.TaskRecord> tasks = await engine.listTasks(
         threadUuid: thread,
       );
       if (tasks.isEmpty) return;
@@ -300,7 +308,7 @@ final class EngineLlmProvider extends ChangeNotifier {
     _timestamps[user] = DateTime.now();
     notifyListeners();
     EngineChatMessage? response;
-    repository
+    _engine
         .streamChat(content: prompt, threadUuid: thread, modelId: modelId)
         .listen(
           (String delta) {
@@ -325,7 +333,7 @@ final class EngineLlmProvider extends ChangeNotifier {
   }) {
     final String? executor = executorNodeId;
     if (executor == null) {
-      return repository.streamChat(
+      return _engine.streamChat(
         content: prompt,
         threadUuid: threadUuid,
         workspaceUuid: workspaceUuid,
@@ -347,7 +355,7 @@ final class EngineLlmProvider extends ChangeNotifier {
     taskError = null;
     notifyListeners();
     try {
-      await for (final core.TaskEvent event in repository.runTask(
+      await for (final core.TaskEvent event in _engine.runTask(
         content: prompt,
         threadUuid: threadUuid,
         workspaceUuid: workspaceUuid,

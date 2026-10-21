@@ -172,6 +172,10 @@ final class DashboardController extends ChangeNotifier {
 
   EngineLlmProvider? chatProvider;
 
+  /// Last messages loaded per thread, shown while the engine is away.
+  final Map<String, List<ChatMessage>> _messageCache =
+      <String, List<ChatMessage>>{};
+
   /// Providers whose turn is still running after the user opened another
   /// thread. They keep working in the background and are reused when the user
   /// returns to the thread.
@@ -992,6 +996,11 @@ final class DashboardController extends ChangeNotifier {
       await loadWorkspaces();
       // Tabs that could not be read while the engine was away come back now,
       // and files edited in the meantime are compared with the disk.
+      final ThreadInfo? openThread = selectedThread;
+      if (openThread != null) {
+        // The thread was opened while offline: load the live history now.
+        unawaited(_refreshSelectedThreadHistory(openThread.uuid));
+      }
       unawaited(documents.retryRestore());
       unawaited(documents.checkExternalChanges());
       _schedulePendingNavigationSave();
@@ -1505,6 +1514,7 @@ final class DashboardController extends ChangeNotifier {
           selectedThread?.uuid != threadUuid) {
         return;
       }
+      _messageCache[threadUuid] = messages;
       provider.replaceEngineHistory(messages);
     } on Object {
       // Remote updates are opportunistic; the current view remains usable on failure.
@@ -1742,8 +1752,19 @@ final class DashboardController extends ChangeNotifier {
     isLoadingChat = true;
     notifyListeners();
     if (currentRepository == null || !isConnected) {
+      // Offline: show what was loaded earlier. The composer stays on screen
+      // (disabled); it never gives way to an error.
+      final EngineLlmProvider offline =
+          _runningProviders.remove(thread.uuid) ??
+          EngineLlmProvider(
+            threadUuid: thread.uuid,
+            modelId: thread.defaultModelId ?? threadsWorkspace?.defaultModelId,
+          );
+      offline.replaceEngineHistory(
+        _messageCache[thread.uuid] ?? const <ChatMessage>[],
+      );
+      chatProvider = offline;
       isLoadingChat = false;
-      chatError = StateError('The Subconscious engine is not connected.');
       notifyListeners();
       return;
     }
@@ -1752,6 +1773,7 @@ final class DashboardController extends ChangeNotifier {
       final List<ChatMessage> messages = await currentRepository
           .listMessages(thread.uuid)
           .timeout(requestTimeout);
+      _messageCache[thread.uuid] = messages;
       if (_disposed ||
           requestVersion != _chatRequestVersion ||
           selectedThread?.uuid != thread.uuid) {
@@ -1772,6 +1794,14 @@ final class DashboardController extends ChangeNotifier {
     } on Object catch (caughtError) {
       if (!_disposed && requestVersion == _chatRequestVersion) {
         chatError = caughtError;
+        // Keep the composer: fall back to the cached history.
+        chatProvider ??= EngineLlmProvider(
+          repository: currentRepository,
+          threadUuid: thread.uuid,
+          modelId: thread.defaultModelId ?? threadsWorkspace?.defaultModelId,
+        )..replaceEngineHistory(
+            _messageCache[thread.uuid] ?? const <ChatMessage>[],
+          );
       }
     } finally {
       if (!_disposed && requestVersion == _chatRequestVersion) {
@@ -2451,9 +2481,7 @@ final class DashboardController extends ChangeNotifier {
     chatError = null;
     isLoadingChat = false;
     final EngineRepository? currentRepository = repository;
-    chatProvider =
-        currentRepository == null ||
-            (workspaceUuid == null && threadUuid == null)
+    chatProvider = (workspaceUuid == null && threadUuid == null)
         ? null
         : EngineLlmProvider(
             repository: currentRepository,

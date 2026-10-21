@@ -454,14 +454,15 @@ final class _NodeTile extends StatelessWidget {
         preferred != null && nodeIdsEqual(node.id, preferred);
     final bool canApprove =
         runtime.canApprove && node.status == 'pending' && !view.isLocal;
+    final bool online = view.online || runtime.isOwnClientRow(view);
     final List<String> details = <String>[
       node.isEngine ? 'Full node' : 'Client',
       node.platform,
       if (node.status != 'active') node.status,
-      if (view.online && view.tier != null) view.tier!,
+      if (online && view.tier != null) view.tier!,
     ].where((String s) => s.isNotEmpty).toList();
     final String subtitle = <String>[
-      view.online ? 'Online' : 'Offline',
+      online ? 'Online' : 'Offline',
       ...details,
     ].join(', ');
     final bool canRemove = node.status == 'pending' && !view.isLocal;

@@ -338,6 +338,46 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   /// Re-runs the dashboard's connection resolver (set in `main.dart`).
   Future<void> Function()? onEngineAvailable;
 
+  /// Whether the dashboard's engine session is up (set in `main.dart`). The
+  /// dashboard controller is the single source of truth for "connected to the
+  /// engine"; the card, the device rows and the Refresh button follow it.
+  bool Function()? engineSessionUp;
+
+  bool? _lastSessionUp;
+
+  /// The dashboard's connection changed. A link this runtime believes is
+  /// connected is dropped when the session is really down, so the card never
+  /// says "Connected" while the composer is disabled, and the next
+  /// auto-connect pass reconnects instead of assuming the link is fine.
+  void engineSessionChanged({required bool up, required bool connecting}) {
+    bool changed = _lastSessionUp != up;
+    _lastSessionUp = up;
+    if (!hasLocalFullNode &&
+        !up &&
+        !connecting &&
+        engineState == EngineLinkState.connected) {
+      homeEngineId = null;
+      engineState = EngineLinkState.failed;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// True for the device row that is this app's own client of the local
+  /// engine (its earlier thin registration, folded under the engine). It has
+  /// no presence of its own, so it is online whenever the engine session is.
+  bool isOwnClientRow(NodeView view) {
+    final NodeView? engine = localNode;
+    final String? parent = view.parentId;
+    return hasLocalFullNode &&
+        engine != null &&
+        parent != null &&
+        !view.isLocal &&
+        !view.node.isEngine &&
+        nodeIdsEqual(parent, engine.node.id) &&
+        (engineSessionUp?.call() ?? false);
+  }
+
   Timer? _reconcileTimer;
   Timer? _homeTimer;
   Timer? _hysteresisTimer;
@@ -917,6 +957,14 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       offlineProblem = 'Refresh failed: $caught';
       _fail(caught);
     } finally {
+      // Refresh also reconnects: a dead engine session is brought back here,
+      // not only the device list.
+      if (autoConnect && !(engineSessionUp?.call() ?? true)) {
+        await _reconnect();
+        if (hasLocalFullNode && (engineSessionUp?.call() ?? false)) {
+          await _loadFromLocalEngine();
+        }
+      }
       refreshing = false;
       if (offlineProblem case final String problem) {
         debugPrint('Devices refresh: this device is not online: $problem');

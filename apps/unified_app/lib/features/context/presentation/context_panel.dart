@@ -273,8 +273,9 @@ final class _ThreadsSection extends StatelessWidget {
                         break;
                       }
                     }
+                    // The sidebar stays open: switching the workspace only
+                    // changes which threads the list shows.
                     controller.selectThreadWorkspace(workspace);
-                    onSelection?.call();
                   },
                 ),
               ),

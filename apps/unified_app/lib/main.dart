@@ -96,6 +96,16 @@ Future<void> main() async {
   HiveRuntime.shared.localEngineClient = () async =>
       controller.repository?.rest;
   HiveRuntime.shared.onEngineAvailable = controller.reconnectNow;
+  // One source of truth: the dashboard controller decides if the engine is
+  // connected; the hive runtime (card, device rows, Refresh) follows it.
+  HiveRuntime.shared.engineSessionUp = () => controller.isConnected;
+  controller.addListener(
+    () => HiveRuntime.shared.engineSessionChanged(
+      up: controller.isConnected,
+      connecting:
+          controller.connectionStatus == EngineConnectionStatus.connecting,
+    ),
+  );
   unawaited(_loadEngineAndRestoreAccount(controller, accountController));
   runApp(
     SubconsciousApp(
