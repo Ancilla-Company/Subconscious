@@ -301,6 +301,8 @@ class EngineHost:
             listener.listen(2048)
             self._listener = listener
             self._bound_port = int(listener.getsockname()[1])
+            # The OAuth sign-in for remote tools redirects the browser back to this port.
+            self.app.state.oauth_broker.set_port(self._bound_port)
 
             server = uvicorn.Server(
                 uvicorn.Config(

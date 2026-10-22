@@ -77,6 +77,32 @@
       "console": "terminal"
     },
     {
+      "name": "Chromium Extension (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:5050/",
+      "userDataDir": "${workspaceFolder}/.dart_tool/chromium-extension-profile",
+      "runtimeArgs": [
+        "--load-extension=${workspaceFolder}/apps/chromium_extension",
+        "--disable-extensions-except=${workspaceFolder}/apps/chromium_extension",
+        "--no-first-run"
+      ],
+      "webRoot": "${workspaceFolder}/apps/chromium_extension"
+    },
+    {
+      "name": "Chromium Extension (Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://127.0.0.1:5050/",
+      "userDataDir": "${workspaceFolder}/.dart_tool/edge-extension-profile",
+      "runtimeArgs": [
+        "--load-extension=${workspaceFolder}/apps/chromium_extension",
+        "--disable-extensions-except=${workspaceFolder}/apps/chromium_extension",
+        "--no-first-run"
+      ],
+      "webRoot": "${workspaceFolder}/apps/chromium_extension"
+    },
+    {
       "name": "TUI App (Connected)",
       "type": "dart",
       "request": "launch",

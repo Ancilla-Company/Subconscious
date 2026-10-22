@@ -155,9 +155,11 @@ final class EngineLlmProvider extends ChangeNotifier {
 
   void replaceEngineHistory(Iterable<core.ChatMessage> messages) {
     // Responses still streaming are not stored yet; keep them across a refresh.
-    final Map<EngineChatMessage, DateTime?> live = <EngineChatMessage, DateTime?>{
-      for (final EngineChatMessage message in _live) message: _timestamps[message],
-    };
+    final Map<EngineChatMessage, DateTime?> live =
+        <EngineChatMessage, DateTime?>{
+          for (final EngineChatMessage message in _live)
+            message: _timestamps[message],
+        };
     _history.clear();
     _timestamps.clear();
     for (final core.ChatMessage message in messages) {
@@ -262,7 +264,8 @@ final class EngineLlmProvider extends ChangeNotifier {
       },
       onError: (Object error, StackTrace stackTrace) {
         lastError = error;
-        if (!completion.isCompleted) completion.completeError(error, stackTrace);
+        if (!completion.isCompleted)
+          completion.completeError(error, stackTrace);
       },
       onDone: () {
         if (!completion.isCompleted) completion.complete();
@@ -303,7 +306,10 @@ final class EngineLlmProvider extends ChangeNotifier {
   /// Sends a message while a turn is running. The engine injects it into the
   /// running agent; if it arrives too late the engine answers it as a
   /// follow-up turn on the same stream. Returns false when it cannot be sent.
-  bool sendSteeringMessage(String prompt, {void Function(Object error)? onError}) {
+  bool sendSteeringMessage(
+    String prompt, {
+    void Function(Object error)? onError,
+  }) {
     final String? thread = threadUuid;
     if (thread == null || executorNodeId != null) return false;
     final EngineChatMessage user = EngineChatMessage.user(prompt);
@@ -313,19 +319,16 @@ final class EngineLlmProvider extends ChangeNotifier {
     EngineChatMessage? response;
     _engine
         .streamChat(content: prompt, threadUuid: thread, modelId: modelId)
-        .listen(
-          (String delta) {
-            // Deltas only arrive when the message became a follow-up turn.
-            if (response == null) {
-              response = EngineChatMessage.assistant()..ranOn = executorLabel;
-              _history.add(response!);
-              _timestamps[response!] = DateTime.now();
-            }
-            response!.append(delta);
-            notifyListeners();
-          },
-          onError: (Object error) => onError?.call(error),
-        );
+        .listen((String delta) {
+          // Deltas only arrive when the message became a follow-up turn.
+          if (response == null) {
+            response = EngineChatMessage.assistant()..ranOn = executorLabel;
+            _history.add(response!);
+            _timestamps[response!] = DateTime.now();
+          }
+          response!.append(delta);
+          notifyListeners();
+        }, onError: (Object error) => onError?.call(error));
     return true;
   }
 

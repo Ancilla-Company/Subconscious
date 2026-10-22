@@ -181,7 +181,6 @@ String? engineDataDirectory({required bool preferDev}) {
   return dev ? '$baseDirectory-dev' : baseDirectory;
 }
 
-
 const String _activeProfileFile = 'gui-active-profile.txt';
 final RegExp _profileIdPattern = RegExp(r'^[A-Za-z0-9_-]+$');
 
@@ -191,8 +190,9 @@ final RegExp _profileIdPattern = RegExp(r'^[A-Za-z0-9_-]+$');
 Future<List<String>> _discoveryDirectories(String root) async {
   final List<String> directories = <String>[];
   try {
-    final String id = (await File(_join(root, _activeProfileFile)).readAsString())
-        .trim();
+    final String id = (await File(
+      _join(root, _activeProfileFile),
+    ).readAsString()).trim();
     if (id != 'default' && _profileIdPattern.hasMatch(id)) {
       directories.add(_join(_join(root, 'profiles'), id));
     }

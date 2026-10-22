@@ -96,7 +96,9 @@ abstract final class TabDisplay {
             TextSpan(text: value.substring(start, index), style: segment),
           );
         }
-        out.add(TextSpan(text: '\t', style: lineStart ? leadingTab : middleTab));
+        out.add(
+          TextSpan(text: '\t', style: lineStart ? leadingTab : middleTab),
+        );
         start = index + 1;
       }
       lineStart = endsLine(unit);

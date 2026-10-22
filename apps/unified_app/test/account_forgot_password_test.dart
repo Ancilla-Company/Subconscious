@@ -95,7 +95,7 @@ Future<void> _openRequestStep(WidgetTester tester) async {
 
 Future<void> _reachConfirmStep(WidgetTester tester) async {
   await _openRequestStep(tester);
-  await tester.enterText(find.widgetWithText(TextFormField, 'Email address'), 'a@b.c');
+  await tester.enterText(find.widgetWithText(TextFormField, 'you@example.com'), 'a@b.c');
   await tester.tap(find.text('Send reset code'));
   await tester.pump();
   await tester.pump();
@@ -155,6 +155,24 @@ void main() {
     });
   });
 
+  testWidgets('sign-in email and password fields share one height and use the '
+      'settings label style', (WidgetTester tester) async {
+    final AccountController account = await _controller(tester, <http.Request>[]);
+    await _pump(tester, account);
+    final Finder email = find.widgetWithText(TextFormField, 'you@example.com');
+    final Finder password = find.widgetWithText(
+      TextFormField,
+      'At least 8 characters',
+    );
+    expect(email, findsOneWidget);
+    expect(password, findsOneWidget);
+    expect(tester.getSize(email).height, tester.getSize(password).height);
+    expect(find.text('Email address'), findsOneWidget);
+    expect(find.text('Password'), findsOneWidget);
+    // No floating label, helper text or suffix icon on the password field.
+    expect(find.byType(IconButton), findsNothing);
+  });
+
   group('AccountPanel forgot password', () {
     testWidgets('the link is shown on the sign-in form', (WidgetTester tester) async {
       final AccountController account = await _controller(tester, <http.Request>[]);
@@ -179,8 +197,11 @@ void main() {
       await _pump(tester, account);
       await _reachConfirmStep(tester);
       expect(find.text('Code sent to a@b.c'), findsOneWidget);
-      expect(find.widgetWithText(TextFormField, 'Reset code'), findsOneWidget);
-      expect(find.widgetWithText(TextFormField, 'New password'), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, 'Code from your email'), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, 'At least 8 characters'), findsOneWidget);
+    // Labels sit above the fields (the app's settings form style).
+    expect(find.text('Reset code'), findsOneWidget);
+    expect(find.text('New password'), findsOneWidget);
       final Finder resend = find.widgetWithText(TextButton, 'Send a new code in 60s');
       expect(tester.widget<TextButton>(resend).onPressed, isNull);
       expect(requests.single.url.path, '/auth/password-reset/request');
@@ -194,7 +215,7 @@ void main() {
       final AccountController account = await _controller(tester, requests);
       await _pump(tester, account);
       await _reachConfirmStep(tester);
-      await tester.enterText(find.widgetWithText(TextFormField, 'New password'), 'short');
+      await tester.enterText(find.widgetWithText(TextFormField, 'At least 8 characters'), 'short');
       await tester.tap(find.text('Reset password'));
       await tester.pump();
       expect(find.text('Enter the code from your email.'), findsOneWidget);
@@ -209,8 +230,8 @@ void main() {
       final AccountController account = await _controller(tester, requests);
       await _pump(tester, account);
       await _reachConfirmStep(tester);
-      await tester.enterText(find.widgetWithText(TextFormField, 'Reset code'), '123456');
-      await tester.enterText(find.widgetWithText(TextFormField, 'New password'), 'new-pass-1');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Code from your email'), '123456');
+      await tester.enterText(find.widgetWithText(TextFormField, 'At least 8 characters'), 'new-pass-1');
       await tester.tap(find.text('Reset password'));
       await tester.pump();
       await tester.pump();
@@ -225,8 +246,8 @@ void main() {
       final AccountController account = await _controller(tester, <http.Request>[], confirmStatus: 400);
       await _pump(tester, account);
       await _reachConfirmStep(tester);
-      await tester.enterText(find.widgetWithText(TextFormField, 'Reset code'), '000000');
-      await tester.enterText(find.widgetWithText(TextFormField, 'New password'), 'new-pass-1');
+      await tester.enterText(find.widgetWithText(TextFormField, 'Code from your email'), '000000');
+      await tester.enterText(find.widgetWithText(TextFormField, 'At least 8 characters'), 'new-pass-1');
       await tester.tap(find.text('Reset password'));
       await tester.pump();
       await tester.pump();

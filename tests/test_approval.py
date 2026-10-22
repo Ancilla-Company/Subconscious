@@ -47,3 +47,11 @@ def test_frozen_config_cannot_be_mutated():
     config = ApprovalConfig()
     with pytest.raises(AttributeError):
         config.query = False
+
+
+def test_requires_operation_uses_the_already_classified_operation_and_fails_closed():
+    config = ApprovalConfig(create=True, read=False, update=False, delete=True)
+    assert [config.requires_operation(op) for op in (CREATE, READ, UPDATE, DELETE)] == [True, False, False, True]
+    assert config.requires_operation("bogus") is True
+    # requires(name) is requires_operation(classify_operation(name))
+    assert config.requires("get_thing") is config.requires_operation(READ) is False

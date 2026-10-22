@@ -71,10 +71,8 @@ Future<void> main() async {
     session: HiveRuntime.shared,
     clientProvider: () => controller.repository?.rest,
     thinClient: !_hasLocalEngine,
-    onEngineProfile: (String profileId) => setActiveEngineProfile(
-      preferDev: preferDev,
-      profileId: profileId,
-    ),
+    onEngineProfile: (String profileId) =>
+        setActiveEngineProfile(preferDev: preferDev, profileId: profileId),
     onSessionChanged: () async {
       await controller.reconnectNow();
       if (!HiveRuntime.shared.hasLocalFullNode) return;
@@ -106,6 +104,7 @@ Future<void> main() async {
           controller.connectionStatus == EngineConnectionStatus.connecting,
     ),
   );
+  controller.onConnectionAttemptFailed = HiveRuntime.shared.engineAttemptFailed;
   unawaited(_loadEngineAndRestoreAccount(controller, accountController));
   runApp(
     SubconsciousApp(

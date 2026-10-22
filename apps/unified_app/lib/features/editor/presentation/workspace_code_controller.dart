@@ -21,7 +21,9 @@ final class CopyIndentModifier extends CodeModifier {
     EditorParams params,
   ) {
     final int caret = sel.start.clamp(0, text.length);
-    final int lineStart = caret == 0 ? 0 : text.lastIndexOf('\n', caret - 1) + 1;
+    final int lineStart = caret == 0
+        ? 0
+        : text.lastIndexOf('\n', caret - 1) + 1;
     int end = lineStart;
     while (end < caret &&
         (text.codeUnitAt(end) == 0x20 || text.codeUnitAt(end) == 0x09)) {

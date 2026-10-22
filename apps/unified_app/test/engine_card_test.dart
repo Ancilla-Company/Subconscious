@@ -5,11 +5,13 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:unified_app/features/account/account_controller.dart';
 import 'package:unified_app/features/dashboard/controller/dashboard_controller.dart';
 import 'package:unified_app/features/dashboard/presentation/window_caption_widgets.dart';
+import 'package:unified_app/features/hive/engine_card_view.dart';
 import 'package:unified_app/features/hive/hive_runtime.dart';
 import 'package:unified_app/features/hive/presentation/nodes_page.dart';
 
@@ -59,6 +61,19 @@ Future<HiveRuntime> _runtime() async {
 
 Future<EngineRepository?> _noEngine({Uri? explicitEndpoint, String? explicitToken}) async => null;
 
+void _singleSourceOfTruthTests() {
+  test('the card never says connected while the dashboard session is down', () async {
+    final HiveRuntime runtime = await _runtime();
+    runtime.engineState = EngineLinkState.connected;
+    runtime.homeEngineId = 'e1';
+    runtime.engineSessionUp = () => false;
+    expect(runtime.engineState, EngineLinkState.failed);
+    expect(engineCardViewFor(runtime).title, isNot(startsWith('Connected')));
+    runtime.engineSessionUp = () => true;
+    expect(runtime.engineState, EngineLinkState.connected);
+  });
+}
+
 /// `label:enabled` for every button under [root], in tree order.
 List<String> _buttons(Finder root) {
   final List<String> seen = <String>[];
@@ -101,6 +116,7 @@ final class _Case {
 }
 
 void main() {
+  _singleSourceOfTruthTests();
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues(<String, String>{}));
 
@@ -238,12 +254,12 @@ void main() {
 
     runtime.nodes = <NodeView>[_engine('a')];
     runtime.engineState = EngineLinkState.connecting;
-    final (Color, String) connecting = captionPresentation(
+    final (AppStatus, String) connecting = captionPresentation(
       dashboard.connectionStatus,
       runtime,
     );
     expect(connecting.$2, 'connecting');
-    expect(connecting.$1, Colors.amber);
+    expect(connecting.$1, AppStatus.connecting);
 
     runtime.engineState = EngineLinkState.disconnected;
     runtime.nodes = <NodeView>[_engine('a', online: false)];

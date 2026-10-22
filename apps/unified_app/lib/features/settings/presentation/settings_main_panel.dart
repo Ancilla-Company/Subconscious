@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../account/account_controller.dart';
 import '../../account/presentation/account_panel.dart';
@@ -30,7 +31,7 @@ final class SettingsMainPanel extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (BuildContext context, Widget? child) => Theme(
-      data: settingsFormTheme(context),
+      data: appFormTheme(context),
       child: SizedBox.expand(
         child: ColoredBox(
           color: Theme.of(context).colorScheme.surface,
@@ -41,7 +42,7 @@ final class SettingsMainPanel extends StatelessWidget {
             ),
             SettingsPage.models => _ModelsSettingsPage(controller: controller),
             SettingsPage.tools => _ToolsSettingsPage(controller: controller),
-            SettingsPage.skills => const _SkillsSettingsPage(),
+            SettingsPage.skills => _SkillsSettingsPage(controller: controller),
             SettingsPage.account => AccountPanel(
               controller: accountController,
               lanAccess: _supportsRemoteEngineConnection
@@ -114,9 +115,9 @@ final class _GeneralSettingsPage extends StatelessWidget {
           EngineConnectionStatus.disconnected;
       return _SettingsBody(
         children: <Widget>[
-          const _SectionHeading(title: 'General Settings'),
+          const AppSectionHeading(title: 'General Settings'),
           if (_supportsRemoteEngineConnection) ...<Widget>[
-            const _FieldLabel('Engine Connection'),
+            const AppFieldLabel('Engine Connection'),
             _RemoteEngineConnectionForm(controller: dashboardController),
           ],
           // Fixed height so the form does not jump while a load runs.
@@ -154,46 +155,46 @@ final class _GeneralSettingsPage extends StatelessWidget {
   );
 
   List<Widget> _fields() => <Widget>[
-      _LabeledDropdown(
-        label: 'Mode',
-        value: controller.modeValue,
-        options: _modes,
-        onChanged: (String value) => controller.updateGeneralSetting(
-          DashboardSettingsController.modeKey,
-          value,
-        ),
+    AppDropdown(
+      label: 'Mode',
+      value: controller.modeValue,
+      options: _modes,
+      onChanged: (String value) => controller.updateGeneralSetting(
+        DashboardSettingsController.modeKey,
+        value,
       ),
-      _LabeledDropdown(
-        label: 'Colour Theme',
-        value: controller.colourThemeValue,
-        options: _colours,
-        onChanged: (String value) => controller.updateGeneralSetting(
-          DashboardSettingsController.colourThemeKey,
-          value,
-        ),
+    ),
+    AppDropdown(
+      label: 'Colour Theme',
+      value: controller.colourThemeValue,
+      options: _colours,
+      onChanged: (String value) => controller.updateGeneralSetting(
+        DashboardSettingsController.colourThemeKey,
+        value,
       ),
-      _LabeledDropdown(
-        label: 'Sidebar position',
-        value: controller.sidebarPositionValue,
-        options: _sidebarPositions,
-        onChanged: (String value) => controller.updateGeneralSetting(
-          DashboardSettingsController.sidebarPositionKey,
-          value,
-        ),
+    ),
+    AppDropdown(
+      label: 'Sidebar position',
+      value: controller.sidebarPositionValue,
+      options: _sidebarPositions,
+      onChanged: (String value) => controller.updateGeneralSetting(
+        DashboardSettingsController.sidebarPositionKey,
+        value,
       ),
-      _LabeledDropdown(
-        label: 'Panel configuration',
-        value: controller.panelConfigurationValue,
-        options: _panelConfigurations,
-        onChanged: (String value) => controller.updateGeneralSetting(
-          DashboardSettingsController.panelConfigurationKey,
-          value,
-        ),
+    ),
+    AppDropdown(
+      label: 'Panel configuration',
+      value: controller.panelConfigurationValue,
+      options: _panelConfigurations,
+      onChanged: (String value) => controller.updateGeneralSetting(
+        DashboardSettingsController.panelConfigurationKey,
+        value,
       ),
-      if (!_supportsRemoteEngineConnection) ...<Widget>[
-        const _FieldLabel('Data Folder'),
-        const _DataDirectoryField(),
-      ],
+    ),
+    if (!_supportsRemoteEngineConnection) ...<Widget>[
+      const AppFieldLabel('Data Folder'),
+      const _DataDirectoryField(),
+    ],
   ];
 }
 
@@ -210,7 +211,7 @@ final class _LanAccessSection extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       Text('LAN access', style: Theme.of(context).textTheme.titleMedium),
-      const _FieldLabel('Joining Token'),
+      const AppFieldLabel('Joining Token'),
       _JoiningTokenField(token: token),
       if (_supportsWindowsFirewall) const _WindowsFirewallSettings(),
     ],
@@ -246,23 +247,11 @@ final class _EngineStatusBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 12),
-    child: Row(
-      children: <Widget>[
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(message, style: Theme.of(context).textTheme.titleSmall),
-              Text(
-                detail,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.error,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
+    child: AppBanner(
+      tone: AppBannerTone.error,
+      title: message,
+      message: detail,
+      actions: <Widget>[
         OutlinedButton(
           onPressed: () => unawaited(onRetry()),
           child: const Text('Retry'),
@@ -335,14 +324,11 @@ final class _WindowsFirewallSettingsState
         <String, Object>{'enabled': enabled, 'port': ?port},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            enabled
-                ? 'Windows Firewall now allows local-subnet access on TCP $port.'
-                : 'The Subconscious Engine firewall rule was removed.',
-          ),
-        ),
+      showAppSnack(
+        context,
+        enabled
+            ? 'Windows Firewall now allows local-subnet access on TCP $port.'
+            : 'The Subconscious Engine firewall rule was removed.',
       );
     } on PlatformException catch (error) {
       if (!mounted) return;
@@ -365,7 +351,7 @@ final class _WindowsFirewallSettingsState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        const _FieldLabel('Engine IP Address'),
+        const AppFieldLabel('Engine IP Address'),
         _EngineConnectionValueField(
           value: endpoint?.host,
           unavailableText: _isLoadingEndpoint
@@ -374,7 +360,7 @@ final class _WindowsFirewallSettingsState
           copyMessage: 'Engine IP address copied',
           icon: FluentIcons.globe_20_regular,
         ),
-        const _FieldLabel('Engine Port'),
+        const AppFieldLabel('Engine Port'),
         _EngineConnectionValueField(
           value: endpoint?.port.toString(),
           unavailableText: _isLoadingEndpoint
@@ -383,7 +369,7 @@ final class _WindowsFirewallSettingsState
           copyMessage: 'Engine port copied',
           icon: FluentIcons.plug_connected_20_regular,
         ),
-        const _FieldLabel('Mobile and LAN Access'),
+        const AppFieldLabel('Mobile and LAN Access'),
         const Text(
           'Allow devices on the local subnet to reach this computer’s engine. Windows will request administrator approval. The engine must also be started with --lan.',
         ),
@@ -394,12 +380,9 @@ final class _WindowsFirewallSettingsState
               : 'Rule scope: TCP ${endpoint.port} · LocalSubnet · active Private/Public profile',
           style: Theme.of(context).textTheme.bodySmall,
         ),
-        if (_error != null) _SettingsError(error: _error!),
+        if (_error != null) AppFormError(error: _error!),
         const SizedBox(height: 12),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 8,
-          runSpacing: 8,
+        AppButtonRow(
           children: <Widget>[
             OutlinedButton(
               onPressed: _isUpdating ? null : () => _setFirewallRule(false),
@@ -438,22 +421,12 @@ final class _EngineConnectionValueField extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     children: <Widget>[
       Expanded(
-        child: SizedBox(
+        child: AppTextField(
+          key: ValueKey<String?>(value),
+          initialValue: value ?? unavailableText,
+          readOnly: true,
           height: 32,
-          child: TextFormField(
-            key: ValueKey<String?>(value),
-            initialValue: value ?? unavailableText,
-            readOnly: true,
-            textAlignVertical: TextAlignVertical.center,
-            decoration: InputDecoration(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-              prefixIcon: Icon(icon, size: 17),
-              prefixIconConstraints: const BoxConstraints(
-                minWidth: 32,
-                minHeight: 32,
-              ),
-            ),
-          ),
+          prefixIcon: Icon(icon, size: 17),
         ),
       ),
       const SizedBox(width: 8),
@@ -465,8 +438,7 @@ final class _EngineConnectionValueField extends StatelessWidget {
             : () async {
                 await Clipboard.setData(ClipboardData(text: value!));
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(content: Text(copyMessage)));
+                  showAppSnack(context, copyMessage);
                 }
               },
       ),
@@ -524,9 +496,7 @@ final class _RemoteEngineConnectionFormState
       if (error == null) _token.clear();
     });
     if (error == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Connected to the engine.')));
+      showAppSnack(context, 'Connected to the engine.');
     }
   }
 
@@ -537,42 +507,40 @@ final class _RemoteEngineConnectionFormState
       const Text(
         'Connect to an engine on this Wi-Fi network. Enter the address and port shown by the engine, then its joining token.',
       ),
-      const _FieldLabel('Engine host or IP address'),
-      TextField(
+      AppTextField(
+        label: 'Engine host or IP address',
         controller: _host,
         enabled: !_isConnecting,
         autocorrect: false,
         enableSuggestions: false,
         keyboardType: TextInputType.url,
         textInputAction: TextInputAction.next,
-        decoration: const InputDecoration(hintText: '192.168.1.42'),
+        hintText: '192.168.1.42',
       ),
-      const _FieldLabel('Engine port'),
-      TextField(
+      AppTextField(
+        label: 'Engine port',
         controller: _port,
         enabled: !_isConnecting,
         keyboardType: TextInputType.number,
         textInputAction: TextInputAction.next,
-        decoration: const InputDecoration(hintText: 'Port shown by the engine'),
+        hintText: 'Port shown by the engine',
       ),
-      const _FieldLabel('Joining token'),
-      TextField(
+      AppTextField(
+        label: 'Joining token',
         controller: _token,
         enabled: !_isConnecting,
         autocorrect: false,
         enableSuggestions: false,
         obscureText: true,
-        decoration: InputDecoration(
-          hintText: widget.controller.hasExplicitToken
-              ? 'A token is already configured'
-              : 'Paste the joining token',
-          helperText: widget.controller.hasExplicitToken
-              ? 'Leave blank to reuse the configured token for this session.'
-              : 'The token is retained only for this app session.',
-        ),
+        hintText: widget.controller.hasExplicitToken
+            ? 'A token is already configured'
+            : 'Paste the joining token',
+        helperText: widget.controller.hasExplicitToken
+            ? 'Leave blank to reuse the configured token for this session.'
+            : 'The token is retained only for this app session.',
         onSubmitted: (_) => _isConnecting ? null : _connect(),
       ),
-      if (_error != null) _SettingsError(error: _error!),
+      if (_error != null) AppFormError(error: _error!),
       const SizedBox(height: 12),
       Align(
         alignment: Alignment.centerRight,
@@ -581,45 +549,6 @@ final class _RemoteEngineConnectionFormState
           icon: const Icon(FluentIcons.plug_connected_20_regular, size: 16),
           label: Text(_isConnecting ? 'Connecting…' : 'Connect'),
         ),
-      ),
-    ],
-  );
-}
-
-final class _LabeledDropdown extends StatelessWidget {
-  const _LabeledDropdown({
-    required this.label,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-    this.enabled = true,
-  });
-
-  final String label;
-  final String value;
-  final List<String> options;
-  final ValueChanged<String> onChanged;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      _FieldLabel(label),
-      DropdownButtonFormField<String>(
-        key: ValueKey<String>('$label:$value'),
-        initialValue: options.contains(value) ? value : options.first,
-        style: Theme.of(context).textTheme.bodyMedium
-            ?.copyWith(fontWeight: FontWeight.normal),
-        items: <DropdownMenuItem<String>>[
-          for (final String option in options)
-            DropdownMenuItem<String>(value: option, child: Text(option)),
-        ],
-        onChanged: !enabled
-            ? null
-            : (String? next) {
-                if (next != null) onChanged(next);
-              },
       ),
     ],
   );
@@ -685,11 +614,11 @@ final class _ModelsSettingsPageState extends State<_ModelsSettingsPage> {
         ),
         if (widget.controller.isLoadingModels) const LinearProgressIndicator(),
         if (!hasOpenEditor && widget.controller.modelsError != null)
-          _SettingsError(error: widget.controller.modelsError!),
+          AppFormError(error: widget.controller.modelsError!),
         if (!widget.controller.isLoadingModels &&
             widget.controller.modelConfigurations.isEmpty &&
             !_isCreating)
-          const _EmptySettingsMessage(
+          const AppEmptyMessage(
             'No model configurations yet. Add one to get started.',
           ),
         if (_isCreating)
@@ -890,57 +819,55 @@ final class _ModelEditorState extends State<_ModelEditor> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      const _FieldLabel('Alias'),
-      TextField(
+      AppTextField(
+        label: 'Alias',
         controller: _alias,
         enabled: !_isSubmitting,
-        decoration: const InputDecoration(hintText: 'Configuration name'),
+        hintText: 'Configuration name',
       ),
-      _LabeledDropdown(
+      AppDropdown(
         label: 'Provider',
         value: _modelProviders.contains(_provider) ? _provider : 'Custom',
         options: _modelProviders,
         enabled: !_isSubmitting,
         onChanged: (String value) => setState(() => _provider = value),
       ),
-      const _FieldLabel('Model'),
-      TextField(
+      AppTextField(
+        label: 'Model',
         controller: _model,
         enabled: !_isSubmitting,
-        decoration: const InputDecoration(hintText: 'Model name'),
+        hintText: 'Model name',
       ),
-      const _FieldLabel('API Key'),
-      TextField(
+      AppTextField(
+        label: 'API Key',
         controller: _apiKey,
         enabled: !_isSubmitting,
         obscureText: true,
-        decoration: InputDecoration(
-          helperText: widget.existing?.hasApiKey ?? false
-              ? 'Leave blank to keep the saved API key.'
-              : 'Stored encrypted by the engine.',
-        ),
+        helperText: widget.existing?.hasApiKey ?? false
+            ? 'Leave blank to keep the saved API key.'
+            : 'Stored encrypted by the engine.',
       ),
-      const _FieldLabel('Base URL'),
-      TextField(
+      AppTextField(
+        label: 'Base URL',
         controller: _baseUrl,
         enabled: !_isSubmitting,
-        decoration: const InputDecoration(hintText: 'Optional endpoint URL'),
+        hintText: 'Optional endpoint URL',
       ),
-      const _FieldLabel('Context Window (tokens)'),
-      TextField(
+      AppTextField(
+        label: 'Context Window (tokens)',
         controller: _contextWindow,
         enabled: !_isSubmitting,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(hintText: 'Optional token limit'),
+        hintText: 'Optional token limit',
       ),
-      const _FieldLabel('Capabilities'),
+      const AppFieldLabel('Capabilities'),
       const Text(
         'Auto lets the engine decide from what it knows about the model. '
         'Set a value only to correct it. Features such as dictation, read '
         'aloud and realtime voice appear when a model supports them.',
       ),
       for (final (String flag, String label) in _capabilityChoices)
-        _LabeledDropdown(
+        AppDropdown(
           label: label,
           value: switch (_capabilities[flag]) {
             true => 'Yes',
@@ -957,12 +884,9 @@ final class _ModelEditorState extends State<_ModelEditor> {
             }
           }),
         ),
-      if (_error != null) _SettingsError(error: _error!),
+      if (_error != null) AppFormError(error: _error!),
       const SizedBox(height: 18),
-      Wrap(
-        alignment: WrapAlignment.end,
-        spacing: 8,
-        runSpacing: 8,
+      AppButtonRow(
         children: <Widget>[
           if (widget.existing != null)
             TextButton(
@@ -1038,21 +962,21 @@ final class _ToolsSettingsPageState extends State<_ToolsSettingsPage> {
           add: _startCreating,
         ),
         const Text(
-          'Configure scripts, MCP servers, and API tools. Credentials are stored encrypted and are never returned to this app.',
+          'Register MCP servers and command line tools the assistant can use. Credentials are stored encrypted and are never returned to this app.',
         ),
         if (widget.controller.isLoadingTools) const LinearProgressIndicator(),
         if (!hasOpenEditor && widget.controller.toolsError != null)
-          _SettingsError(error: widget.controller.toolsError!),
+          AppFormError(error: widget.controller.toolsError!),
         if (!widget.controller.isLoadingTools &&
             widget.controller.tools.isEmpty &&
             !_isCreating)
-          const _EmptySettingsMessage(
+          const AppEmptyMessage(
             'No configured tools yet. Add one to make it available in policies.',
           ),
         if (_isCreating)
           _SettingsExpansionCard(
             title: 'New tool',
-            subtitle: 'Configure a script, MCP server, or API tool',
+            subtitle: 'Register an MCP server or command line tool',
             trailing: 'unsaved',
             expanded: true,
             onToggle: _closeEditor,
@@ -1070,13 +994,16 @@ final class _ToolsSettingsPageState extends State<_ToolsSettingsPage> {
                 ? tool.alias!
                 : tool.name,
             subtitle: <String>[
-              tool.toolType,
-              if (tool.toolType == 'script' && tool.scriptPath != null)
-                tool.scriptPath!,
-              if (tool.toolType != 'script' && tool.endpointUrl != null)
-                tool.endpointUrl!,
+              _toolTypeLabel(tool.toolType),
+              if (_toolLocation(tool) != null) _toolLocation(tool)!,
             ].join(' · '),
-            trailing: tool.hasAuthConfig ? 'Credentials saved' : tool.status,
+            trailing: tool.authType == 'oauth'
+                ? (tool.oauthConnected ?? false)
+                      ? 'Connected'
+                      : 'Not connected'
+                : tool.hasAuthConfig
+                ? 'Credentials saved'
+                : tool.status,
             expanded: _expandedToolUuid == tool.uuid,
             onToggle: () => _toggleTool(tool.uuid),
             editor: _expandedToolUuid == tool.uuid
@@ -1113,57 +1040,51 @@ final class _SettingsExpansionCard extends StatelessWidget {
   final Widget? editor;
 
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) => AppSectionCard(
+    title: title,
+    subtitle: subtitle,
     margin: const EdgeInsets.only(top: 10),
-    clipBehavior: Clip.antiAlias,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(6)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        ListTile(
-          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text(
-            subtitle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+    expanded: expanded && editor != null,
+    onToggle: onToggle,
+    trailing: trailing == null
+        ? null
+        : ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 220),
+            child: Text(
+              trailing!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
           ),
-          onTap: onToggle,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              if (trailing != null)
-                Text(trailing!, style: Theme.of(context).textTheme.labelSmall),
-              const SizedBox(width: 8),
-              Icon(
-                expanded
-                    ? FluentIcons.chevron_up_20_regular
-                    : FluentIcons.chevron_down_20_regular,
-                size: 17,
-              ),
-            ],
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          alignment: Alignment.topCenter,
-          child: expanded && editor != null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 2, 16, 16),
-                      child: editor,
-                    ),
-                  ],
-                )
-              : const SizedBox.shrink(),
-        ),
-      ],
-    ),
+    child: editor ?? const SizedBox.shrink(),
   );
+}
+
+const String _mcpToolLabel = 'MCP server';
+const String _cliToolLabel = 'Command line tool';
+const String _stdioConnectionLabel = 'Command (stdio)';
+const String _httpConnectionLabel = 'HTTP URL';
+
+String _toolTypeLabel(String toolType) => switch (toolType) {
+  'mcp' => _mcpToolLabel,
+  'cli' => _cliToolLabel,
+  'script' => 'Script (legacy)',
+  'api' => 'API (legacy)',
+  _ => toolType,
+};
+
+String? _toolLocation(ToolRegistryEntry tool) {
+  final String? value = switch (tool.toolType) {
+    'script' => tool.scriptPath,
+    'cli' => tool.command,
+    'mcp' =>
+      (tool.command?.trim().isNotEmpty ?? false)
+          ? tool.command
+          : tool.endpointUrl,
+    _ => tool.endpointUrl,
+  };
+  return value == null || value.trim().isEmpty ? null : value;
 }
 
 final class _ToolEditor extends StatefulWidget {
@@ -1187,84 +1108,251 @@ final class _ToolEditor extends StatefulWidget {
 }
 
 final class _ToolEditorState extends State<_ToolEditor> {
-  static const List<String> _toolTypes = <String>['script', 'mcp', 'api'];
   static const List<String> _scriptLanguages = <String>[
     'python',
     'javascript',
     'typescript',
   ];
   static const List<String> _authenticationTypes = <String>['None', 'API key'];
+  static const List<String> _mcpAuthenticationTypes = <String>[
+    'None',
+    'API key',
+    'OAuth',
+  ];
+  static const List<String> _connectionLabels = <String>[
+    _stdioConnectionLabel,
+    _httpConnectionLabel,
+  ];
 
   late final TextEditingController _alias;
+  late final TextEditingController _description;
   late final TextEditingController _scriptPath;
   late final TextEditingController _endpointUrl;
   late final TextEditingController _authConfig;
+  late final TextEditingController _oauthClientId;
+  late final TextEditingController _oauthClientSecret;
+  late final TextEditingController _oauthScopes;
+  final TextEditingController _oauthPaste = TextEditingController();
+  late final TextEditingController _command;
+  late final TextEditingController _args;
+  late final TextEditingController _cwd;
+  late final TextEditingController _env;
   late String _toolType;
+  late bool _isHttp;
   late String _scriptLanguage;
   late String _authType;
   String? _error;
   bool _isSubmitting = false;
+
+  /// The sign-in started by Connect that is waiting for the pasted address.
+  String? _pendingAuthId;
+  bool _isConnecting = false;
+
+  /// Legacy rows keep their own type in the dropdown so nothing is lost.
+  List<String> get _toolTypes => <String>[
+    'mcp',
+    'cli',
+    if (widget.existing?.toolType == 'script' ||
+        widget.existing?.toolType == 'api')
+      widget.existing!.toolType,
+  ];
 
   @override
   void initState() {
     super.initState();
     final ToolRegistryEntry? existing = widget.existing;
     _alias = TextEditingController(text: existing?.alias ?? existing?.name);
+    _description = TextEditingController(text: existing?.description);
     _scriptPath = TextEditingController(text: existing?.scriptPath);
     _endpointUrl = TextEditingController(text: existing?.endpointUrl);
     _authConfig = TextEditingController();
-    _toolType = _toolTypes.contains(existing?.toolType)
+    _oauthClientId = TextEditingController(text: existing?.oauthClientId);
+    // Write-only: the saved secret is never shown or prefilled.
+    _oauthClientSecret = TextEditingController();
+    _oauthScopes = TextEditingController(text: existing?.oauthScopes);
+    _oauthPaste.addListener(_onPasteChanged);
+    _command = TextEditingController(text: existing?.command);
+    _args = TextEditingController(text: existing?.args.join('\n'));
+    _cwd = TextEditingController(text: existing?.cwd);
+    _env = TextEditingController(
+      text: existing?.env.entries
+          .map(
+            (MapEntry<String, String> entry) => '${entry.key}=${entry.value}',
+          )
+          .join('\n'),
+    );
+    _toolType =
+        <String>['mcp', 'cli', 'script', 'api'].contains(existing?.toolType)
         ? existing!.toolType
-        : 'script';
+        : 'mcp';
+    _isHttp =
+        existing != null &&
+        (existing.transport == 'http' ||
+            ((existing.endpointUrl?.trim().isNotEmpty ?? false) &&
+                !(existing.command?.trim().isNotEmpty ?? false)));
     _scriptLanguage = _scriptLanguages.contains(existing?.scriptLanguage)
         ? existing!.scriptLanguage!
         : 'python';
-    _authType =
-        existing?.authType?.toLowerCase() == 'api_key' ||
-            (existing?.hasAuthConfig ?? false)
+    _authType = existing?.authType?.toLowerCase() == 'oauth'
+        ? 'oauth'
+        : existing?.authType?.toLowerCase() == 'api_key' ||
+              (existing?.hasAuthConfig ?? false)
         ? 'api_key'
         : 'None';
   }
 
+  void _onPasteChanged() => setState(() {});
+
   @override
   void dispose() {
     _alias.dispose();
+    _description.dispose();
     _scriptPath.dispose();
     _endpointUrl.dispose();
     _authConfig.dispose();
+    _oauthClientId.dispose();
+    _oauthClientSecret.dispose();
+    _oauthScopes.dispose();
+    _oauthPaste.removeListener(_onPasteChanged);
+    _oauthPaste.dispose();
+    _command.dispose();
+    _args.dispose();
+    _cwd.dispose();
+    _env.dispose();
     super.dispose();
   }
 
+  bool get _isScript => _toolType == 'script';
+  bool get _isCli => _toolType == 'cli';
+  bool get _isStdio => _toolType == 'mcp' && !_isHttp;
+  bool get _isEndpoint => _toolType == 'api' || (_toolType == 'mcp' && _isHttp);
+  bool get _hasCommand => _isCli || _isStdio;
+
+  /// OAuth only exists for MCP servers reached over HTTP.
+  bool get _isOAuth => _toolType == 'mcp' && _isHttp && _authType == 'oauth';
+
+  String get _authenticationLabel => switch (_authType) {
+    'api_key' => 'API key',
+    'oauth' => 'OAuth',
+    _ => 'None',
+  };
+
+  List<String> _parseArgs() => <String>[
+    for (final String line in _args.text.split('\n'))
+      if (line.trim().isNotEmpty) line.trim(),
+  ];
+
+  /// Null when a line is not `KEY=value`.
+  Map<String, String>? _parseEnv() {
+    final Map<String, String> env = <String, String>{};
+    for (final String raw in _env.text.split('\n')) {
+      final String line = raw.trim();
+      if (line.isEmpty) continue;
+      final int separator = line.indexOf('=');
+      if (separator <= 0) return null;
+      env[line.substring(0, separator).trim()] = line.substring(separator + 1);
+    }
+    return env;
+  }
+
+  String? _validate() {
+    if (_alias.text.trim().isEmpty) {
+      return _isScript || _toolType == 'api'
+          ? 'Alias and the selected tool location are required.'
+          : 'Alias is required.';
+    }
+    if (_isScript && _scriptPath.text.trim().isEmpty) {
+      return 'Alias and the selected tool location are required.';
+    }
+    if (_isEndpoint) {
+      final String url = _endpointUrl.text.trim();
+      if (url.isEmpty) {
+        return _toolType == 'api'
+            ? 'Alias and the selected tool location are required.'
+            : 'Endpoint URL is required.';
+      }
+      if (_toolType == 'mcp') {
+        final Uri? uri = Uri.tryParse(url);
+        if (uri == null ||
+            !(uri.scheme == 'http' || uri.scheme == 'https') ||
+            uri.host.isEmpty) {
+          return _isOAuth
+              ? 'OAuth needs an endpoint URL starting with http:// or https://.'
+              : 'Endpoint URL must start with http:// or https://.';
+        }
+      }
+    }
+    if (_hasCommand && _command.text.trim().isEmpty) {
+      return 'Command is required.';
+    }
+    if (_isCli && _description.text.trim().isEmpty) {
+      return 'Description is required for command line tools.';
+    }
+    if (_isStdio && _parseEnv() == null) {
+      return 'Environment lines must look like KEY=value.';
+    }
+    return null;
+  }
+
   Future<void> _save() async {
-    final bool isScript = _toolType == 'script';
-    final bool isEndpoint = _toolType == 'mcp' || _toolType == 'api';
-    if (_alias.text.trim().isEmpty ||
-        (isScript && _scriptPath.text.trim().isEmpty) ||
-        (isEndpoint && _endpointUrl.text.trim().isEmpty)) {
-      setState(
-        () => _error = 'Alias and the selected tool location are required.',
-      );
+    final String? problem = _validate();
+    if (problem != null) {
+      setState(() => _error = problem);
       return;
     }
     setState(() {
       _error = null;
       _isSubmitting = true;
     });
+    final ToolRegistryEntry? existing = widget.existing;
+    final bool hadCommand = existing?.command?.trim().isNotEmpty ?? false;
+    final bool hadEndpoint = existing?.endpointUrl?.trim().isNotEmpty ?? false;
+    final bool hadClientId =
+        existing?.oauthClientId?.trim().isNotEmpty ?? false;
     final bool saved = await widget.controller.saveTool(
-      existing: widget.existing,
+      existing: existing,
       request: ToolRegistryRequest(
         alias: _alias.text.trim(),
-        description: widget.existing?.description,
+        description: _nullIfEmpty(_description.text),
         toolType: _toolType,
-        scriptPath: isScript ? _scriptPath.text.trim() : null,
-        scriptLanguage: isScript ? _scriptLanguage : null,
-        endpointUrl: isEndpoint ? _endpointUrl.text.trim() : null,
-        authType: isEndpoint && _authType == 'api_key' ? 'api_key' : null,
-        authConfigJson: isEndpoint && _authType == 'api_key'
+        scriptPath: _isScript ? _scriptPath.text.trim() : null,
+        scriptLanguage: _isScript ? _scriptLanguage : null,
+        endpointUrl: _isEndpoint ? _endpointUrl.text.trim() : null,
+        clearEndpointUrl: !_isEndpoint && hadEndpoint,
+        authType: _isOAuth
+            ? 'oauth'
+            : _isEndpoint && _authType == 'api_key'
+            ? 'api_key'
+            : null,
+        authConfigJson: _isEndpoint && _authType == 'api_key'
             ? _nullIfEmpty(_authConfig.text)
             : null,
-        clearAuthConfig: !isEndpoint || _authType != 'api_key',
-        status: widget.existing?.status,
+        clearAuthConfig: !_isEndpoint || _authType != 'api_key',
+        oauthClientId: _isOAuth
+            ? _oauthValue(_oauthClientId, hadClientId)
+            : null,
+        oauthClientSecret: _isOAuth
+            ? _nullIfEmpty(_oauthClientSecret.text)
+            : null,
+        // Dropping a custom client id back to automatic registration also
+        // drops the secret that belonged to it.
+        clearOauthClientSecret:
+            _isOAuth &&
+            hadClientId &&
+            _oauthClientId.text.trim().isEmpty &&
+            _oauthClientSecret.text.trim().isEmpty,
+        oauthScopes: _isOAuth
+            ? _oauthValue(
+                _oauthScopes,
+                existing?.oauthScopes?.trim().isNotEmpty ?? false,
+              )
+            : null,
+        command: _hasCommand ? _command.text.trim() : null,
+        args: _hasCommand ? _parseArgs() : null,
+        env: _isStdio ? _parseEnv() : null,
+        cwd: _hasCommand ? _nullIfEmpty(_cwd.text) : null,
+        clearCommand: !_hasCommand && hadCommand,
+        status: existing?.status,
       ),
     );
     if (!mounted) return;
@@ -1297,28 +1385,354 @@ final class _ToolEditorState extends State<_ToolEditor> {
     });
   }
 
+  /// The trimmed text, or null to leave the saved value alone. An empty string
+  /// is sent only to clear a value that was saved before.
+  String? _oauthValue(TextEditingController field, bool hadValue) {
+    final String? value = _nullIfEmpty(field.text);
+    return value ?? (hadValue ? '' : null);
+  }
+
+  String _describeToolError(Object error) =>
+      error is EngineApiException ? error.engineMessage ?? '$error' : '$error';
+
+  /// Starts the browser sign-in; the address the browser ends on can be pasted
+  /// back below when this device cannot be reached by the redirect.
+  Future<void> _connect() async {
+    final ToolRegistryEntry? existing = widget.existing;
+    if (existing == null) return;
+    setState(() {
+      _error = null;
+      _isConnecting = true;
+    });
+    final ToolAuthorizeResult? result = await widget.controller.authorizeTool(
+      existing,
+    );
+    if (!mounted) return;
+    if (result == null) {
+      setState(() {
+        _error = _describeToolError(widget.controller.toolsError!);
+        _isConnecting = false;
+      });
+      return;
+    }
+    final String? url = result.url;
+    final String? authId = result.authId;
+    String? problem;
+    if (!result.isConnected && url != null && authId != null) {
+      _oauthPaste.clear();
+      final Uri? uri = Uri.tryParse(url);
+      if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
+        problem = 'The sign-in address is not a web link.';
+      } else {
+        try {
+          if (!await widget.controller.urlLauncher(uri)) {
+            problem =
+                'Could not open the browser. Open this address '
+                'yourself: $url';
+          }
+        } on Object catch (error) {
+          debugPrint('Opening the OAuth sign-in page failed: $error');
+          problem = 'Could not open the browser: $error';
+        }
+      }
+    } else if (!result.isConnected) {
+      problem = 'The engine did not return a sign-in address.';
+    }
+    if (!mounted) return;
+    setState(() {
+      _pendingAuthId = result.isConnected ? null : authId;
+      _error = problem;
+      _isConnecting = false;
+    });
+  }
+
+  Future<void> _submitPaste() async {
+    final String? authId = _pendingAuthId;
+    final OAuthPaste? parsed = parseOAuthPaste(_oauthPaste.text);
+    if (authId == null || parsed == null) return;
+    setState(() {
+      _error = null;
+      _isConnecting = true;
+    });
+    final bool done = await widget.controller.completeOAuth(
+      authId,
+      redirectUrl: parsed.redirectUrl,
+      code: parsed.code,
+      state: parsed.state,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isConnecting = false;
+      if (done) {
+        _pendingAuthId = null;
+        _oauthPaste.clear();
+      } else {
+        _error = _describeToolError(widget.controller.toolsError!);
+      }
+    });
+  }
+
+  Future<void> _disconnect() async {
+    final ToolRegistryEntry? existing = widget.existing;
+    if (existing == null) return;
+    final bool? confirmed = await showAppDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AppDialog(
+        title: 'Disconnect',
+        content: Text(
+          'Forget the saved sign-in for ${_toolTitle(existing)}? '
+          'You will need to sign in again to use it.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Disconnect'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _error = null;
+      _isConnecting = true;
+    });
+    final bool done = await widget.controller.disconnectTool(existing);
+    if (!mounted) return;
+    setState(() {
+      _isConnecting = false;
+      if (done) {
+        _pendingAuthId = null;
+      } else {
+        _error = _describeToolError(widget.controller.toolsError!);
+      }
+    });
+  }
+
+  String _toolTitle(ToolRegistryEntry tool) =>
+      tool.alias?.trim().isNotEmpty ?? false ? tool.alias! : tool.name;
+
+  List<Widget> _oauthFields(ToolRegistryEntry? existing) {
+    // Connecting needs a saved tool whose registry row already says OAuth.
+    final bool canConnect = existing != null && existing.authType == 'oauth';
+    final bool connected = existing?.oauthConnected ?? false;
+    final bool showPaste = _pendingAuthId != null && !connected;
+    final bool busy = _isSubmitting || _isConnecting;
+    return <Widget>[
+      AppTextField(
+        label: 'Client ID (optional)',
+        controller: _oauthClientId,
+        enabled: !_isSubmitting,
+        hintText: 'Leave blank to register automatically',
+      ),
+      AppTextField(
+        label: 'Client secret (optional)',
+        controller: _oauthClientSecret,
+        enabled: !_isSubmitting,
+        obscureText: true,
+        enableSuggestions: false,
+        autocorrect: false,
+        helperText: 'Stored encrypted. Leave blank to keep the saved secret.',
+      ),
+      AppTextField(
+        label: 'Scopes (optional)',
+        controller: _oauthScopes,
+        enabled: !_isSubmitting,
+        hintText: 'Space separated',
+      ),
+      if (canConnect) ...<Widget>[
+        const AppFieldLabel('Sign-in'),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                connected ? 'Connected' : 'Not connected',
+                key: const ValueKey<String>('oauth-status'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              children: <Widget>[
+                if (connected)
+                  TextButton(
+                    onPressed: busy ? null : _disconnect,
+                    child: const Text('Disconnect'),
+                  ),
+                FilledButton(
+                  onPressed: busy ? null : _connect,
+                  child: Text(_isConnecting ? 'Connecting…' : 'Connect'),
+                ),
+              ],
+            ),
+          ],
+        ),
+        if (showPaste) ...<Widget>[
+          const AppFieldLabel('Paste the address or code'),
+          Text(
+            'Finish signing in in your browser. If you land on a page that '
+            'cannot be reached, copy its address and paste it here.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          AppTextField(
+            controller: _oauthPaste,
+            enabled: !busy,
+            onSubmitted: (_) => unawaited(_submitPaste()),
+            hintText: 'Paste the address or code',
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton(
+              onPressed: busy || _oauthPaste.text.trim().isEmpty
+                  ? null
+                  : _submitPaste,
+              child: const Text('Submit'),
+            ),
+          ),
+        ],
+      ],
+    ];
+  }
+
+  Future<void> _test() async {
+    final ToolRegistryEntry? existing = widget.existing;
+    if (existing == null) return;
+    setState(() => _error = null);
+    final ToolTestResult? result = await widget.controller.testTool(existing);
+    if (!mounted) return;
+    if (result == null) {
+      setState(() => _error = '${widget.controller.toolsError}');
+    }
+  }
+
+  List<Widget> _commandFields({required bool withEnvironment}) => <Widget>[
+    AppTextField(
+      label: 'Command',
+      controller: _command,
+      enabled: !_isSubmitting,
+      hintText: 'Executable, e.g. npx',
+    ),
+    AppTextField(
+      label: 'Arguments (one per line)',
+      controller: _args,
+      enabled: !_isSubmitting,
+      minLines: 2,
+      maxLines: 6,
+      hintText: 'One argument per line',
+    ),
+    AppTextField(
+      label: 'Working directory (optional)',
+      controller: _cwd,
+      enabled: !_isSubmitting,
+      hintText: 'Defaults to the engine',
+    ),
+    if (withEnvironment) ...<Widget>[
+      AppTextField(
+        label: 'Environment (optional)',
+        controller: _env,
+        enabled: !_isSubmitting,
+        minLines: 2,
+        maxLines: 6,
+        hintText: 'KEY=value, one per line',
+        helperText: 'Not encrypted - do not put secrets here.',
+      ),
+    ],
+  ];
+
+  Widget _testResult(ToolTestResult result) {
+    final TextTheme textTheme = Theme.of(context).textTheme;
+    if (result.needsAuth) {
+      return const AppFormError(error: 'Sign-in required');
+    }
+    if (!result.ok) {
+      return AppFormError(error: result.error ?? 'The connection test failed.');
+    }
+    final int count = result.tools.length;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            'Connected - $count ${count == 1 ? 'tool' : 'tools'}',
+            style: textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          for (final ToolTestTool tool in result.tools)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Tooltip(
+                      message: tool.description,
+                      child: Text(
+                        tool.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(tool.operation, style: textTheme.labelSmall),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bool isScript = _toolType == 'script';
-    final bool isEndpoint = _toolType == 'mcp' || _toolType == 'api';
+    final ToolRegistryEntry? existing = widget.existing;
+    final bool isTesting =
+        existing != null &&
+        widget.controller.testingToolUuids.contains(existing.uuid);
+    final bool busy = _isSubmitting || isTesting;
+    final ToolTestResult? testResult = existing == null
+        ? null
+        : widget.controller.toolTestResults[existing.uuid];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        const _FieldLabel('Alias'),
-        TextField(
+        AppTextField(
+          label: 'Alias',
           controller: _alias,
           enabled: !_isSubmitting,
-          decoration: const InputDecoration(hintText: 'Tool name'),
+          hintText: 'Tool name',
         ),
-        _LabeledDropdown(
+        AppDropdown(
           label: 'Tool Type',
-          value: _toolType,
-          options: _toolTypes,
+          value: _toolTypeLabel(_toolType),
+          options: <String>[
+            for (final String type in _toolTypes) _toolTypeLabel(type),
+          ],
           enabled: !_isSubmitting,
-          onChanged: (String value) => setState(() => _toolType = value),
+          onChanged: (String value) => setState(
+            () => _toolType = _toolTypes.firstWhere(
+              (String type) => _toolTypeLabel(type) == value,
+              orElse: () => _toolType,
+            ),
+          ),
         ),
-        if (isScript) ...<Widget>[
-          _LabeledDropdown(
+        if (_toolType == 'mcp')
+          AppDropdown(
+            label: 'Connection',
+            value: _isHttp ? _httpConnectionLabel : _stdioConnectionLabel,
+            options: _connectionLabels,
+            enabled: !_isSubmitting,
+            onChanged: (String value) =>
+                setState(() => _isHttp = value == _httpConnectionLabel),
+          ),
+        if (_hasCommand) ..._commandFields(withEnvironment: _isStdio),
+        if (_isScript) ...<Widget>[
+          AppDropdown(
             label: 'Language',
             value: _scriptLanguage,
             options: _scriptLanguages,
@@ -1326,204 +1740,237 @@ final class _ToolEditorState extends State<_ToolEditor> {
             onChanged: (String value) =>
                 setState(() => _scriptLanguage = value),
           ),
-          const _FieldLabel('Script Path'),
-          TextField(
+          AppTextField(
+            label: 'Script Path',
             controller: _scriptPath,
             enabled: !_isSubmitting,
-            decoration: const InputDecoration(hintText: 'Path to the script'),
+            hintText: 'Path to the script',
           ),
         ],
-        if (isEndpoint) ...<Widget>[
-          const _FieldLabel('Endpoint URL'),
-          TextField(
+        if (_isEndpoint) ...<Widget>[
+          AppTextField(
+            label: 'Endpoint URL',
             controller: _endpointUrl,
             enabled: !_isSubmitting,
-            decoration: const InputDecoration(hintText: 'https://'),
+            hintText: 'https://',
           ),
-          _LabeledDropdown(
+          AppDropdown(
             label: 'Authentication',
-            value: _authType == 'api_key' ? 'API key' : 'None',
-            options: _authenticationTypes,
+            value: _toolType == 'mcp' || _authType != 'oauth'
+                ? _authenticationLabel
+                : 'None',
+            options: _toolType == 'mcp'
+                ? _mcpAuthenticationTypes
+                : _authenticationTypes,
             enabled: !_isSubmitting,
             onChanged: (String value) => setState(
-              () => _authType = value == 'API key' ? 'api_key' : 'None',
+              () => _authType = switch (value) {
+                'API key' => 'api_key',
+                'OAuth' => 'oauth',
+                _ => 'None',
+              },
             ),
           ),
+          if (_isOAuth) ..._oauthFields(existing),
           if (_authType == 'api_key') ...<Widget>[
-            const _FieldLabel('API key header (JSON)'),
-            TextField(
+            AppTextField(
+              label: 'API key header (JSON)',
               controller: _authConfig,
               enabled: !_isSubmitting,
               minLines: 2,
               maxLines: 4,
-              decoration: InputDecoration(
-                hintText: '{"x-api-key":"your-api-key"}',
-                helperText: widget.existing?.hasAuthConfig ?? false
-                    ? 'Leave blank to keep the saved credentials.'
-                    : 'Stored encrypted by the engine.',
-              ),
+              hintText: '{"x-api-key":"your-api-key"}',
+              helperText: existing?.hasAuthConfig ?? false
+                  ? 'Leave blank to keep the saved credentials.'
+                  : 'Stored encrypted by the engine.',
             ),
           ],
         ],
-        if (_error != null) _SettingsError(error: _error!),
+        AppTextField(
+          label: 'Description',
+          controller: _description,
+          enabled: !_isSubmitting,
+          minLines: 2,
+          maxLines: 4,
+          hintText: _isCli
+              ? 'Tell the model what this tool does and how to call it'
+              : 'Optional description',
+        ),
+        if (_error != null) AppFormError(error: _error!),
         const SizedBox(height: 18),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 8,
-          runSpacing: 8,
+        AppButtonRow(
           children: <Widget>[
-            if (widget.existing != null)
+            if (existing != null)
+              OutlinedButton(
+                onPressed: busy ? null : _test,
+                child: Text(isTesting ? 'Testing…' : 'Test'),
+              ),
+            if (existing != null)
               TextButton(
-                onPressed: _isSubmitting ? null : _delete,
+                onPressed: busy ? null : _delete,
                 child: const Text('Delete'),
               ),
             TextButton(
-              onPressed: _isSubmitting ? null : widget.onCancel,
+              onPressed: busy ? null : widget.onCancel,
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: _isSubmitting ? null : _save,
+              onPressed: busy ? null : _save,
               child: Text(_isSubmitting ? 'Saving…' : 'Save'),
             ),
           ],
         ),
+        if (testResult != null) _testResult(testResult),
       ],
     );
   }
 }
 
 final class _SkillsSettingsPage extends StatefulWidget {
-  const _SkillsSettingsPage();
+  const _SkillsSettingsPage({required this.controller});
+
+  final DashboardSettingsController controller;
 
   @override
   State<_SkillsSettingsPage> createState() => _SkillsSettingsPageState();
 }
 
 final class _SkillsSettingsPageState extends State<_SkillsSettingsPage> {
-  final List<_SkillDraft> _skills = <_SkillDraft>[];
-  int? _expandedSkillIndex;
+  String? _expandedSkillUuid;
   bool _isCreating = false;
 
   void _startCreating() {
     setState(() {
       _isCreating = true;
-      _expandedSkillIndex = null;
+      _expandedSkillUuid = null;
     });
   }
 
-  void _toggleSkill(int index) {
+  void _toggleSkill(String uuid) {
     setState(() {
       _isCreating = false;
-      _expandedSkillIndex = _expandedSkillIndex == index ? null : index;
+      _expandedSkillUuid = _expandedSkillUuid == uuid ? null : uuid;
     });
   }
 
   void _closeEditor() {
+    if (!mounted) return;
     setState(() {
       _isCreating = false;
-      _expandedSkillIndex = null;
+      _expandedSkillUuid = null;
     });
   }
 
-  void _saveSkill(_SkillDraft draft, [int? index]) {
-    setState(() {
-      if (index == null) {
-        _skills.add(draft);
-      } else {
-        _skills[index] = draft;
-      }
-      _isCreating = false;
-      _expandedSkillIndex = null;
-    });
+  Future<void> _reload() async {
+    _closeEditor();
+    await widget.controller.loadSkills();
   }
 
-  void _deleteSkill(int index) {
-    setState(() {
-      _skills.removeAt(index);
-      _isCreating = false;
-      _expandedSkillIndex = null;
-    });
+  static String _subtitle(SkillEntry skill) {
+    final bool isText = skill.sourceType == 'text';
+    final String detail = isText
+        ? (skill.instructions ?? '').trim().replaceAll(RegExp(r'\s+'), ' ')
+        : (skill.source ?? '');
+    return <String>[
+      isText ? 'Text' : 'Folder',
+      if (detail.isNotEmpty) detail,
+    ].join(' · ');
+  }
+
+  static String? _trailing(SkillEntry skill) {
+    final String? error = skill.valid
+        ? null
+        : ((skill.error?.trim().isNotEmpty ?? false)
+              ? skill.error!.trim()
+              : 'invalid');
+    return switch ((skill.enabled, error)) {
+      (true, null) => null,
+      (false, null) => 'disabled',
+      (true, final String message) => message,
+      (false, final String message) => 'disabled · $message',
+    };
   }
 
   @override
-  Widget build(BuildContext context) => _SettingsBody(
-    children: <Widget>[
-      _SettingsToolbar(
-        title: 'Skills',
-        addLabel: 'New skill',
-        add: _startCreating,
-      ),
-      const Text(
-        'Skills are editable for this app session. Engine-backed skill configuration and validation are not available yet.',
-      ),
-      if (_skills.isEmpty && !_isCreating)
-        const _EmptySettingsMessage(
-          'No skills have been added. Add one to configure it.',
+  Widget build(BuildContext context) {
+    final bool expandedSkillExists = widget.controller.skills.any(
+      (SkillEntry skill) => skill.uuid == _expandedSkillUuid,
+    );
+    final bool hasOpenEditor = _isCreating || expandedSkillExists;
+    return _SettingsBody(
+      children: <Widget>[
+        _SettingsToolbar(
+          title: 'Skills',
+          reload: _reload,
+          addLabel: 'New skill',
+          add: _startCreating,
         ),
-      if (_isCreating)
-        _SettingsExpansionCard(
-          title: 'New skill',
-          subtitle: 'Configure a folder, zip, or URL skill source',
-          trailing: 'unsaved',
-          expanded: true,
-          onToggle: _closeEditor,
-          editor: _SkillEditor(
-            key: const ValueKey<String>('new-skill'),
-            onSaved: _saveSkill,
-            onCancel: _closeEditor,
+        const Text(
+          'Skills are instructions the assistant can load when relevant. The engine lists enabled skills to the model and reads the full SKILL.md on demand.',
+        ),
+        if (widget.controller.isLoadingSkills) const LinearProgressIndicator(),
+        if (!hasOpenEditor && widget.controller.skillsError != null)
+          AppFormError(error: widget.controller.skillsError!),
+        if (!widget.controller.isLoadingSkills &&
+            widget.controller.skills.isEmpty &&
+            !_isCreating)
+          const AppEmptyMessage(
+            'No skills yet. Add a folder with a SKILL.md or write instructions directly.',
           ),
-        ),
-      for (int index = 0; index < _skills.length; index++)
-        _SettingsExpansionCard(
-          title: _skills[index].alias.isEmpty
-              ? _skills[index].name
-              : _skills[index].alias,
-          subtitle: '${_skills[index].sourceType} · ${_skills[index].source}',
-          trailing: 'session only',
-          expanded: _expandedSkillIndex == index,
-          onToggle: () => _toggleSkill(index),
-          editor: _expandedSkillIndex == index
-              ? _SkillEditor(
-                  key: ValueKey<String>('skill-$index'),
-                  existing: _skills[index],
-                  onSaved: (_SkillDraft draft) => _saveSkill(draft, index),
-                  onDeleted: () => _deleteSkill(index),
-                  onCancel: _closeEditor,
-                )
-              : null,
-        ),
-    ],
-  );
-}
-
-final class _SkillDraft {
-  const _SkillDraft({
-    required this.name,
-    required this.alias,
-    required this.description,
-    required this.sourceType,
-    required this.source,
-  });
-
-  final String name;
-  final String alias;
-  final String description;
-  final String sourceType;
-  final String source;
+        if (_isCreating)
+          _SettingsExpansionCard(
+            title: 'New skill',
+            subtitle: 'Add a skill folder or write instructions',
+            trailing: 'unsaved',
+            expanded: true,
+            onToggle: _closeEditor,
+            editor: _SkillEditor(
+              key: const ValueKey<String>('new-skill'),
+              controller: widget.controller,
+              onSaved: _closeEditor,
+              onDeleted: _closeEditor,
+              onCancel: _closeEditor,
+            ),
+          ),
+        for (final SkillEntry skill in widget.controller.skills)
+          _SettingsExpansionCard(
+            title: skill.alias?.trim().isNotEmpty ?? false
+                ? skill.alias!
+                : skill.name,
+            subtitle: _subtitle(skill),
+            trailing: _trailing(skill),
+            expanded: _expandedSkillUuid == skill.uuid,
+            onToggle: () => _toggleSkill(skill.uuid),
+            editor: _expandedSkillUuid == skill.uuid
+                ? _SkillEditor(
+                    key: ValueKey<String>(skill.uuid),
+                    controller: widget.controller,
+                    existing: skill,
+                    onSaved: _closeEditor,
+                    onDeleted: _closeEditor,
+                    onCancel: _closeEditor,
+                  )
+                : null,
+          ),
+      ],
+    );
+  }
 }
 
 final class _SkillEditor extends StatefulWidget {
   const _SkillEditor({
+    required this.controller,
     required this.onSaved,
+    required this.onDeleted,
     required this.onCancel,
     this.existing,
-    this.onDeleted,
     super.key,
   });
 
-  final _SkillDraft? existing;
-  final ValueChanged<_SkillDraft> onSaved;
-  final VoidCallback? onDeleted;
+  final DashboardSettingsController controller;
+  final SkillEntry? existing;
+  final VoidCallback onSaved;
+  final VoidCallback onDeleted;
   final VoidCallback onCancel;
 
   @override
@@ -1531,26 +1978,29 @@ final class _SkillEditor extends StatefulWidget {
 }
 
 final class _SkillEditorState extends State<_SkillEditor> {
-  static const List<String> _sourceTypes = <String>['folder', 'zip', 'url'];
+  static const List<String> _sourceTypeLabels = <String>['Folder', 'Text'];
 
   late final TextEditingController _name;
   late final TextEditingController _alias;
   late final TextEditingController _description;
   late final TextEditingController _source;
-  late String _sourceType;
+  late final TextEditingController _instructions;
+  late bool _isText;
+  late bool _enabled;
   String? _error;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
-    final _SkillDraft? existing = widget.existing;
+    final SkillEntry? existing = widget.existing;
     _name = TextEditingController(text: existing?.name);
     _alias = TextEditingController(text: existing?.alias);
     _description = TextEditingController(text: existing?.description);
     _source = TextEditingController(text: existing?.source);
-    _sourceType = _sourceTypes.contains(existing?.sourceType)
-        ? existing!.sourceType
-        : 'folder';
+    _instructions = TextEditingController(text: existing?.instructions);
+    _isText = existing?.sourceType == 'text';
+    _enabled = existing?.enabled ?? true;
   }
 
   @override
@@ -1559,73 +2009,144 @@ final class _SkillEditorState extends State<_SkillEditor> {
     _alias.dispose();
     _description.dispose();
     _source.dispose();
+    _instructions.dispose();
     super.dispose();
   }
 
-  void _save() {
-    if (_name.text.trim().isEmpty || _source.text.trim().isEmpty) {
-      setState(() => _error = 'Name and source are required.');
+  Future<void> _save() async {
+    final String? problem = _name.text.trim().isEmpty
+        ? 'Name is required.'
+        : _isText
+        ? (_instructions.text.trim().isEmpty
+              ? 'Instructions are required.'
+              : null)
+        : (_source.text.trim().isEmpty ? 'Folder path is required.' : null);
+    if (problem != null) {
+      setState(() => _error = problem);
       return;
     }
-    widget.onSaved(
-      _SkillDraft(
+    setState(() {
+      _error = null;
+      _isSubmitting = true;
+    });
+    final bool saved = await widget.controller.saveSkill(
+      existing: widget.existing,
+      request: SkillRequest(
         name: _name.text.trim(),
-        alias: _alias.text.trim(),
-        description: _description.text.trim(),
-        sourceType: _sourceType,
-        source: _source.text.trim(),
+        alias: _nullIfEmpty(_alias.text),
+        description: _nullIfEmpty(_description.text),
+        sourceType: _isText ? 'text' : 'folder',
+        source: _isText ? null : _source.text.trim(),
+        instructions: _isText ? _instructions.text.trim() : null,
+        enabled: _enabled,
       ),
     );
+    if (!mounted) return;
+    if (saved) {
+      widget.onSaved();
+      return;
+    }
+    setState(() {
+      _error = '${widget.controller.skillsError}';
+      _isSubmitting = false;
+    });
+  }
+
+  Future<void> _delete() async {
+    final SkillEntry? existing = widget.existing;
+    if (existing == null) return;
+    setState(() {
+      _error = null;
+      _isSubmitting = true;
+    });
+    final bool deleted = await widget.controller.deleteSkill(existing);
+    if (!mounted) return;
+    if (deleted) {
+      widget.onDeleted();
+      return;
+    }
+    setState(() {
+      _error = '${widget.controller.skillsError}';
+      _isSubmitting = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      const _FieldLabel('Name'),
-      TextField(
+      AppTextField(
+        label: 'Name',
         controller: _name,
-        decoration: const InputDecoration(hintText: 'Skill name'),
+        enabled: !_isSubmitting,
+        hintText: 'Letters, digits, . _ - (max 64)',
       ),
-      const _FieldLabel('Alias'),
-      TextField(
+      AppTextField(
+        label: 'Alias',
         controller: _alias,
-        decoration: const InputDecoration(hintText: 'Optional display name'),
+        enabled: !_isSubmitting,
+        hintText: 'Optional display name',
       ),
-      const _FieldLabel('Description'),
-      TextField(
+      AppTextField(
+        label: 'Description',
         controller: _description,
+        enabled: !_isSubmitting,
         minLines: 2,
         maxLines: 4,
-        decoration: const InputDecoration(hintText: 'Optional description'),
+        hintText: _isText
+            ? 'Tell the model when to use this skill'
+            : 'Filled from SKILL.md when left blank',
       ),
-      _LabeledDropdown(
+      AppDropdown(
         label: 'Source Type',
-        value: _sourceType,
-        options: _sourceTypes,
-        onChanged: (String value) => setState(() => _sourceType = value),
+        value: _isText ? 'Text' : 'Folder',
+        options: _sourceTypeLabels,
+        enabled: !_isSubmitting,
+        onChanged: (String value) => setState(() => _isText = value == 'Text'),
       ),
-      const _FieldLabel('Source'),
-      TextField(
-        controller: _source,
-        decoration: const InputDecoration(
-          hintText: 'Folder path, zip path, or URL',
+      if (_isText) ...<Widget>[
+        AppTextField(
+          label: 'Instructions',
+          controller: _instructions,
+          enabled: !_isSubmitting,
+          minLines: 6,
+          maxLines: 14,
+          maxLength: 20000,
+          hintText: 'Write the skill instructions',
         ),
+      ] else ...<Widget>[
+        AppTextField(
+          label: 'Folder path',
+          controller: _source,
+          enabled: !_isSubmitting,
+          hintText: 'Folder containing SKILL.md',
+        ),
+      ],
+      const SizedBox(height: 6),
+      AppSwitchTile(
+        title: 'Enabled',
+        value: _enabled,
+        onChanged: _isSubmitting
+            ? null
+            : (bool value) => setState(() => _enabled = value),
       ),
-      if (_error != null) _SettingsError(error: _error!),
+      if (_error != null) AppFormError(error: _error!),
       const SizedBox(height: 18),
-      Wrap(
-        alignment: WrapAlignment.end,
-        spacing: 8,
-        runSpacing: 8,
+      AppButtonRow(
         children: <Widget>[
           if (widget.existing != null)
             TextButton(
-              onPressed: widget.onDeleted,
+              onPressed: _isSubmitting ? null : _delete,
               child: const Text('Delete'),
             ),
-          TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
-          FilledButton(onPressed: _save, child: const Text('Save')),
+          TextButton(
+            onPressed: _isSubmitting ? null : widget.onCancel,
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: _isSubmitting ? null : _save,
+            child: Text(_isSubmitting ? 'Saving…' : 'Save'),
+          ),
         ],
       ),
     ],
@@ -1756,7 +2277,7 @@ final class _SettingsToolbar extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _SectionHeading(title: title),
+        AppSectionHeading(title: title),
         const SizedBox(height: 12),
         Wrap(
           alignment: WrapAlignment.end,
@@ -1784,67 +2305,6 @@ final class _SettingsToolbar extends StatelessWidget {
   );
 }
 
-final class _SectionHeading extends StatelessWidget {
-  const _SectionHeading({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) => Text(
-    title,
-    style: Theme.of(context).textTheme.titleMedium
-        ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
-  );
-}
-
-final class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 6, top: 18),
-    child: Text(
-      label,
-      style: Theme.of(context).textTheme.labelMedium
-          ?.copyWith(fontWeight: FontWeight.bold),
-    ),
-  );
-}
-
-final class _SettingsError extends StatelessWidget {
-  const _SettingsError({required this.error});
-
-  final Object error;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 12),
-    child: Text(
-      '$error',
-      style: Theme.of(context).textTheme.bodySmall
-          ?.copyWith(color: Theme.of(context).colorScheme.error),
-    ),
-  );
-}
-
-final class _EmptySettingsMessage extends StatelessWidget {
-  const _EmptySettingsMessage(this.message);
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 32),
-    child: Text(
-      message,
-      textAlign: TextAlign.center,
-      style: Theme.of(context).textTheme.bodySmall,
-    ),
-  );
-}
-
 final class _CopyLink extends StatelessWidget {
   const _CopyLink({required this.label, required this.value});
 
@@ -1856,8 +2316,7 @@ final class _CopyLink extends StatelessWidget {
     onPressed: () async {
       await Clipboard.setData(ClipboardData(text: value));
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$label link copied')));
+        showAppSnack(context, '$label link copied');
       }
     },
     child: Text(label),
@@ -1867,59 +2326,6 @@ final class _CopyLink extends StatelessWidget {
 String? _nullIfEmpty(String value) {
   final String trimmed = value.trim();
   return trimmed.isEmpty ? null : trimmed;
-}
-
-/// Flat, compact form controls: the app's one template for buttons, fields and
-/// popups. It applies on every platform (web, desktop and mobile) so a screen
-/// looks the same wherever it runs.
-ThemeData settingsFormTheme(BuildContext context) =>
-    _windowsSettingsTheme(context);
-
-ThemeData _windowsSettingsTheme(BuildContext context) {
-  final ThemeData base = Theme.of(context);
-  final ColorScheme colors = base.colorScheme;
-  const RoundedRectangleBorder buttonShape = RoundedRectangleBorder(
-    borderRadius: BorderRadius.all(Radius.circular(3)),
-  );
-  return base.copyWith(
-    visualDensity: VisualDensity.compact,
-    inputDecorationTheme: InputDecorationTheme(
-      isDense: true,
-      filled: true,
-      fillColor: colors.surfaceContainerLowest,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      border: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      hintStyle: TextStyle(
-        color: colors.onSurfaceVariant.withValues(alpha: 0.33),
-      ),
-    ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(shape: buttonShape),
-    ),
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        shape: buttonShape,
-        side: BorderSide(color: colors.outlineVariant),
-      ),
-    ),
-    textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(shape: buttonShape),
-    ),
-    iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(shape: buttonShape),
-    ),
-  );
 }
 
 final class _DataDirectoryField extends StatelessWidget {
@@ -1932,22 +2338,12 @@ final class _DataDirectoryField extends StatelessWidget {
     return Row(
       children: <Widget>[
         Expanded(
-          child: SizedBox(
+          child: AppTextField(
+            key: ValueKey<String?>(path),
+            initialValue: path ?? 'Unavailable on this platform',
+            readOnly: true,
             height: 32,
-            child: TextFormField(
-              key: ValueKey<String?>(path),
-              initialValue: path ?? 'Unavailable on this platform',
-              readOnly: true,
-              textAlignVertical: TextAlignVertical.center,
-              decoration: const InputDecoration(
-                contentPadding: EdgeInsets.symmetric(horizontal: 10),
-                prefixIcon: Icon(FluentIcons.folder_20_regular, size: 17),
-                prefixIconConstraints: BoxConstraints(
-                  minWidth: 32,
-                  minHeight: 32,
-                ),
-              ),
-            ),
+            prefixIcon: const Icon(FluentIcons.folder_20_regular, size: 17),
           ),
         ),
         const SizedBox(width: 8),
@@ -1959,9 +2355,7 @@ final class _DataDirectoryField extends StatelessWidget {
               : () async {
                   await Clipboard.setData(ClipboardData(text: path));
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Data folder path copied')),
-                    );
+                    showAppSnack(context, 'Data folder path copied');
                   }
                 },
         ),
@@ -1976,8 +2370,7 @@ final class _DataDirectoryField extends StatelessWidget {
                     await openEngineDataDirectory(path);
                   } on Object catch (error) {
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(SnackBar(content: Text('$error')));
+                      showAppSnack(context, '$error');
                     }
                   }
                 },
@@ -1996,23 +2389,12 @@ final class _JoiningTokenField extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     children: <Widget>[
       Expanded(
-        child: SizedBox(
+        child: AppTextField(
+          key: ValueKey<String?>(token),
+          initialValue: token ?? 'Unavailable while the engine is disconnected',
+          readOnly: true,
           height: 32,
-          child: TextFormField(
-            key: ValueKey<String?>(token),
-            initialValue:
-                token ?? 'Unavailable while the engine is disconnected',
-            readOnly: true,
-            textAlignVertical: TextAlignVertical.center,
-            decoration: const InputDecoration(
-              contentPadding: EdgeInsets.symmetric(horizontal: 10),
-              prefixIcon: Icon(FluentIcons.key_20_regular, size: 17),
-              prefixIconConstraints: BoxConstraints(
-                minWidth: 32,
-                minHeight: 32,
-              ),
-            ),
-          ),
+          prefixIcon: const Icon(FluentIcons.key_20_regular, size: 17),
         ),
       ),
       const SizedBox(width: 8),
@@ -2024,9 +2406,7 @@ final class _JoiningTokenField extends StatelessWidget {
             : () async {
                 await Clipboard.setData(ClipboardData(text: token!));
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Joining token copied')),
-                  );
+                  showAppSnack(context, 'Joining token copied');
                 }
               },
       ),
@@ -2046,21 +2426,11 @@ final class _WindowsIconButton extends StatelessWidget {
   final VoidCallback? onPressed;
 
   @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return SizedBox.square(
-      dimension: 32,
-      child: IconButton(
-        tooltip: tooltip,
-        onPressed: onPressed,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-        style: IconButton.styleFrom(
-          backgroundColor: colors.surfaceContainerLowest,
-          side: BorderSide(color: colors.outlineVariant),
-        ),
-        icon: Icon(icon, size: 17),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => AppIconButton(
+    outlined: true,
+    tooltip: tooltip,
+    icon: icon,
+    iconSize: 17,
+    onPressed: onPressed,
+  );
 }

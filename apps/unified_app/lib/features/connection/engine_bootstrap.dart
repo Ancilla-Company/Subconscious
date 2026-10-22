@@ -89,7 +89,8 @@ final class EngineBootstrap {
   final String? engineLogPath;
   final Future<void> Function(Duration) _delay;
 
-  String get _details => engineLogPath == null ? '' : ' Details: $engineLogPath';
+  String get _details =>
+      engineLogPath == null ? '' : ' Details: $engineLogPath';
 
   Future<EngineStartOutcome>? _inFlight;
 

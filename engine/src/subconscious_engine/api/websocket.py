@@ -3,9 +3,10 @@
 import asyncio
 import base64
 import binascii
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 import json
+import re
 from threading import RLock
 import time
 from typing import Any, Protocol
@@ -24,8 +25,16 @@ from subconscious_engine.audio.realtime import (
 )
 from subconscious_engine.audio.routes import capabilities_for
 from subconscious_engine.approval import ApprovalConfig, classify_operation
+from subconscious_engine.client_tools import (
+    MAX_GROUPS_PER_CONNECTION, ClientToolCatalog, ClientToolDefinition, ClientToolError,
+    ClientToolGroup, is_schema_registration, parse_group, tool_enabled,
+)
 from subconscious_engine.configuration.models import ModelConfig
 from subconscious_engine.locality import is_local_peer
+from subconscious_engine.services.configured_tools import NAME_SEPARATOR, unique_name
+from subconscious_engine.services.skills import (
+    NONE_INDEX as NO_SKILLS_INDEX, SkillService, build_skills_index, read_skill_tool, select_skills,
+)
 from subconscious_engine.storage.models import ConversationThread, Message, Workspace, utc_now
 from subconscious_engine.tools import (
     ContextAttachment,
@@ -37,6 +46,7 @@ import logging
 from ..client_identity import (
     ClientIdentity, ClientInfo, build_client_info, is_local_address, parse_identity,
 )
+from ..connection_log import connection_event, connection_problem
 from ..logging_setup import logged_suppress, spawn_logged
 _LOG = logging.getLogger(__name__)
 
@@ -227,12 +237,13 @@ class ClientRegistry:
         data: dict[str, Any],
         *,
         exclude_client_id: str | None = None,
+        exclude_client_ids: Collection[str] = (),
     ) -> None:
         with self._lock:
             recipients = tuple(
                 session
                 for identifier, session in self._sessions.items()
-                if identifier != exclude_client_id
+                if identifier != exclude_client_id and identifier not in exclude_client_ids
             )
         for session in recipients:
             with logged_suppress(Exception):
@@ -338,23 +349,77 @@ class WebSocketSession:
         ] = {}
         self.send_lock = asyncio.Lock()
         self.client_tools: dict[str, dict[str, Any]] = {}
+        # Schema-bearing client tool groups registered on this connection.
+        self.client_tool_groups: dict[str, ClientToolGroup] = {}
+        # Model-visible client tool name -> declared operation (for approval requests).
+        self.client_tool_operations: dict[str, str] = {}
+        self.client_name: str | None = None
+
+    def _transport_label(self) -> str:
+        link = getattr(self.socket, "link", None)
+        if link is None:
+            return "websocket"
+        return f"peer-{getattr(link, 'tier', 'link')}"
+
+    def _remote_label(self) -> str | None:
+        peer = getattr(self.socket, "client", None)
+        host = getattr(peer, "host", None)
+        port = getattr(peer, "port", None)
+        if isinstance(host, str) and isinstance(port, int):
+            return f"{host}:{port}"
+        return host if isinstance(host, str) else None
 
     async def run(self) -> None:
+        started = time.monotonic()
         await self.socket.accept()
+        # Why the session ended, for the connection log. Normal closes are INFO;
+        # anything else is a WARNING so a drop is never silent.
+        outcome = "closed"
+        abnormal = False
         try:
             while True:
                 frame = await self.socket.receive_json()
                 await self._handle(frame)
-        except (WebSocketDisconnect, json.JSONDecodeError, ValueError):
-            _LOG.warning("api.websocket.WebSocketSession.run: handled (WebSocketDisconnect, json.JSONDecodeError, ValueError); continuing with fallback", exc_info=True)
-            pass
+        except WebSocketDisconnect as error:
+            code = getattr(error, "code", None)
+            _LOG.debug("api.websocket.WebSocketSession.run: transport closed (code=%s)", code)
+            outcome = f"disconnect code={code}"
+            abnormal = code not in (None, 1000, 1001)
+        except (json.JSONDecodeError, ValueError) as error:
+            outcome = f"bad frame ({type(error).__name__}: {error})"
+            abnormal = True
+            _LOG.warning("api.websocket.WebSocketSession.run: handled (json.JSONDecodeError, ValueError); continuing with fallback", exc_info=True)
+        except asyncio.CancelledError:
+            outcome = "cancelled (session stopped or engine shutting down)"
+            abnormal = True
+            raise
+        except Exception as error:
+            outcome = f"error ({type(error).__name__}: {error})"
+            abnormal = True
+            _LOG.exception("api.websocket.WebSocketSession.run: unexpected error ending the session")
+            raise
         finally:
+            fields = {
+                "client_id": self.client_id,
+                "transport": self._transport_label(),
+                "remote": self._remote_label(),
+                "duration_s": f"{time.monotonic() - started:.1f}",
+                "reason": outcome,
+            }
+            if abnormal:
+                connection_problem("client.dropped", **fields)
+            else:
+                connection_event("client.disconnected", **fields)
             await self._stop_realtime()
             await self._stop_active_turn()
             for _, future in self.pending.values():
                 future.cancel()
             for _, future in self.pending_client_tools.values():
                 future.cancel()
+            self.client_tool_groups.clear()
+            catalog = self._client_catalog()
+            if catalog is not None:
+                catalog.disconnect(self)
             manager = self._tasks()
             if manager is not None:
                 manager.session_closed(self)
@@ -391,14 +456,13 @@ class WebSocketSession:
         elif frame_type == "tool.approval.response":
             await self._approval(turn_id, data)
         elif frame_type == "tool.register":
-            for tool in data.get("tools", []):
-                if (isinstance(tool, dict)
-                        and isinstance(tool.get("id"), str)
-                        and tool["id"] in _UI_TOOL_NAMES):
-                    self.client_tools[tool["id"]] = {"id": tool["id"]}
+            await self._register_tools(data)
         elif frame_type == "tool.unregister":
+            group = data.get("group")
             identifier = data.get("id")
-            if isinstance(identifier, str):
+            if isinstance(group, str):
+                self._remove_group(group)
+            elif isinstance(identifier, str):
                 self.client_tools.pop(identifier, None)
         elif frame_type == "client.tool.result":
             await self._client_tool_result(turn_id, data)
@@ -433,10 +497,27 @@ class WebSocketSession:
             node_name=(getattr(self.socket, "display_name", "") or client_name) if is_peer else None,
         )
         if identifier is None:
+            connection_problem(
+                "client.rejected",
+                reason="Client_ID already in use by an active connection",
+                requested_id=requested,
+                name=client_name,
+                transport=self._transport_label(),
+                remote=self._remote_label(),
+            )
             await self._send("client.hello.reject", {"reason": "Client_ID already in use by an active connection."})
             return
         await self.app.state.client_registry.release(self.client_id)
         self.client_id = identifier
+        self.client_name = client_name or identifier
+        connection_event(
+            "client.connected",
+            client_id=identifier,
+            name=client_name,
+            transport=self._transport_label(),
+            remote=peer_label,
+            local=False if is_peer else is_local_address(host),
+        )
         await self.app.state.client_registry.register_session(identifier, self)
         await self._send(
             "client.hello.ack", {"clientId": identifier, "local": is_local_peer(self.socket)}
@@ -759,6 +840,107 @@ class WebSocketSession:
         elif not pending[1].done():
             pending[1].set_result(decision.casefold() == "approve")
 
+    def _client_catalog(self) -> ClientToolCatalog | None:
+        catalog = getattr(self.app.state, "client_tool_catalog", None)
+        return catalog if isinstance(catalog, ClientToolCatalog) else None
+
+    def _builtin_catalog(self) -> dict[str, list[dict[str, str]]]:
+        """Built-in groups plus remembered client groups (what the tools settings can toggle)."""
+        registry = getattr(self.app.state, "tool_registry", None)
+        merged: dict[str, list[dict[str, str]]] = dict(registry.catalog()) if registry is not None else {}
+        client = self._client_catalog()
+        if client is not None:
+            for name, items in client.catalog().items():
+                merged.setdefault(name, items)
+        return merged
+
+    async def _register_tools(self, data: dict[str, Any]) -> None:
+        if not is_schema_registration(data):
+            tools = data.get("tools", [])
+            for tool in tools if isinstance(tools, list) else []:
+                if (isinstance(tool, dict)
+                        and isinstance(tool.get("id"), str)
+                        and tool["id"] in _UI_TOOL_NAMES):
+                    self.client_tools[tool["id"]] = {"id": tool["id"]}
+            return
+        if getattr(self.socket, "link", None) is not None:
+            await self._error("Hive peers cannot register client tools with schemas.")
+            return
+        registry = getattr(self.app.state, "tool_registry", None)
+        reserved = {spec.slug for spec in getattr(registry, "specs", ())}
+        try:
+            group = parse_group(data, reserved=reserved)
+            if group.tools and group.group not in self.client_tool_groups \
+                    and len(self.client_tool_groups) >= MAX_GROUPS_PER_CONNECTION:
+                raise ClientToolError(
+                    f"a connection can register at most {MAX_GROUPS_PER_CONNECTION} tool groups.")
+        except ClientToolError as error:
+            _LOG.warning("api.websocket._register_tools: rejected client tool registration: %s", error)
+            await self._error(f"tool.register rejected: {error}")
+            return
+        if not group.tools:
+            self._remove_group(group.group)
+            return
+        self.client_tool_groups[group.group] = group
+        catalog = self._client_catalog()
+        if catalog is not None:
+            catalog.register(self, group)
+
+    def _remove_group(self, name: str) -> None:
+        self.client_tool_groups.pop(name, None)
+        catalog = self._client_catalog()
+        if catalog is not None:
+            catalog.unregister(self, name)
+
+    def _client_group_tools(
+        self, turn_id: str, tools_raw: str | None, approval: ApprovalConfig,
+        reserved: Collection[str],
+    ) -> list[Tool[Any]]:
+        """Model tools for the registered client groups, honouring ``tools_config`` and approval."""
+        try:
+            parsed = json.loads(tools_raw) if tools_raw else {}
+        except json.JSONDecodeError:
+            _LOG.warning("api.websocket._client_group_tools: invalid tools_config ignored", exc_info=True)
+            parsed = {}
+        config: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
+        used = set(reserved) | set(self.client_tools)
+        operations: dict[str, str] = {}
+        tools: list[Tool[Any]] = []
+        client = self.client_name or "client"
+        for group in self.client_tool_groups.values():
+            for definition in group.tools:
+                if not tool_enabled(config, group.group, definition.id):
+                    continue
+                base = re.sub(r"[^A-Za-z0-9_]", "_", f"{group.group}{NAME_SEPARATOR}{definition.id}")
+                name = unique_name(base, used)
+                tool: Tool[Any] = Tool.from_schema(
+                    self._client_tool_function(turn_id, group.group, definition),
+                    name=name,
+                    description=f"[{group.title} via {client}] {definition.description}".strip(),
+                    json_schema=definition.input_schema,
+                )
+                tool.requires_approval = approval.requires_operation(definition.approval_operation)
+                operations[name] = definition.operation
+                tools.append(tool)
+        self.client_tool_operations = operations
+        return tools
+
+    def _client_tool_function(
+        self, turn_id: str, group: str, definition: ClientToolDefinition
+    ) -> Callable[..., Any]:
+        async def call(**arguments: Any) -> Any:
+            try:
+                return await self._request_client_tool(
+                    turn_id, definition.id, arguments, group=group,
+                    timeout=definition.timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                raise RuntimeError(
+                    f"The client did not answer tool '{definition.id}' in time."
+                ) from None
+
+        return call
+
     async def _client_tool_result(
         self, turn_id: str | None, data: dict[str, Any]
     ) -> None:
@@ -778,24 +960,24 @@ class WebSocketSession:
             pending[1].set_result(data)
 
     async def _request_client_tool(
-        self, turn_id: str, tool_name: str, arguments: dict[str, Any]
+        self, turn_id: str, tool_name: str, arguments: dict[str, Any], *,
+        group: str | None = None, timeout: float | None = None,
     ) -> Any:
         request_id = uuid4().hex
         future: asyncio.Future[dict[str, Any]] = \
             asyncio.get_running_loop().create_future()
         self.pending_client_tools[request_id] = (turn_id, future)
         try:
-            await self._send(
-                "client.tool.request",
-                {
-                    "request_id": request_id,
-                    "tool_name": tool_name,
-                    "arguments": arguments,
-                },
-                turn_id,
-            )
+            payload: dict[str, Any] = {
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "arguments": arguments,
+            }
+            if group is not None:
+                payload["group"] = group
+            await self._send("client.tool.request", payload, turn_id)
             response = await asyncio.wait_for(
-                future, timeout=_CLIENT_TOOL_TIMEOUT_SECONDS
+                future, timeout=timeout or _CLIENT_TOOL_TIMEOUT_SECONDS
             )
             if response.get("ok") is not True:
                 error = response.get("error")
@@ -849,7 +1031,7 @@ class WebSocketSession:
         ) -> Any:
             normalized_group = group.strip()
             normalized_tool = tool.strip()
-            catalog = self.app.state.tool_registry.catalog()
+            catalog = self._builtin_catalog()
             if normalized_group not in catalog:
                 raise ValueError("group is not a registered built-in tool group.")
             if normalized_tool and normalized_tool not in {
@@ -914,6 +1096,18 @@ class WebSocketSession:
         must take so a task can name its thread before the executor creates it.
         """
         thread_uuid = ""
+        oauth_broker = getattr(self.app.state, "oauth_broker", None)
+        if oauth_broker is not None:
+            async def oauth_notify(frame_type: str, payload: dict[str, Any]) -> None:
+                # A sign-in card (or its resolution) for this chat; thread_uuid is filled in once known.
+                if frame_type == "oauth.request":
+                    payload = {**payload, "thread_uuid": thread_uuid}
+                await self._send(frame_type, payload, turn_id)
+
+            server = (getattr(self.socket, "scope", None) or {}).get("server")
+            if server and server[1]:
+                oauth_broker.set_port(server[1], overwrite=False)  # loopback redirect fallback
+            oauth_broker.attach(turn_id, oauth_notify, self.client_id)
         try:
             created_thread = False
             content = data.get("content")
@@ -1008,6 +1202,9 @@ class WebSocketSession:
                     await self._publish_message(user_message, thread_uuid)
                 tools_enabled = data.get("tools_enabled", True) is not False
                 tools = []
+                # The skills index goes into the prompt as a non-empty string; the full text is
+                # fetched on demand by the read_skill tool (only offered when skills exist).
+                skills_index = NO_SKILLS_INDEX
                 tool_context = ToolContext(
                     self.app.state.rag_service,
                     self.app.state.database,
@@ -1033,6 +1230,31 @@ class WebSocketSession:
                         tools.extend(await remote_toolset.tools_for_turn(
                             tools_raw, task_id=turn_id, workspace_uuid=workspace.uuid,
                             approval=approval))
+                    configured_tools = getattr(self.app.state, "configured_tools", None)
+                    if configured_tools is not None:
+                        # User-configured MCP servers and CLI tools; a broken one is skipped.
+                        try:
+                            tools.extend(await configured_tools.tools_for_turn(
+                                approval, reserved={tool.name for tool in tools}))
+                        except Exception:
+                            _LOG.exception("api.websocket._run_turn: configured tools unavailable this turn")
+                    management = getattr(self.app.state, "tool_management", None)
+                    if management is not None:
+                        # The assistant can configure its own tools/skills; approval is forced on.
+                        tools.extend(management.tools(approval, reserved={tool.name for tool in tools}))
+                    try:
+                        selected_skills = select_skills(
+                            await SkillService(session).snapshots(),
+                            thread.skills_config, workspace.skills_config)
+                    except Exception:
+                        _LOG.exception("api.websocket._run_turn: skills unavailable this turn")
+                        selected_skills = []
+                    skills_index = build_skills_index(selected_skills)
+                    skill_tool = read_skill_tool(selected_skills, approval)
+                    if skill_tool is not None:
+                        tools.append(skill_tool)
+                    tools.extend(self._client_group_tools(
+                        turn_id, tools_raw, approval, {tool.name for tool in tools}))
                 tools.extend(self._ui_tools(turn_id))
                 agent_content: str | list[Any] = content
                 if (active_file is not None or tagged_files or attachments) and \
@@ -1065,10 +1287,17 @@ class WebSocketSession:
                         if event.get("type") == "model.delta":
                             await stream_delta(event.get("delta"))
 
+                    extra: dict[str, Any] = {}
+                    if skills_index != NO_SKILLS_INDEX:
+                        extra["system_prompt"] = "\n\n".join(part for part in (
+                            config.system_prompt,
+                            f"Active skills (call read_skill with a name to load one):\n{skills_index}",
+                        ) if part)
                     result = await self.app.state.agent_manager.execute(
                         config, agent_content, history, tools,
                         lambda call: self._request_approval(turn_id, thread_uuid, call),
                         event_sink=agent_event,
+                        **extra,
                     )
                 else:
                     async def graph_event(event: dict[str, Any]) -> None:
@@ -1089,9 +1318,7 @@ class WebSocketSession:
                         history,
                         tools,
                         lambda call: self._request_approval(turn_id, thread_uuid, call),
-                        state={
-                            "active_skills": thread.skills_config or workspace.skills_config or "[]",
-                        },
+                        state={"active_skills": skills_index},
                         event_sink=graph_event,
                     )
                 for record in result.tool_records:
@@ -1135,6 +1362,8 @@ class WebSocketSession:
             await self._send("chat.error", {"thread_uuid": thread_uuid, "error": str(error)}, turn_id)
             return "failed", str(error) or error.__class__.__name__
         finally:
+            if oauth_broker is not None:
+                oauth_broker.detach(turn_id)
             for approval_id, (pending_turn, future) in tuple(self.pending.items()):
                 if pending_turn == turn_id:
                     self.pending.pop(approval_id, None)
@@ -1155,7 +1384,7 @@ class WebSocketSession:
         try:
             await self._send("tool.approval.request", {"approval_id": approval_id,
                 "thread_uuid": thread_uuid, "tool_name": call.tool_name,
-                "arguments": call.args_as_dict(), "operation": classify_operation(call.tool_name)}, turn_id)
+                "arguments": call.args_as_dict(), "operation": self.client_tool_operations.get(call.tool_name) or classify_operation(call.tool_name)}, turn_id)
             return await future
         finally:
             self.pending.pop(approval_id, None)

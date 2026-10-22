@@ -42,6 +42,7 @@ from .identity import (
 )
 from .relay import RateLimiter, RelayManager, RelaySender, RelaySession
 from .switchable import DIRECT_TIER, RELAY_TIER, SwitchableLink
+from ..connection_log import connection_event, connection_problem
 from ..logging_setup import logged_suppress, spawn_logged
 _LOG = logging.getLogger(__name__)
 
@@ -367,9 +368,20 @@ class PeerManager:
         existing = self._links.get(node_id)
         if existing is not None and not existing.closed.is_set():
             existing.add(inner)
+            connection_event(
+                "peer.link.path_added",
+                node_id=node_id,
+                tier=getattr(inner, "tier", None),
+            )
             return existing
         link = SwitchableLink(inner, on_closed=self._link_closed, grace=self._swap_grace)
         self._links[node_id] = link
+        connection_event(
+            "peer.link.up",
+            node_id=node_id,
+            tier=getattr(inner, "tier", None),
+            role=getattr(inner, "role", None),
+        )
         if self._on_link is not None:
             self._on_link(link)  # type: ignore[arg-type]
         if inner.tier == RELAY_TIER:
@@ -379,6 +391,14 @@ class PeerManager:
     def _link_closed(self, link: SwitchableLink) -> None:
         node_id = link.node_id
         if self._links.get(node_id) is link:
+            if self._closed:
+                connection_event("peer.link.down", node_id=node_id, reason="engine shutting down")
+            else:
+                connection_problem(
+                    "peer.link.down",
+                    node_id=node_id,
+                    reason="link closed (remote left, network lost or all paths failed)",
+                )
             del self._links[node_id]
             upgrade = self._upgrades.pop(node_id, None)
             if upgrade is not None and upgrade is not asyncio.current_task():
@@ -548,6 +568,11 @@ class PeerManager:
 
         @pc.on("connectionstatechange")
         def _state() -> None:
+            fields = {"node_id": remote.id, "sid": attempt.sid, "state": pc.connectionState}
+            if pc.connectionState == "failed":
+                connection_problem("peer.connection.state", **fields)
+            else:
+                connection_event("peer.connection.state", **fields)
             if pc.connectionState in {"failed", "closed"}:
                 self._spawn(self._teardown(attempt, pc.connectionState, notify=False))
 
@@ -801,6 +826,19 @@ class PeerManager:
             return
         attempt.closed = True
         remote_id = attempt.remote.id
+        teardown_fields = {
+            "node_id": remote_id,
+            "name": attempt.remote.name,
+            "sid": attempt.sid,
+            "reason": reason,
+            "had_link": attempt.link is not None,
+            "offerer": attempt.offerer,
+        }
+        if reason == "closed":
+            connection_event("peer.attempt.closed", **teardown_fields)
+        else:
+            # failed / timeout / error: the remote could not be reached or dropped.
+            connection_problem("peer.attempt.failed", **teardown_fields)
         if self._attempts.get(remote_id) is attempt:
             del self._attempts[remote_id]
         link = attempt.link

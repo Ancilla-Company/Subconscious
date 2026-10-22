@@ -15,10 +15,7 @@ final class EngineCompositionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge(<Listenable>[
-      controller,
-      controller.settings,
-    ]),
+    animation: Listenable.merge(<Listenable>[controller, controller.settings]),
     builder: (BuildContext context, Widget? child) {
       final ThemeData theme = Theme.of(context);
       return ColoredBox(

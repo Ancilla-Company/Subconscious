@@ -137,10 +137,17 @@ def _migration_3_app_state_client_scope(connection: Connection) -> None:
     connection.execute(text("DROP TABLE app_state_old"))
 
 
+def _migration_4_tool_registry_config(connection: Connection) -> None:
+    """``tool_registry.config_json`` holds command/args/env/cwd for mcp (stdio) and cli tools."""
+    if "tool_registry" in inspect(connection).get_table_names():
+        _add_column(connection, "tool_registry", "config_json", "TEXT")
+
+
 MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (1, "hive_sync", _migration_1_hive_sync),
     (2, "remote_tool_audit", _migration_2_remote_tool_audit),
     (3, "app_state_client_scope", _migration_3_app_state_client_scope),
+    (4, "tool_registry_config", _migration_4_tool_registry_config),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 

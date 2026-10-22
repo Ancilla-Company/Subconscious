@@ -154,7 +154,7 @@ def test_migration_upgrades_existing_database_with_backup_and_is_idempotent(tmp_
             messages = (await session.scalars(select(Message).order_by(Message.id))).all()
             assert messages[0].hlc < messages[1].hlc  # derived from created_at, order preserved
             versions = [r[0] for r in (await session.execute(text("SELECT version FROM schema_migrations")))]
-            assert versions == [1, 2, 3]
+            assert versions == [1, 2, 3, 4]
             for table in ("sync_log", "sync_state", "sync_pending", "sync_field_clock", "tasks", "hive_meta",
                           "remote_tool_audit"):
                 await session.execute(text(f"SELECT count(*) FROM {table}"))
@@ -200,7 +200,7 @@ def test_fresh_database_is_created_current_without_a_backup(tmp_path):
         await database.initialize()
         assert database.last_backup is None
         async with database.session() as session:
-            assert [r[0] for r in await session.execute(text("SELECT version FROM schema_migrations"))] == [1, 2, 3]
+            assert [r[0] for r in await session.execute(text("SELECT version FROM schema_migrations"))] == [1, 2, 3, 4]
         await database.close()
         assert not list(tmp_path.glob("*.bak-*"))
 

@@ -187,9 +187,7 @@ final class FindModel extends ChangeNotifier {
     final RegExp? pattern = _pattern();
     if (target == null || pattern == null) return null;
     final Match? match = pattern.matchAsPrefix(text, target.start);
-    final String replacement = match == null
-        ? _replacement
-        : _expand(match);
+    final String replacement = match == null ? _replacement : _expand(match);
     return (
       text: text.replaceRange(target.start, target.end, replacement),
       caret: target.start + replacement.length,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../hive/engine_card_view.dart';
 import '../../hive/hive_runtime.dart';
@@ -16,21 +17,24 @@ const double kCaptionBarHeight = 32;
 /// local engine is still being linked, the chip is amber and never says
 /// "disconnected" (AC-26).
 @visibleForTesting
-(Color, String) captionPresentation(
+(AppStatus, String) captionPresentation(
   EngineConnectionStatus status,
   HiveRuntime hive,
 ) {
-  final (Color, String) base = switch (status) {
-    EngineConnectionStatus.connected => (Colors.green, 'connected'),
-    EngineConnectionStatus.connecting => (Colors.amber, 'connecting'),
-    EngineConnectionStatus.disconnected => (Colors.red, 'disconnected'),
+  final (AppStatus, String) base = switch (status) {
+    EngineConnectionStatus.connected => (AppStatus.connected, 'connected'),
+    EngineConnectionStatus.connecting => (AppStatus.connecting, 'connecting'),
+    EngineConnectionStatus.disconnected => (
+      AppStatus.disconnected,
+      'disconnected',
+    ),
   };
   if (status == EngineConnectionStatus.connected) return base;
-  if (hive.linkingLocalEngine) return (Colors.amber, 'starting engine');
+  if (hive.linkingLocalEngine) return (AppStatus.connecting, 'starting engine');
   if (!hive.hasLocalFullNode &&
       hive.isSignedIn &&
       engineCardViewFor(hive).isConnecting) {
-    return (Colors.amber, 'connecting');
+    return (AppStatus.connecting, 'connecting');
   }
   return base;
 }
@@ -59,7 +63,7 @@ final class CaptionTitleContent extends StatelessWidget {
 
   Widget _content(BuildContext context, HiveRuntime hive) {
     final ThemeData theme = Theme.of(context);
-    final (Color, String) presentation = captionPresentation(
+    final (AppStatus, String) presentation = captionPresentation(
       controller.connectionStatus,
       hive,
     );
@@ -84,23 +88,15 @@ final class CaptionTitleContent extends StatelessWidget {
         Text('Subconscious', style: theme.textTheme.labelLarge),
         const Spacer(),
         Transform.translate(
-          offset: const Offset(0, 2),
-          child: Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: presentation.$1,
-              shape: BoxShape.circle,
-            ),
-          ),
+          offset: const Offset(0, 1),
+          child: AppStatusDot(status: presentation.$1, label: presentation.$2),
         ),
-        const SizedBox(width: 6),
-        Text(presentation.$2, style: theme.textTheme.labelMedium),
         const SizedBox(width: 12),
       ],
     );
   }
 }
+
 final class PanelVisibilityControls extends StatelessWidget {
   const PanelVisibilityControls({
     required this.controller,
@@ -233,77 +229,90 @@ final class ThreadWorkspaceCaptionPicker extends StatelessWidget {
     final Color foreground = brightness == Brightness.dark
         ? Colors.white
         : Colors.black;
+    final String label = controller.threadsWorkspace?.name ?? 'All workspaces';
+    final String activeUuid = controller.threadsWorkspace?.uuid ?? '';
+    // Same hover, focus and pressed feedback as the panel toggle buttons: the
+    // caption bar is not a Material, so the trigger brings its own surface and
+    // the popup button's ink takes these colours.
     final Color hoverColor = brightness == Brightness.dark
         ? Colors.white.withValues(alpha: 0.08)
         : Colors.black.withValues(alpha: 0.06);
-    final String label = controller.threadsWorkspace?.name ?? 'All workspaces';
-    return MenuAnchor(
-      menuChildren: <Widget>[
-        MenuItemButton(
-          onPressed: controller.threadsWorkspace == null
-              ? null
-              : () => unawaited(controller.selectThreadWorkspace(null)),
-          leadingIcon: const Icon(FluentIcons.apps_20_regular, size: 16),
-          child: const Text('All workspaces'),
+    return Material(
+      color: Colors.transparent,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          hoverColor: hoverColor,
+          focusColor: hoverColor,
+          highlightColor: hoverColor,
+        ),
+        child: _picker(context, label, activeUuid, foreground),
+      ),
+    );
+  }
+
+  Widget _picker(
+    BuildContext context,
+    String label,
+    String activeUuid,
+    Color foreground,
+  ) {
+    return AppPopupMenu<String>(
+      tooltip: 'Active Workspace: $label',
+      enabled: controller.isConnected && controller.workspaces.isNotEmpty,
+      onSelected: (String uuid) {
+        if (uuid.isEmpty) {
+          unawaited(controller.selectThreadWorkspace(null));
+          return;
+        }
+        for (final workspace in controller.workspaces) {
+          if (workspace.uuid == uuid) {
+            unawaited(controller.selectThreadWorkspace(workspace));
+            return;
+          }
+        }
+      },
+      items: <AppMenuItem<String>>[
+        AppMenuItem<String>(
+          value: '',
+          label: 'All workspaces',
+          icon: FluentIcons.apps_20_regular,
+          enabled: activeUuid.isNotEmpty,
         ),
         for (final workspace in controller.workspaces)
-          MenuItemButton(
-            onPressed: controller.threadsWorkspace?.uuid == workspace.uuid
-                ? null
-                : () => unawaited(controller.selectThreadWorkspace(workspace)),
-            leadingIcon: const Icon(FluentIcons.folder_20_regular, size: 16),
-            child: Text(workspace.name),
+          AppMenuItem<String>(
+            value: workspace.uuid,
+            label: workspace.name,
+            icon: FluentIcons.folder_20_regular,
+            enabled: activeUuid != workspace.uuid,
           ),
       ],
-      builder:
-          (BuildContext context, MenuController menuController, Widget? child) {
-            return Tooltip(
-              message: 'Active Workspace: $label',
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap:
-                      controller.isConnected && controller.workspaces.isNotEmpty
-                      ? menuController.open
-                      : null,
-                  hoverColor: hoverColor,
-                  focusColor: hoverColor,
-                  highlightColor: hoverColor,
-                  child: SizedBox(
-                    width: 180,
-                    height: kCaptionBarHeight,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        children: <Widget>[
-                          Icon(
-                            FluentIcons.folder_20_regular,
-                            size: 16,
-                            color: foreground,
-                          ),
-                          const SizedBox(width: 7),
-                          Expanded(
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.labelMedium
-                                  ?.copyWith(color: foreground),
-                            ),
-                          ),
-                          Icon(
-                            FluentIcons.chevron_down_16_regular,
-                            size: 12,
-                            color: foreground,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+      child: SizedBox(
+        width: 180,
+        height: kCaptionBarHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: <Widget>[
+              Icon(FluentIcons.folder_20_regular, size: 16, color: foreground),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium
+                      ?.copyWith(color: foreground),
                 ),
               ),
-            );
-          },
+              Icon(
+                FluentIcons.chevron_down_16_regular,
+                size: 12,
+                color: foreground,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

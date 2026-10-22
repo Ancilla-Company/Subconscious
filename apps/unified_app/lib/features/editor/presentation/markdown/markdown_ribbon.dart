@@ -54,7 +54,6 @@ final class MarkdownRibbon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
     final bool editable = mode != MarkdownViewMode.preview;
     final String mod = shortcutPrefix;
 
@@ -64,142 +63,122 @@ final class MarkdownRibbon extends StatelessWidget {
       required VoidCallback onPressed,
       bool selected = false,
       bool enabled = true,
-    }) => SidebarButton(
+    }) => AppIconButton(
       icon: icon,
-      selectedIcon: icon,
       tooltip: tooltip,
       selected: selected,
       onPressed: enabled ? onPressed : null,
     );
 
-    Widget divider() => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: SizedBox(
-        width: 1,
-        height: 20,
-        child: ColoredBox(color: colors.outlineVariant),
-      ),
-    );
-
-    return ClipRRect(
-      borderRadius: const BorderRadius.all(Radius.circular(6)),
-      child: ColoredBox(
-        color: colors.surfaceContainerLow,
-        child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              button(
-                icon: FluentIcons.text_bold_20_regular,
-                tooltip: 'Bold (${mod}B)',
-                enabled: editable,
-                onPressed: () => onInline(InlineMark.bold),
-              ),
-              button(
-                icon: FluentIcons.text_italic_20_regular,
-                tooltip: 'Italic (${mod}I)',
-                enabled: editable,
-                onPressed: () => onInline(InlineMark.italic),
-              ),
-              button(
-                icon: FluentIcons.text_strikethrough_20_regular,
-                tooltip: 'Strikethrough (${mod}Shift+X)',
-                enabled: editable,
-                onPressed: () => onInline(InlineMark.strike),
-              ),
-              button(
-                icon: FluentIcons.code_20_regular,
-                tooltip: 'Inline code (${mod}E)',
-                enabled: editable,
-                onPressed: () => onInline(InlineMark.code),
-              ),
-              button(
-                icon: FluentIcons.link_20_regular,
-                tooltip: 'Link (${mod}K)',
-                enabled: editable,
-                onPressed: onLink,
-              ),
-              divider(),
-              button(
-                icon: FluentIcons.text_header_1_20_regular,
-                tooltip: 'Heading 1 (${mod}1)',
-                enabled: editable,
-                onPressed: () => onHeading(1),
-              ),
-              button(
-                icon: FluentIcons.text_header_2_20_regular,
-                tooltip: 'Heading 2 (${mod}2)',
-                enabled: editable,
-                onPressed: () => onHeading(2),
-              ),
-              button(
-                icon: FluentIcons.text_header_3_20_regular,
-                tooltip: 'Heading 3 (${mod}3)',
-                enabled: editable,
-                onPressed: () => onHeading(3),
-              ),
-              divider(),
-              button(
-                icon: FluentIcons.text_bullet_list_20_regular,
-                tooltip: 'Bulleted list (${mod}Shift+L)',
-                enabled: editable,
-                onPressed: () => onPrefix(LinePrefix.bullet),
-              ),
-              button(
-                icon: FluentIcons.text_number_list_ltr_20_regular,
-                tooltip: 'Numbered list (${mod}Shift+O)',
-                enabled: editable,
-                onPressed: () => onPrefix(LinePrefix.numbered),
-              ),
-              button(
-                icon: FluentIcons.task_list_ltr_20_regular,
-                tooltip: 'Task list (${mod}Shift+T)',
-                enabled: editable,
-                onPressed: () => onPrefix(LinePrefix.task),
-              ),
-              button(
-                icon: FluentIcons.text_quote_20_regular,
-                tooltip: 'Quote (${mod}Shift+Q)',
-                enabled: editable,
-                onPressed: () => onPrefix(LinePrefix.quote),
-              ),
-              button(
-                icon: FluentIcons.code_block_20_regular,
-                tooltip: 'Code block (${mod}Shift+K)',
-                enabled: editable,
-                onPressed: onCodeBlock,
-              ),
-              divider(),
-              button(
-                icon: FluentIcons.search_20_regular,
-                tooltip: 'Find and replace (${mod}F)',
-                enabled: editable,
-                onPressed: onFind,
-              ),
-              divider(),
-              button(
-                icon: FluentIcons.edit_20_regular,
-                tooltip: 'Edit',
-                selected: mode == MarkdownViewMode.edit,
-                onPressed: () => onModeChanged(MarkdownViewMode.edit),
-              ),
-              button(
-                icon: FluentIcons.layout_column_two_20_regular,
-                tooltip: 'Edit and preview side by side',
-                selected: mode == MarkdownViewMode.split,
-                onPressed: () => onModeChanged(MarkdownViewMode.split),
-              ),
-              button(
-                icon: FluentIcons.eye_20_regular,
-                tooltip: 'Preview',
-                selected: mode == MarkdownViewMode.preview,
-                onPressed: () => onModeChanged(MarkdownViewMode.preview),
-              ),
-            ],
-          ),
+    return AppToolbar(
+      children: <Widget>[
+        button(
+          icon: FluentIcons.text_bold_20_regular,
+          tooltip: 'Bold (${mod}B)',
+          enabled: editable,
+          onPressed: () => onInline(InlineMark.bold),
         ),
-      ),
+        button(
+          icon: FluentIcons.text_italic_20_regular,
+          tooltip: 'Italic (${mod}I)',
+          enabled: editable,
+          onPressed: () => onInline(InlineMark.italic),
+        ),
+        button(
+          icon: FluentIcons.text_strikethrough_20_regular,
+          tooltip: 'Strikethrough (${mod}Shift+X)',
+          enabled: editable,
+          onPressed: () => onInline(InlineMark.strike),
+        ),
+        button(
+          icon: FluentIcons.code_20_regular,
+          tooltip: 'Inline code (${mod}E)',
+          enabled: editable,
+          onPressed: () => onInline(InlineMark.code),
+        ),
+        button(
+          icon: FluentIcons.link_20_regular,
+          tooltip: 'Link (${mod}K)',
+          enabled: editable,
+          onPressed: onLink,
+        ),
+        const AppToolbarDivider(),
+        button(
+          icon: FluentIcons.text_header_1_20_regular,
+          tooltip: 'Heading 1 (${mod}1)',
+          enabled: editable,
+          onPressed: () => onHeading(1),
+        ),
+        button(
+          icon: FluentIcons.text_header_2_20_regular,
+          tooltip: 'Heading 2 (${mod}2)',
+          enabled: editable,
+          onPressed: () => onHeading(2),
+        ),
+        button(
+          icon: FluentIcons.text_header_3_20_regular,
+          tooltip: 'Heading 3 (${mod}3)',
+          enabled: editable,
+          onPressed: () => onHeading(3),
+        ),
+        const AppToolbarDivider(),
+        button(
+          icon: FluentIcons.text_bullet_list_20_regular,
+          tooltip: 'Bulleted list (${mod}Shift+L)',
+          enabled: editable,
+          onPressed: () => onPrefix(LinePrefix.bullet),
+        ),
+        button(
+          icon: FluentIcons.text_number_list_ltr_20_regular,
+          tooltip: 'Numbered list (${mod}Shift+O)',
+          enabled: editable,
+          onPressed: () => onPrefix(LinePrefix.numbered),
+        ),
+        button(
+          icon: FluentIcons.task_list_ltr_20_regular,
+          tooltip: 'Task list (${mod}Shift+T)',
+          enabled: editable,
+          onPressed: () => onPrefix(LinePrefix.task),
+        ),
+        button(
+          icon: FluentIcons.text_quote_20_regular,
+          tooltip: 'Quote (${mod}Shift+Q)',
+          enabled: editable,
+          onPressed: () => onPrefix(LinePrefix.quote),
+        ),
+        button(
+          icon: FluentIcons.code_block_20_regular,
+          tooltip: 'Code block (${mod}Shift+K)',
+          enabled: editable,
+          onPressed: onCodeBlock,
+        ),
+        const AppToolbarDivider(),
+        button(
+          icon: FluentIcons.search_20_regular,
+          tooltip: 'Find and replace (${mod}F)',
+          enabled: editable,
+          onPressed: onFind,
+        ),
+        const AppToolbarDivider(),
+        button(
+          icon: FluentIcons.edit_20_regular,
+          tooltip: 'Edit',
+          selected: mode == MarkdownViewMode.edit,
+          onPressed: () => onModeChanged(MarkdownViewMode.edit),
+        ),
+        button(
+          icon: FluentIcons.layout_column_two_20_regular,
+          tooltip: 'Edit and preview side by side',
+          selected: mode == MarkdownViewMode.split,
+          onPressed: () => onModeChanged(MarkdownViewMode.split),
+        ),
+        button(
+          icon: FluentIcons.eye_20_regular,
+          tooltip: 'Preview',
+          selected: mode == MarkdownViewMode.preview,
+          onPressed: () => onModeChanged(MarkdownViewMode.preview),
+        ),
+      ],
     );
   }
 }

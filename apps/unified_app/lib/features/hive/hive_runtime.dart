@@ -297,7 +297,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   /// Node id of the home engine this app is connected to, once resolved.
   String? homeEngineId;
 
-  /// Node id of an engine this app reaches directly over REST (a LAN or 
+  /// Node id of an engine this app reaches directly over REST (a LAN or
   /// explicit URL, with no hive link), read from that engine. It is the same
   /// machine as one of the account's listed full nodes, so it must not be
   /// offered a second time as another device.
@@ -333,7 +333,31 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   /// reconnect or pick an engine.
   bool autoConnect = true;
 
-  EngineLinkState engineState = EngineLinkState.disconnected;
+  EngineLinkState _engineState = EngineLinkState.disconnected;
+
+  /// Engine whose peer link is up but whose session the dashboard has not
+  /// confirmed yet. The link only counts as connected once the dashboard
+  /// controller reports its session up (see [engineSessionChanged]).
+  String? _pendingHomeId;
+
+  /// The card's state. "Connected" is never reported on the strength of the
+  /// peer link alone: whenever the dashboard's session is down the state reads
+  /// as failed, so the card, the header indicator and the composer can never
+  /// disagree.
+  EngineLinkState get engineState =>
+      _engineState == EngineLinkState.connected &&
+          !hasLocalFullNode &&
+          !(engineSessionUp?.call() ?? true)
+      ? EngineLinkState.failed
+      : _engineState;
+
+  set engineState(EngineLinkState value) {
+    _engineState = value;
+    if (value == EngineLinkState.disconnected ||
+        value == EngineLinkState.failed) {
+      _pendingHomeId = null;
+    }
+  }
 
   /// Re-runs the dashboard's connection resolver (set in `main.dart`).
   Future<void> Function()? onEngineAvailable;
@@ -352,15 +376,39 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   void engineSessionChanged({required bool up, required bool connecting}) {
     bool changed = _lastSessionUp != up;
     _lastSessionUp = up;
-    if (!hasLocalFullNode &&
-        !up &&
-        !connecting &&
-        engineState == EngineLinkState.connected) {
-      homeEngineId = null;
-      engineState = EngineLinkState.failed;
-      changed = true;
+    if (!hasLocalFullNode) {
+      final String? pending = _pendingHomeId;
+      if (up && pending != null) {
+        // The dashboard confirmed the session: now, and only now, connected.
+        _pendingHomeId = null;
+        homeEngineId = pending;
+        _engineState = EngineLinkState.connected;
+        changed = true;
+      } else if (!up &&
+          !connecting &&
+          _engineState == EngineLinkState.connected) {
+        homeEngineId = null;
+        _engineState = EngineLinkState.failed;
+        changed = true;
+      }
     }
     if (changed) notifyListeners();
+  }
+
+  int _attemptSeq = 0;
+  int _abandonedThrough = 0;
+
+  /// The dashboard's attempt to bring the session up failed. A peer link set
+  /// up for it is abandoned, and a link still being set up when this fires
+  /// (the attempt timed out) is dropped when it completes.
+  void engineAttemptFailed() {
+    if (hasLocalFullNode) return;
+    _abandonedThrough = _attemptSeq;
+    if (_pendingHomeId != null) {
+      _pendingHomeId = null;
+      _engineState = EngineLinkState.failed;
+      notifyListeners();
+    }
   }
 
   /// True for the device row that is this app's own client of the local
@@ -610,7 +658,8 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       // The first option already is the connected engine. With a local full
       // node there is no home id, so also skip that engine's own directory row.
       if (!v.isLocal &&
-          (connectedNodeId == null || !nodeIdsEqual(v.node.id, connectedNodeId!)))
+          (connectedNodeId == null ||
+              !nodeIdsEqual(v.node.id, connectedNodeId!)))
         ExecutorOption(
           nodeId: v.node.id,
           name: v.node.name.isEmpty ? v.node.id : v.node.name,
@@ -628,10 +677,27 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     return null;
   }
 
+  /// Whether tasks have an engine to run on by default: this device is the
+  /// engine, a remote or direct engine is connected, or (when the dashboard
+  /// does not report) the session is assumed up. A phone or browser with no
+  /// session has none, and must not describe itself as "this engine".
+  bool get hasDefaultEngine =>
+      hasLocalFullNode ||
+      connectedNodeId != null ||
+      (engineSessionUp?.call() ?? true);
+
   String _homeName() {
     final NodeView? home = _homeView();
-    if (home == null) return 'This engine';
-    return home.node.name.isEmpty ? 'This engine' : '${home.node.name} (home)';
+    if (!hasDefaultEngine) return 'No engine connected';
+    // "This engine" only describes an engine reached over localhost, i.e. on a
+    // platform that runs one next to the app. A phone or browser never has a
+    // local engine; whatever it is connected to is a remote engine.
+    final bool localhost = hasLocalFullNode || expectsLocalEngine;
+    if (home == null) return localhost ? 'This engine' : 'Connected engine';
+    if (home.node.name.isEmpty) {
+      return localhost ? 'This engine' : 'Connected engine';
+    }
+    return '${home.node.name} (home)';
   }
 
   @override
@@ -939,8 +1005,10 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       if (!hive.started) {
         await adoptSession();
         if (!hive.started) {
-          offlineProblem = 'This device could not join the hive. '
-              '${error == null ? '' : 'Cause: $error'}'.trim();
+          offlineProblem =
+              'This device could not join the hive. '
+                      '${error == null ? '' : 'Cause: $error'}'
+                  .trim();
           return;
         }
       }
@@ -950,7 +1018,8 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       serverUnavailable = false;
       unawaited(maybeAutoConnect());
     } on HiveApiException catch (caught) {
-      offlineProblem = 'The server refused the refresh '
+      offlineProblem =
+          'The server refused the refresh '
           '(HTTP ${caught.statusCode}: ${caught.message}).';
       _fail(caught);
     } on Object catch (caught) {
@@ -1104,6 +1173,8 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       notifyListeners();
       return null;
     }
+    final int attempt = ++_attemptSeq;
+    _pendingHomeId = null;
     engineState = EngineLinkState.connecting;
     notifyListeners();
     try {
@@ -1121,9 +1192,19 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       notifyListeners();
       return null;
     }
+    if (attempt <= _abandonedThrough) {
+      // The dashboard gave up on this attempt while the link was being set up.
+      homeEngineId = null;
+      engineState = EngineLinkState.failed;
+      notifyListeners();
+      return null;
+    }
     await _storage.write(key: _homeKey, value: home.id);
-    homeEngineId = home.id;
-    engineState = EngineLinkState.connected;
+    // Still "connecting": the dashboard controller owns the session. It
+    // confirms (or abandons) this link through [engineSessionChanged].
+    _pendingHomeId = home.id;
+    homeEngineId = null;
+    engineState = EngineLinkState.connecting;
     notifyListeners();
     Future<PeerLink> link() => hive.connectTo(home.id);
     return EngineRepository(
@@ -1222,7 +1303,8 @@ String? engineOfflineProblem(Map<String, dynamic> snapshot) {
   final Object? signalling = snapshot['signalling'];
   if (snapshot['state'] != 'running' || signalling is! Map) return null;
   if (signalling['connected'] == true) return null;
-  final Object? cause = signalling['last_error_detail'] ?? signalling['last_error'];
+  final Object? cause =
+      signalling['last_error_detail'] ?? signalling['last_error'];
   final Object? failures = signalling['failures'];
   // Not connected yet and nothing failed: the first attempt is still running.
   if ((failures is! int || failures == 0) && cause == null) return null;

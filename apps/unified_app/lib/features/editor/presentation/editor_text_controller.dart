@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import 'editor_fonts.dart';
 import 'markdown/markdown_tokenizer.dart';
@@ -92,8 +93,8 @@ class EditorTextController extends TextEditingController {
         ? <MdRun>[MdRun(0, text.length, 0)]
         : _runs;
     final Map<int, TextStyle?> styles = <int, TextStyle?>{};
-    final Color matchColor = Colors.amber.withValues(alpha: 0.35);
-    final Color currentColor = Colors.orange.withValues(alpha: 0.6);
+    final Color matchColor = AppColors.highlightFind;
+    final Color currentColor = AppColors.highlightFindCurrent;
     final List<InlineSpan> children = <InlineSpan>[];
     int matchIndex = 0;
     for (final MdRun run in runs) {
@@ -151,7 +152,8 @@ class EditorTextController extends TextEditingController {
           text.substring(from, to),
           segment,
           base,
-          atLineStart: from == 0 || TabDisplay.endsLine(text.codeUnitAt(from - 1)),
+          atLineStart:
+              from == 0 || TabDisplay.endsLine(text.codeUnitAt(from - 1)),
         );
         from = to;
       }
@@ -237,9 +239,14 @@ final class MarkdownTextController extends EditorTextController {
     if (!_styled || !selection.isValid) return TextRange.empty;
     final int start = selection.start.clamp(0, text.length);
     final int end = selection.end.clamp(0, text.length);
-    final int lineStart = start == 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
+    final int lineStart = start == 0
+        ? 0
+        : text.lastIndexOf('\n', start - 1) + 1;
     final int newline = text.indexOf('\n', end);
-    return TextRange(start: lineStart, end: newline < 0 ? text.length : newline);
+    return TextRange(
+      start: lineStart,
+      end: newline < 0 ? text.length : newline,
+    );
   }
 
   @override
@@ -249,7 +256,9 @@ final class MarkdownTextController extends EditorTextController {
     if (!symbol || flags & _keepVisible != 0) return null;
     // A run on a revealed line is drawn in full. A caret at the very end of
     // the line still counts as on it.
-    if (revealed.isValid && run.start <= revealed.end && run.end > revealed.start) {
+    if (revealed.isValid &&
+        run.start <= revealed.end &&
+        run.end > revealed.start) {
       return null;
     }
     return const TextStyle(

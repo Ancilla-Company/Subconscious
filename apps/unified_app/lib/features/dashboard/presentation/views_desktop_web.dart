@@ -38,7 +38,7 @@ final class _DesktopWebDashboardViewState
   static const double _maximumContextPanelWidth = 600;
   static const double _minimumMainPanelWidth = 300;
   static const double _sidebarAndDividerWidth = 41;
-  static const double _resizeDividerWidth = 5;
+  static const double _resizeDividerWidth = AppPanelDivider.width;
 
   void _selectPanel(DashboardSection section) {
     widget.controller.updateLayoutState(contextPanelVisible: true);
@@ -145,11 +145,7 @@ final class _DesktopWebDashboardViewState
       onPanelSelected: _selectPanel,
       onAccountSelected: _selectAccount,
     );
-    final Widget sidebarDivider = SizedBox(
-      width: 1,
-      height: double.infinity,
-      child: ColoredBox(color: colors.outlineVariant),
-    );
+    const Widget sidebarDivider = AppVerticalRule();
     final int mainPanelIndex = panelOrder.indexOf(DashboardPanel.main);
     final int chatPanelIndex = panelOrder.indexOf(DashboardPanel.chat);
     final int flexiblePanelIndex = mainPanelIndex >= 0
@@ -162,7 +158,7 @@ final class _DesktopWebDashboardViewState
     final List<Widget> configuredPanels = <Widget>[
       for (int index = 0; index < panelOrder.length; index++) ...<Widget>[
         if (index > 0)
-          _PanelResizeDivider(
+          AppPanelDivider(
             onDragUpdate: (DragUpdateDetails details) => _resizePanel(
               panel: _panelForDivider(
                 leftIndex: index - 1,
@@ -292,6 +288,15 @@ final class _DesktopWebDashboardViewState
                 onToolApproval: (bool approved) => unawaited(
                   widget.controller.respondToToolApproval(approved),
                 ),
+                oauth: widget.controller.pendingOAuth,
+                onOAuthOpen: () =>
+                    unawaited(widget.controller.openOAuthSignIn()),
+                onOAuthPaste: (String pasted) =>
+                    unawaited(widget.controller.completeOAuthFromPaste(pasted)),
+                onOAuthCancel: () => unawaited(widget.controller.cancelOAuth()),
+                oauthError: widget.controller.oauthError == null
+                    ? null
+                    : describeChatError(widget.controller.oauthError!),
                 onUpdateThread:
                     ({
                       required ThreadInfo thread,
@@ -311,9 +316,6 @@ final class _DesktopWebDashboardViewState
                     widget.controller.pendingDraftTitle,
                 draftToolsConfig: widget.controller.pendingDraftToolsConfig,
                 executors: widget.controller.executors,
-                useNeutralUserBubbleForeground:
-                    widget.controller.settings.accentTheme ==
-                    AppAccentTheme.neutral,
               );
             }
           },
@@ -378,42 +380,6 @@ final class _DesktopWebDashboardViewState
   }
 }
 
-final class _PanelResizeDivider extends StatelessWidget {
-  const _PanelResizeDivider({required this.onDragUpdate});
-
-  final GestureDragUpdateCallback onDragUpdate;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return MouseRegion(
-      cursor: SystemMouseCursors.resizeColumn,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onHorizontalDragUpdate: onDragUpdate,
-        child: ColoredBox(
-          color: colors.surface,
-          child: SizedBox(
-            width: 5,
-            height: double.infinity,
-            child: Stack(
-              children: <Widget>[
-                Positioned(
-                  left: 2,
-                  top: 0,
-                  bottom: 0,
-                  width: 1,
-                  child: ColoredBox(color: colors.outlineVariant),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 final class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selectedPanel,
@@ -463,7 +429,7 @@ final class _Sidebar extends StatelessWidget {
             onPressed: () => onPanelSelected(DashboardSection.files),
           ),
           const Spacer(),
-          const _SidebarDivider(),
+          const AppSidebarDivider(),
           SidebarButton(
             icon: FluentIcons.settings_24_regular,
             selectedIcon: FluentIcons.settings_24_filled,
@@ -493,18 +459,5 @@ final class _Sidebar extends StatelessWidget {
         ],
       ),
     ),
-  );
-}
-
-final class _SidebarDivider extends StatelessWidget {
-  const _SidebarDivider();
-
-  @override
-  Widget build(BuildContext context) => Divider(
-    height: 1,
-    thickness: 1,
-    indent: 4,
-    endIndent: 4,
-    color: Theme.of(context).colorScheme.outlineVariant,
   );
 }

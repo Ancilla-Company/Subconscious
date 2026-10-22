@@ -96,7 +96,9 @@ final class _SourceEditorState extends State<SourceEditor> {
       ..addListener(_rememberScroll);
     _controller.addListener(_onControllerChanged);
     _find.addListener(_onFindChanged);
-    if (tab.scrollOffset == 0 && tab.selection.isValid && tab.selection.start > 0) {
+    if (tab.scrollOffset == 0 &&
+        tab.selection.isValid &&
+        tab.selection.start > 0) {
       // A restored caret far down the file should be in view.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _reveal(_controller.selection.extentOffset);
@@ -428,8 +430,9 @@ final class _SourceEditorState extends State<SourceEditor> {
               model: _find,
               queryFocus: _findFocus,
               textProvider: () => _controller.text,
-              anchorProvider: () =>
-                  _controller.selection.isValid ? _controller.selection.start : 0,
+              anchorProvider: () => _controller.selection.isValid
+                  ? _controller.selection.start
+                  : 0,
               onJump: _jump,
               onReplace: _replaceCurrent,
               onReplaceAll: _replaceAll,

@@ -4,6 +4,7 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../context/presentation/workspace_document_preview.dart';
 import '../../context/presentation/workspace_image_preview.dart';
@@ -44,8 +45,7 @@ final class WorkspaceFileEditor extends StatefulWidget {
 enum _CloseChoice { save, discard, cancel }
 
 final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
-  final Map<String, MarkdownViewMode> _viewModes =
-      <String, MarkdownViewMode>{};
+  final Map<String, MarkdownViewMode> _viewModes = <String, MarkdownViewMode>{};
   bool _focusEditorNext = false;
 
   EditorDocumentStore get _store => widget.store;
@@ -62,10 +62,10 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
 
   Future<void> _closeTab(EditorTab tab) async {
     if (tab is TextTab && tab.isDirty) {
-      final _CloseChoice? choice = await showDialog<_CloseChoice>(
+      final _CloseChoice? choice = await showAppDialog<_CloseChoice>(
         context: context,
-        builder: (BuildContext context) => AlertDialog(
-          title: Text('Save changes to ${tab.name}?'),
+        builder: (BuildContext context) => AppDialog(
+          title: 'Save changes to ${tab.name}?',
           content: const Text(
             'If you do not save, the changes you made to this file are lost.',
           ),
@@ -205,15 +205,8 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
             const SizedBox(width: 8),
             if (text != null)
               Tooltip(
-                message: connected
-                    ? 'Save (${shortcutPrefix}S)'
-                    : 'Not connected to the engine. Your changes are kept as a draft.',
+                message: connected ? 'Save (${shortcutPrefix}S)' : 'Not connected to the engine. Your changes are kept as a draft.',
                 child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(3)),
-                    ),
-                  ),
                   onPressed: canSave ? () => unawaited(_save(text)) : null,
                   icon: text.isSaving
                       ? const SizedBox.square(
@@ -237,7 +230,6 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
         banners.add(
           _EditorBanner(
             tone: _BannerTone.warning,
-            icon: FluentIcons.warning_20_regular,
             message: tab.recoveredFromDraft
                 ? 'Your unsaved changes were recovered, but the file on disk '
                       'has changed since. Choose which version to keep.'
@@ -261,7 +253,6 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
         banners.add(
           _EditorBanner(
             tone: _BannerTone.warning,
-            icon: FluentIcons.warning_20_regular,
             message:
                 'This file was deleted or moved on disk. Your text is still '
                 'here. Save to create the file again.',
@@ -281,7 +272,6 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       banners.add(
         _EditorBanner(
           tone: _BannerTone.error,
-          icon: FluentIcons.error_circle_20_regular,
           message: "Couldn't save: ${describeEditorError(saveError)}",
           actions: <Widget>[
             TextButton(
@@ -296,7 +286,6 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       banners.add(
         _EditorBanner(
           tone: _BannerTone.info,
-          icon: FluentIcons.history_20_regular,
           message: 'Restored your unsaved changes from last time.',
           actions: <Widget>[
             TextButton(
@@ -317,7 +306,6 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       banners.add(
         const _EditorBanner(
           tone: _BannerTone.info,
-          icon: FluentIcons.info_20_regular,
           message:
               'Large file: styling is turned off to keep typing responsive.',
         ),
@@ -339,7 +327,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       return Padding(
         padding: const EdgeInsets.all(12),
         child: ClipRRect(
-          borderRadius: const BorderRadius.all(Radius.circular(6)),
+          borderRadius: AppRadii.md,
           child: ColoredBox(
             color: colors.surfaceContainerLowest,
             child: WorkspaceImagePreview(bytes: tab.bytes, isSvg: tab.isSvg),
@@ -394,7 +382,8 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
 /// A plain-language description of a file operation failure.
 String describeEditorError(Object error) {
   if (error is EngineApiException) {
-    return error.engineMessage ?? 'The engine answered with ${error.statusCode}.';
+    return error.engineMessage ??
+        'The engine answered with ${error.statusCode}.';
   }
   if (error is TimeoutException) return 'The engine took too long to answer.';
   if (error is FileUnavailableException) return error.message;
@@ -407,69 +396,26 @@ enum _BannerTone { info, warning, error }
 final class _EditorBanner extends StatelessWidget {
   const _EditorBanner({
     required this.tone,
-    required this.icon,
     required this.message,
     this.actions = const <Widget>[],
   });
 
   final _BannerTone tone;
-  final IconData icon;
   final String message;
   final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme colors = theme.colorScheme;
-    final bool dark = theme.brightness == Brightness.dark;
-    final (Color background, Color foreground) = switch (tone) {
-      _BannerTone.info => (colors.secondaryContainer, colors.onSecondaryContainer),
-      // Amber is used for warnings whatever the accent colour, so a conflict
-      // never blends into a neutral theme.
-      _BannerTone.warning =>
-        dark
-            ? (const Color(0xFF4A3B12), const Color(0xFFFFE9A8))
-            : (const Color(0xFFFFF1C2), const Color(0xFF4A3B00)),
-      _BannerTone.error => (colors.errorContainer, colors.onErrorContainer),
-    };
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      child: Semantics(
-        liveRegion: true,
-        child: Material(
-          color: background,
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Row(
-              children: <Widget>[
-                Icon(icon, size: 18, color: foreground),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Text(
-                      message,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: foreground),
-                    ),
-                  ),
-                ),
-                if (actions.isNotEmpty)
-                  DefaultTextStyle.merge(
-                    style: TextStyle(color: foreground),
-                    child: TextButtonTheme(
-                      data: TextButtonThemeData(
-                        style: TextButton.styleFrom(foregroundColor: foreground),
-                      ),
-                      child: Wrap(spacing: 4, children: actions),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
+      child: AppBanner(
+        tone: switch (tone) {
+          _BannerTone.info => AppBannerTone.info,
+          _BannerTone.warning => AppBannerTone.warning,
+          _BannerTone.error => AppBannerTone.error,
+        },
+        message: message,
+        actions: actions,
       ),
     );
   }

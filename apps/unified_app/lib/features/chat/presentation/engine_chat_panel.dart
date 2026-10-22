@@ -6,13 +6,14 @@ import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../editor/presentation/markdown/markdown_preview.dart';
 import '../../hive/executor_selection.dart';
+import '../../tools/presentation/tool_policy_list.dart';
 import '../../voice/voice_controller.dart';
 import '../engine_llm_provider.dart';
 import 'executor_widgets.dart';
-import '../../settings/presentation/settings_main_panel.dart';
 
 typedef MaterializeThreadDraftCallback = Future<EngineLlmProvider> Function(
   String firstMessage,
@@ -33,7 +34,9 @@ typedef UpdateThreadCallback = Future<void> Function({
 /// `Exception: ` prefixes Dart adds to [StateError] / [Exception] strings.
 String describeChatError(Object error) {
   final String text = error is StateError ? error.message.toString() : '$error';
-  return text.replaceFirst(RegExp(r'^(Bad state|Exception|Error): '), '').trim();
+  return text
+      .replaceFirst(RegExp(r'^(Bad state|Exception|Error): '), '')
+      .trim();
 }
 
 final class EngineChatPanel extends StatefulWidget {
@@ -41,6 +44,7 @@ final class EngineChatPanel extends StatefulWidget {
     required this.provider,
     required this.isComposerEnabled,
     this.borderlessComposer = false,
+    this.minTouchTarget,
     this.onOpenDevices,
     this.errorMessage,
     this.workspace,
@@ -53,9 +57,13 @@ final class EngineChatPanel extends StatefulWidget {
     this.onRefreshActiveFile,
     this.toolApproval,
     this.onToolApproval,
+    this.oauth,
+    this.onOAuthOpen,
+    this.onOAuthPaste,
+    this.onOAuthCancel,
+    this.oauthError,
     this.title,
     this.draftToolsConfig,
-    this.useNeutralUserBubbleForeground = false,
     this.executors,
     super.key,
   });
@@ -67,6 +75,9 @@ final class EngineChatPanel extends StatefulWidget {
 
   /// Mobile layout: the composer has no outline.
   final bool borderlessComposer;
+
+  /// Raises the tappable size of the panel's icon buttons (mobile passes 48).
+  final double? minTouchTarget;
 
   /// When set and the composer is disabled, a notice offers this shortcut to
   /// the Account/Devices page.
@@ -85,9 +96,15 @@ final class EngineChatPanel extends StatefulWidget {
   final Future<void> Function()? onRefreshActiveFile;
   final ToolApprovalRequest? toolApproval;
   final ValueChanged<bool>? onToolApproval;
+
+  /// A tool sign-in waiting on the user, shown above any approval card.
+  final OAuthAuthorization? oauth;
+  final VoidCallback? onOAuthOpen;
+  final ValueChanged<String>? onOAuthPaste;
+  final VoidCallback? onOAuthCancel;
+  final String? oauthError;
   final String? title;
   final String? draftToolsConfig;
-  final bool useNeutralUserBubbleForeground;
 
   @override
   State<EngineChatPanel> createState() => _EngineChatPanelState();
@@ -139,7 +156,8 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     if (missed != null && !widget.provider.isBusy) {
       widget.provider.lastError = null;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showErrorToast(context, "Couldn't send the message: $missed");
+        if (mounted)
+          _showErrorToast(context, "Couldn't send the message: $missed");
       });
     }
   }
@@ -218,8 +236,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   Future<void> _loadModels() async {
     final int version = ++_modelLoadVersion;
     try {
-      final List<ModelInfo> loaded = await widget.provider.engine
-          .listModels();
+      final List<ModelInfo> loaded = await widget.provider.engine.listModels();
       if (!mounted || version != _modelLoadVersion) return;
       setState(() => _models = loaded);
       _voice.models = loaded;
@@ -408,10 +425,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
     if (workspace == null) return;
     final int version = ++_tagSearchVersion;
     try {
-      final List<WorkspaceFileMatch> matches = await widget
-          .provider
-          .engine
-          .rest
+      final List<WorkspaceFileMatch> matches = await widget.provider.engine.rest
           .searchFiles(
             workspaceUuid: workspace.uuid,
             query: query.query,
@@ -501,7 +515,8 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
       final bool accepted = widget.provider.sendSteeringMessage(
         content,
         onError: (Object error) {
-          if (mounted) _showErrorToast(context, "Couldn't send the message: $error");
+          if (mounted)
+            _showErrorToast(context, "Couldn't send the message: $error");
         },
       );
       if (accepted) {
@@ -661,12 +676,12 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
             children: <Widget>[
               gutter(
                 _ChatHeader(
+                  minTouchTarget: widget.minTouchTarget,
                   title: widget.title?.trim().isNotEmpty ?? false
                       ? widget.title!
                       : 'New thread',
                   canCreateThread:
-                      widget.isComposerEnabled &&
-                      widget.onCreateThread != null,
+                      widget.isComposerEnabled && widget.onCreateThread != null,
                   canEditThread:
                       (widget.isComposerEnabled || _showThreadSettings) &&
                       !_isSending &&
@@ -680,7 +695,8 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                 ),
               ),
               Expanded(
-                child: _showThreadSettings &&
+                child:
+                    _showThreadSettings &&
                         widget.workspace != null &&
                         widget.provider.repository != null
                     ? gutter(
@@ -701,40 +717,52 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                     ? const _EmptyChat()
                     : Scrollbar(
                         controller: _scrollController,
-                        child: SelectionArea(child: ListView.builder(
+                        child: SelectionArea(
+                          child: ListView.builder(
                             controller: _scrollController,
-                          padding: EdgeInsets.fromLTRB(
-                            horizontalPadding + 14,
-                            14,
-                            horizontalPadding + 14,
-                            10,
-                          ),
-                          itemCount: messages.length,
-                          itemBuilder: (BuildContext context, int index) =>
-                              _MessageBubble(
-                                message: messages[index],
-                                timestamp: widget.provider.timestampFor(
-                                  messages[index],
+                            padding: EdgeInsets.fromLTRB(
+                              horizontalPadding + 14,
+                              14,
+                              horizontalPadding + 14,
+                              10,
+                            ),
+                            itemCount: messages.length,
+                            itemBuilder: (BuildContext context, int index) =>
+                                _MessageBubble(
+                                  message: messages[index],
+                                  timestamp: widget.provider.timestampFor(
+                                    messages[index],
+                                  ),
+                                  minTouchTarget: widget.minTouchTarget,
+                                  onSpeak:
+                                      _voice.canSpeak &&
+                                          messages[index].origin ==
+                                              EngineChatMessageOrigin.assistant
+                                      ? () => unawaited(
+                                          _voice.toggleSpeak(
+                                            messages[index],
+                                            messages[index].text,
+                                          ),
+                                        )
+                                      : null,
+                                  isSpeaking:
+                                      _voice.speakingKey == messages[index],
                                 ),
-                                useNeutralUserBubbleForeground:
-                                    widget.useNeutralUserBubbleForeground,
-                                onSpeak:
-                                    _voice.canSpeak &&
-                                        messages[index].origin ==
-                                            EngineChatMessageOrigin.assistant
-                                    ? () => unawaited(
-                                        _voice.toggleSpeak(
-                                          messages[index],
-                                          messages[index].text,
-                                        ),
-                                      )
-                                    : null,
-                                isSpeaking:
-                                    _voice.speakingKey == messages[index],
-                              ),
-                        )),
+                          ),
+                        ),
                       ),
               ),
+              if (!_showThreadSettings)
+                if (widget.oauth case final OAuthAuthorization authorization)
+                  gutter(
+                    _OAuthSignInCard(
+                      authorization: authorization,
+                      onOpen: widget.onOAuthOpen,
+                      onPaste: widget.onOAuthPaste,
+                      onCancel: widget.onOAuthCancel,
+                      error: widget.oauthError,
+                    ),
+                  ),
               if (!_showThreadSettings)
                 if (widget.toolApproval case final ToolApprovalRequest request)
                   gutter(
@@ -765,6 +793,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                 gutter(
                   _Composer(
                     borderless: widget.borderlessComposer,
+                    minTouchTarget: widget.minTouchTarget,
                     controller: _composer,
                     focusNode: _composerFocusNode,
                     models: _models
@@ -788,7 +817,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                             directory: widget.executors!,
                             onSelected: _selectExecutor,
                             enabled: widget.isComposerEnabled && !_isSending,
-                            style: _compactControlStyle(context),
+                            minTouchTarget: widget.minTouchTarget,
                           ),
                     onModelSelected: (String modelId) =>
                         unawaited(_selectModel(modelId)),
@@ -814,35 +843,18 @@ final class _EngineUnreachableNotice extends StatelessWidget {
   final VoidCallback? onOpenDevices;
 
   @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      key: const ValueKey<String>('engine-unreachable-notice'),
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest,
-        border: Border.all(color: colors.outlineVariant),
-      ),
-      child: Row(
-        children: <Widget>[
-          Icon(Icons.cloud_off_outlined, size: 18, color: colors.onSurface),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-          if (onOpenDevices != null)
-            TextButton(
-              onPressed: onOpenDevices,
-              child: const Text('Devices'),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+    key: const ValueKey<String>('engine-unreachable-notice'),
+    padding: const EdgeInsets.only(bottom: 8),
+    child: AppBanner(
+      tone: AppBannerTone.warning,
+      message: message,
+      actions: <Widget>[
+        if (onOpenDevices != null)
+          TextButton(onPressed: onOpenDevices, child: const Text('Devices')),
+      ],
+    ),
+  );
 }
 
 final class _ChatHeader extends StatelessWidget {
@@ -853,6 +865,7 @@ final class _ChatHeader extends StatelessWidget {
     required this.settingsVisible,
     required this.onCreateThread,
     required this.onEditThread,
+    this.minTouchTarget,
   });
 
   final String title;
@@ -861,6 +874,7 @@ final class _ChatHeader extends StatelessWidget {
   final bool settingsVisible;
   final VoidCallback onCreateThread;
   final VoidCallback onEditThread;
+  final double? minTouchTarget;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -878,35 +892,21 @@ final class _ChatHeader extends StatelessWidget {
                   ?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
-          IconButton(
+          AppIconButton(
             tooltip: 'New thread',
-            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-            padding: EdgeInsets.zero,
-            style: _compactControlStyle(context),
+            icon: FluentIcons.add_20_regular,
+            minTouchTarget: minTouchTarget,
             onPressed: canCreateThread ? onCreateThread : null,
-            icon: const Icon(FluentIcons.add_20_regular, size: 20),
           ),
           const SizedBox(width: 4),
-          IconButton(
+          AppIconButton(
             tooltip: settingsVisible
                 ? 'Close thread settings'
                 : 'Thread settings',
-            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-            padding: EdgeInsets.zero,
-            isSelected: settingsVisible,
-            style: IconButton.styleFrom(
-              backgroundColor: settingsVisible
-                  ? Theme.of(context).colorScheme.secondaryContainer
-                  : null,
-              foregroundColor: settingsVisible
-                  ? Theme.of(context).colorScheme.onSecondaryContainer
-                  : null,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
+            icon: FluentIcons.more_horizontal_20_regular,
+            selected: settingsVisible,
+            minTouchTarget: minTouchTarget,
             onPressed: canEditThread ? onEditThread : null,
-            icon: const Icon(FluentIcons.more_horizontal_20_regular, size: 20),
           ),
         ],
       ),
@@ -933,10 +933,10 @@ final class _EmptyChat extends StatelessWidget {
 final class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
-    required this.useNeutralUserBubbleForeground,
     this.timestamp,
     this.onSpeak,
     this.isSpeaking = false,
+    this.minTouchTarget,
   });
 
   /// Reads the message aloud; null when no text-to-speech model is set up.
@@ -944,20 +944,17 @@ final class _MessageBubble extends StatelessWidget {
   final bool isSpeaking;
   final EngineChatMessage message;
   final DateTime? timestamp;
-  final bool useNeutralUserBubbleForeground;
+  final double? minTouchTarget;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
+    final TextTheme textTheme = Theme.of(context).textTheme;
     final bool isUser = message.origin == EngineChatMessageOrigin.user;
     final bool isSystem = message.origin == EngineChatMessageOrigin.system;
     final bool isAssistant =
         message.origin == EngineChatMessageOrigin.assistant;
-    final bool useNeutralForeground = isUser && useNeutralUserBubbleForeground;
-    final Color? messageForeground = useNeutralForeground
-        ? colors.onSecondaryContainer
-        : null;
-    final Color metadataForeground = useNeutralForeground
+    final Color metadataForeground = isUser
         ? colors.onSecondaryContainer.withValues(alpha: 0.7)
         : colors.onSurfaceVariant;
     final String text = message.text;
@@ -971,8 +968,7 @@ final class _MessageBubble extends StatelessWidget {
             _withReferencePills(
               context,
               text,
-              Theme.of(context).textTheme.bodyMedium
-                  ?.copyWith(height: 1.45, color: messageForeground),
+              textTheme.bodyMedium?.copyWith(height: 1.45),
             ),
           ),
         Row(
@@ -980,8 +976,9 @@ final class _MessageBubble extends StatelessWidget {
             if (timestamp != null)
               Text(
                 _formatTimestamp(timestamp!),
-                style: Theme.of(context).textTheme.labelSmall
-                    ?.copyWith(color: metadataForeground),
+                style: textTheme.labelSmall?.copyWith(
+                  color: metadataForeground,
+                ),
               ),
             if (isAssistant && message.ranOn != null)
               NodeBadge(name: message.ranOn!),
@@ -990,8 +987,9 @@ final class _MessageBubble extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 10),
                 child: Text(
                   _formatElapsed(message.elapsed!),
-                  style: Theme.of(context).textTheme.labelSmall
-                      ?.copyWith(color: metadataForeground),
+                  style: textTheme.labelSmall?.copyWith(
+                    color: metadataForeground,
+                  ),
                 ),
               ),
             if (isAssistant && (message.tokens ?? 0) > 0)
@@ -999,91 +997,62 @@ final class _MessageBubble extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 10),
                 child: Text(
                   '${message.tokensEstimated ? '~' : ''}${message.tokens} tokens',
-                  style: Theme.of(context).textTheme.labelSmall
-                      ?.copyWith(color: metadataForeground),
+                  style: textTheme.labelSmall?.copyWith(
+                    color: metadataForeground,
+                  ),
                 ),
               ),
             const Spacer(),
             if (onSpeak != null)
-              IconButton(
+              AppIconButton(
                 tooltip: isSpeaking ? 'Stop reading' : 'Read aloud',
-                constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-                padding: EdgeInsets.zero,
-                style: _compactControlStyle(context),
+                icon: isSpeaking
+                    ? FluentIcons.stop_16_regular
+                    : FluentIcons.speaker_2_16_regular,
+                iconSize: 16,
+                minTouchTarget: minTouchTarget,
                 onPressed: onSpeak,
-                icon: Icon(
-                  isSpeaking
-                      ? FluentIcons.stop_16_regular
-                      : FluentIcons.speaker_2_16_regular,
-                  size: 14,
-                ),
               ),
-            IconButton(
+            AppIconButton(
               tooltip: 'Copy message',
-              constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-              padding: EdgeInsets.zero,
-              style: useNeutralForeground
-                  ? IconButton.styleFrom(
-                      foregroundColor: metadataForeground,
-                      disabledForegroundColor: colors.onSecondaryContainer
-                          .withValues(alpha: 0.38),
-                    )
-                  : _compactControlStyle(context),
+              icon: FluentIcons.copy_16_regular,
+              iconSize: 16,
+              minTouchTarget: minTouchTarget,
               onPressed: text.isEmpty
                   ? null
                   : () => Clipboard.setData(ClipboardData(text: text)),
-              icon: const Icon(FluentIcons.copy_16_regular, size: 14),
             ),
           ],
         ),
       ],
     );
-    if (isSystem) {
-      return Align(
-        alignment: Alignment.center,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.fromLTRB(12, 8, 8, 5),
-          decoration: BoxDecoration(
-            color: colors.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Notification',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 3),
-              content,
-            ],
-          ),
-        ),
-      );
-    }
-    if (!isUser) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: SizedBox(width: double.infinity, child: content),
-      );
-    }
-    return Align(
-      alignment: Alignment.centerRight,
-      child: FractionallySizedBox(
-        widthFactor: 0.82,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.fromLTRB(13, 11, 8, 7),
-          decoration: BoxDecoration(
-            color: colors.secondaryContainer,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: content,
-        ),
+    final AppMessageRole role = isSystem
+        ? AppMessageRole.system
+        : isUser
+        ? AppMessageRole.user
+        : AppMessageRole.assistant;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppMessageBubble(
+        role: role,
+        boxed: !isAssistant,
+        maxWidthFraction: isUser ? 0.82 : 1,
+        child: isSystem
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Notification',
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  content,
+                ],
+              )
+            : content,
       ),
     );
   }
@@ -1095,60 +1064,156 @@ final class _ToolApprovalCard extends StatelessWidget {
   final ToolApprovalRequest request;
   final ValueChanged<bool>? onDecision;
 
+  /// The operation as shown to the user ('execute' reads as "Run").
+  static String _operationLabel(String operation) => switch (operation) {
+    'execute' => 'Run',
+    'read' => 'Read',
+    'update' => 'Update',
+    'delete' => 'Delete',
+    _ => operation,
+  };
+
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(8, 4, 8, 6),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: colors.tertiaryContainer,
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(6),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+      child: AppBanner(
+        tone: AppBannerTone.warning,
+        preface: request.remote
+            ? Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '${request.peerName ?? 'Another device'} wants to use a tool '
+                  'on this device',
+                  key: const ValueKey<String>('remote-approval-peer'),
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              )
+            : null,
+        title: 'Approval required: ${request.toolName}',
+        message:
+            '${_operationLabel(request.operation)}: '
+            '${jsonEncode(request.arguments)}',
+        messageMaxLines: 3,
+        actions: <Widget>[
+          TextButton(
+            onPressed: onDecision == null ? null : () => onDecision!(false),
+            child: const Text('Deny'),
+          ),
+          FilledButton(
+            onPressed: onDecision == null ? null : () => onDecision!(true),
+            child: const Text('Approve once'),
+          ),
+        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          if (request.remote)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '${request.peerName ?? 'Another device'} wants to use a tool '
-                'on this device',
-                key: const ValueKey<String>('remote-approval-peer'),
-                style: Theme.of(context).textTheme.labelMedium
-                    ?.copyWith(color: colors.onTertiaryContainer),
+    );
+  }
+}
+
+/// A tool needs the user to sign in. The browser step may land on a page this
+/// device cannot reach (the engine redirects to its own loopback address), so
+/// pasting the address the browser ended on is a first-class path.
+final class _OAuthSignInCard extends StatefulWidget {
+  const _OAuthSignInCard({
+    required this.authorization,
+    required this.onOpen,
+    required this.onPaste,
+    required this.onCancel,
+    this.error,
+  }) : super(key: const ValueKey<String>('oauth-signin-card'));
+
+  final OAuthAuthorization authorization;
+  final VoidCallback? onOpen;
+  final ValueChanged<String>? onPaste;
+  final VoidCallback? onCancel;
+  final String? error;
+
+  @override
+  State<_OAuthSignInCard> createState() => _OAuthSignInCardState();
+}
+
+final class _OAuthSignInCardState extends State<_OAuthSignInCard> {
+  final TextEditingController _pasted = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _pasted.addListener(_onTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(_OAuthSignInCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A different sign-in must not inherit text pasted for the previous one.
+    if (oldWidget.authorization.authId != widget.authorization.authId) {
+      _pasted.clear();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pasted.removeListener(_onTextChanged);
+    _pasted.dispose();
+    super.dispose();
+  }
+
+  void _onTextChanged() => setState(() {});
+
+  bool get _canSubmit =>
+      widget.onPaste != null && _pasted.text.trim().isNotEmpty;
+
+  void _submit() {
+    if (_canSubmit) widget.onPaste!(_pasted.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme text = Theme.of(context).textTheme;
+    final String toolName = widget.authorization.toolName;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+      child: AppBanner(
+        tone: AppBannerTone.warning,
+        title: toolName.isEmpty ? 'Sign in' : 'Sign in to $toolName',
+        message:
+            'Continue in your browser. If this device is not the one running '
+            'the engine, copy the address you end up on and paste it below.',
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton(
+                onPressed: widget.onOpen,
+                child: const Text('Open sign-in page'),
               ),
             ),
-          Text(
-            'Approval required: ${request.toolName}',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: colors.onTertiaryContainer,
-              fontWeight: FontWeight.w600,
+            const SizedBox(height: 8),
+            AppFormTheme(
+              child: AppTextField(
+                controller: _pasted,
+                onSubmitted: (_) => _submit(),
+                hintText: 'Paste the address or code',
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${request.operation}: ${jsonEncode(request.arguments)}',
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall
-                ?.copyWith(color: colors.onTertiaryContainer),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: <Widget>[
-              TextButton(
-                onPressed: onDecision == null ? null : () => onDecision!(false),
-                child: const Text('Deny'),
+            if (widget.error case final String message)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  message,
+                  key: const ValueKey<String>('oauth-signin-error'),
+                  style: text.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
               ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: onDecision == null ? null : () => onDecision!(true),
-                child: const Text('Approve once'),
-              ),
-            ],
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
+          FilledButton(
+            onPressed: _canSubmit ? _submit : null,
+            child: const Text('Submit'),
           ),
         ],
       ),
@@ -1180,10 +1245,12 @@ final class _Composer extends StatelessWidget {
     required this.onToggleRealtime,
     this.executorPicker,
     this.borderless = false,
+    this.minTouchTarget,
   });
 
   /// Drops the outline around the composer (mobile layout).
   final bool borderless;
+  final double? minTouchTarget;
 
   /// Optional "run on" control shown next to the send button.
   final Widget? executorPicker;
@@ -1235,7 +1302,7 @@ final class _Composer extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.surfaceContainerLowest,
         border: borderless ? null : Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: AppRadii.md,
         boxShadow: const <BoxShadow>[
           BoxShadow(
             color: Color(0x12000000),
@@ -1314,56 +1381,24 @@ final class _Composer extends StatelessWidget {
                   if (activeFile case final ChatFileReference file)
                     Tooltip(
                       message: file.label,
-                      child: InputChip(
-                        avatar: const Icon(
-                          FluentIcons.edit_20_regular,
-                          size: 13,
-                        ),
-                        label: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 180),
-                          child: Text(
-                            'Active: ${file.label}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                        ),
-                        visualDensity: const VisualDensity(
-                          horizontal: -2,
-                          vertical: -4,
-                        ),
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: EdgeInsets.zero,
-                        labelPadding: const EdgeInsets.symmetric(horizontal: 3),
-                        onPressed: null,
+                      child: AppBadge(
+                        'Active: ${file.label}',
+                        icon: FluentIcons.edit_20_regular,
+                        maxWidth: 180,
                       ),
                     ),
                   for (final ChatAttachment attachment in attachments)
-                    InputChip(
-                      avatar: const Icon(
-                        FluentIcons.attach_20_regular,
-                        size: 13,
+                    Tooltip(
+                      message: attachment.name,
+                      child: AppBadge(
+                        attachment.name,
+                        icon: FluentIcons.attach_20_regular,
+                        maxWidth: 180,
+                        deleteTooltip: 'Remove ${attachment.name}',
+                        onDeleted: interactive
+                            ? () => onRemoveAttachment(attachment.id)
+                            : null,
                       ),
-                      label: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 180),
-                        child: Text(
-                          attachment.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ),
-                      tooltip: attachment.name,
-                      visualDensity: const VisualDensity(
-                        horizontal: -2,
-                        vertical: -4,
-                      ),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      padding: EdgeInsets.zero,
-                      labelPadding: const EdgeInsets.symmetric(horizontal: 3),
-                      onDeleted: interactive
-                          ? () => onRemoveAttachment(attachment.id)
-                          : null,
                     ),
                 ],
               ),
@@ -1390,18 +1425,14 @@ final class _Composer extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
             child: Row(
               children: <Widget>[
-                IconButton(
+                AppIconButton(
                   tooltip: 'Attach files',
-                  constraints: const BoxConstraints.tightFor(
-                    width: 32,
-                    height: 32,
-                  ),
-                  padding: EdgeInsets.zero,
+                  icon: FluentIcons.attach_20_regular,
+                  iconSize: 19,
+                  minTouchTarget: minTouchTarget,
                   onPressed: interactive && attachments.length < 5
                       ? onAddAttachment
                       : null,
-                  style: _compactControlStyle(context),
-                  icon: const Icon(FluentIcons.attach_20_regular, size: 19),
                 ),
                 if (voice.canDictate) ...<Widget>[
                   const SizedBox(width: 2),
@@ -1409,40 +1440,36 @@ final class _Composer extends StatelessWidget {
                     state: voice.dictation,
                     enabled: enabled && voice.realtime == RealtimeState.off,
                     onPressed: onToggleDictation,
+                    minTouchTarget: minTouchTarget,
                   ),
                 ],
                 if (voice.canRealtime) ...<Widget>[
                   const SizedBox(width: 2),
-                  IconButton(
+                  AppIconButton(
                     tooltip: voice.realtime == RealtimeState.off
                         ? 'Talk (realtime voice)'
                         : 'End voice conversation',
-                    constraints: const BoxConstraints.tightFor(
-                      width: 32,
-                      height: 32,
-                    ),
-                    padding: EdgeInsets.zero,
-                    isSelected: voice.realtime != RealtimeState.off,
-                    style: _compactControlStyle(context),
+                    icon: FluentIcons.headphones_sound_wave_20_regular,
+                    iconSize: 19,
+                    selected: voice.realtime != RealtimeState.off,
+                    minTouchTarget: minTouchTarget,
                     onPressed: enabled ? onToggleRealtime : null,
-                    icon: const Icon(
-                      FluentIcons.headphones_sound_wave_20_regular,
-                      size: 19,
-                    ),
                   ),
                 ],
                 const SizedBox(width: 6),
                 Expanded(
                   child: SizedBox(
-                    height: 32,
+                    height: minTouchTarget == null || minTouchTarget! < 32
+                        ? 32
+                        : minTouchTarget,
                     child: Material(
                       color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: AppRadii.sm,
                       clipBehavior: Clip.antiAlias,
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isExpanded: true,
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: AppRadii.sm,
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(fontWeight: FontWeight.normal),
                           focusColor: colors.secondaryContainer,
@@ -1497,36 +1524,26 @@ final class _Composer extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 if (executorPicker case final Widget picker) ...<Widget>[
-                  SizedBox.square(dimension: 32, child: picker),
+                  picker,
                   const SizedBox(width: 4),
                 ],
-                IconButton(
+                AppIconButton(
                   tooltip: !enabled
                       ? 'Engine unavailable'
                       : isSending
                       ? 'Send to the running agent'
                       : 'Send',
-                  constraints: const BoxConstraints.tightFor(
-                    width: 32,
-                    height: 32,
-                  ),
-                  padding: EdgeInsets.zero,
+                  icon: FluentIcons.send_20_regular,
+                  minTouchTarget: minTouchTarget,
                   onPressed: enabled ? onSend : null,
-                  style: _compactControlStyle(context),
-                  icon: const Icon(FluentIcons.send_20_regular, size: 20),
                 ),
                 if (isSending) ...<Widget>[
                   const SizedBox(width: 4),
-                  IconButton(
+                  AppIconButton(
                     tooltip: 'Stop',
-                    constraints: const BoxConstraints.tightFor(
-                      width: 32,
-                      height: 32,
-                    ),
-                    padding: EdgeInsets.zero,
+                    icon: FluentIcons.stop_20_regular,
+                    minTouchTarget: minTouchTarget,
                     onPressed: onStop,
-                    style: _compactControlStyle(context),
-                    icon: const Icon(FluentIcons.stop_20_regular, size: 20),
                   ),
                 ],
               ],
@@ -1543,42 +1560,42 @@ final class _DictationButton extends StatelessWidget {
     required this.state,
     required this.enabled,
     required this.onPressed,
+    this.minTouchTarget,
   });
 
   final DictationState state;
   final bool enabled;
   final VoidCallback onPressed;
+  final double? minTouchTarget;
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final double dimension = minTouchTarget == null || minTouchTarget! < 32
+        ? 32
+        : minTouchTarget!;
     return switch (state) {
-      DictationState.transcribing => const SizedBox.square(
-        dimension: 32,
-        child: Padding(
+      DictationState.transcribing => SizedBox.square(
+        dimension: dimension,
+        child: const Padding(
           padding: EdgeInsets.all(8),
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
       ),
-      DictationState.recording => IconButton(
+      DictationState.recording => AppIconButton(
         tooltip: 'Stop recording',
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-        padding: EdgeInsets.zero,
-        style: IconButton.styleFrom(
-          foregroundColor: colors.onError,
-          backgroundColor: colors.error,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        ),
+        icon: FluentIcons.stop_20_filled,
+        iconSize: 18,
+        selected: true,
+        destructive: true,
+        minTouchTarget: minTouchTarget,
         onPressed: onPressed,
-        icon: const Icon(FluentIcons.stop_20_filled, size: 18),
       ),
-      DictationState.idle => IconButton(
+      DictationState.idle => AppIconButton(
         tooltip: 'Dictate a message',
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-        padding: EdgeInsets.zero,
-        style: _compactControlStyle(context),
+        icon: FluentIcons.mic_20_regular,
+        iconSize: 19,
+        minTouchTarget: minTouchTarget,
         onPressed: enabled ? onPressed : null,
-        icon: const Icon(FluentIcons.mic_20_regular, size: 19),
       ),
     };
   }
@@ -1593,57 +1610,23 @@ final class _VoiceBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final TextTheme text = Theme.of(context).textTheme;
     final VoiceLine? last = voice.lines.isEmpty ? null : voice.lines.last;
     final String status = voice.realtime == RealtimeState.connecting
         ? 'Connecting…'
         : voice.toolActivity != null
         ? 'Working on it…'
         : 'Listening';
-    return Semantics(
-      liveRegion: true,
-      child: Container(
-        margin: const EdgeInsets.only(top: 4),
-        padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
-        decoration: BoxDecoration(
-          color: colors.secondaryContainer,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              FluentIcons.headphones_sound_wave_20_regular,
-              size: 18,
-              color: colors.onSecondaryContainer,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    status,
-                    style: text.labelMedium?.copyWith(
-                      color: colors.onSecondaryContainer,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (last != null)
-                    Text(
-                      '${last.role == 'user' ? 'You' : 'Assistant'}: ${last.text}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.bodySmall?.copyWith(
-                        color: colors.onSecondaryContainer,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            TextButton(onPressed: onEnd, child: const Text('End')),
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: AppBanner(
+        title: status,
+        message: last == null
+            ? ''
+            : '${last.role == 'user' ? 'You' : 'Assistant'}: ${last.text}',
+        messageMaxLines: 2,
+        actions: <Widget>[
+          TextButton(onPressed: onEnd, child: const Text('End')),
+        ],
       ),
     );
   }
@@ -1846,7 +1829,6 @@ TextSpan _withReferencePills(
   String text,
   TextStyle? style,
 ) {
-  final ColorScheme colors = Theme.of(context).colorScheme;
   final RegExp pattern = RegExp(r'(?<=^|\s)#[^\s#]+');
   final List<InlineSpan> spans = <InlineSpan>[];
   int cursor = 0;
@@ -1857,26 +1839,9 @@ TextSpan _withReferencePills(
     spans.add(
       WidgetSpan(
         alignment: PlaceholderAlignment.middle,
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-          decoration: BoxDecoration(
-            color: colors.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const Icon(FluentIcons.document_20_regular, size: 13),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  label,
-                  style: style?.copyWith(fontSize: (style.fontSize ?? 14) - 1),
-                ),
-              ),
-            ],
-          ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: AppBadge(label, icon: FluentIcons.document_20_regular),
         ),
       ),
     );
@@ -1917,47 +1882,12 @@ EdgeInsets _panelToastMargin(BuildContext context) {
   return EdgeInsets.fromLTRB(left, inset, right, inset);
 }
 
-void _showErrorToast(BuildContext context, String message) {
-  final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
-  if (messenger == null) return;
-  final ColorScheme colors = Theme.of(context).colorScheme;
-  messenger
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: colors.onErrorContainer),
-        ),
-        behavior: SnackBarBehavior.floating,
-        margin: _panelToastMargin(context),
-        duration: const Duration(seconds: 5),
-        showCloseIcon: true,
-        backgroundColor: colors.errorContainer,
-        closeIconColor: colors.onErrorContainer,
-      ),
-    );
-}
-
-ButtonStyle _compactControlStyle(BuildContext context) => IconButton.styleFrom(
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-);
-
-IconButton _compactIconButton({
-  required String tooltip,
-  required VoidCallback? onPressed,
-  required Widget icon,
-}) => IconButton(
-  tooltip: tooltip,
-  constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-  padding: EdgeInsets.zero,
-  style: IconButton.styleFrom(
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-  ),
-  onPressed: onPressed,
-  icon: icon,
+void _showErrorToast(BuildContext context, String message) => showAppSnack(
+  context,
+  message,
+  isError: true,
+  duration: const Duration(seconds: 5),
+  margin: _panelToastMargin(context),
 );
 
 final class _ThreadSettingsDraft {
@@ -2011,8 +1941,6 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
   bool _useWorkspaceDefaults = true;
   bool _builtinEnabled = true;
   bool _configuredEnabled = true;
-  bool _builtinExpanded = true;
-  bool _configuredExpanded = false;
   bool _loading = true;
   bool _saving = false;
 
@@ -2133,7 +2061,6 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       children: <Widget>[
@@ -2144,25 +2071,18 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
               style: Theme.of(context).textTheme.titleMedium
                   ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
             );
-            final Widget actions = Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 8,
-              runSpacing: 8,
+            final Widget actions = AppButtonRow(
               children: <Widget>[
-                _compactIconButton(
+                AppIconButton(
                   tooltip: 'Cancel thread settings',
+                  icon: FluentIcons.dismiss_20_regular,
                   onPressed: _saving ? null : widget.onCancel,
-                  icon: const Icon(FluentIcons.dismiss_20_regular, size: 18),
                 ),
-                _compactIconButton(
+                AppIconButton(
                   tooltip: 'Save thread settings',
+                  icon: FluentIcons.save_20_regular,
+                  busy: _saving,
                   onPressed: _loading || _saving ? null : _submit,
-                  icon: _saving
-                      ? const SizedBox.square(
-                          dimension: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(FluentIcons.save_20_regular, size: 18),
                 ),
               ],
             );
@@ -2179,108 +2099,41 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
             );
           },
         ),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6, top: 18),
-          child: Text(
-            'Thread name',
-            style: Theme.of(context).textTheme.labelMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
-          ),
-        ),
-        TextField(
-          controller: _titleController,
-          autofocus: widget.isDraft,
-          enabled: !_saving,
-          decoration: InputDecoration(
-            isDense: true,
+        AppFormTheme(
+          child: AppTextField(
+            label: 'Thread name',
+            controller: _titleController,
+            autofocus: widget.isDraft,
+            enabled: !_saving,
             hintText: 'New thread',
-            filled: true,
-            fillColor: colors.surfaceContainerLowest,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 10,
-              vertical: 8,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: const BorderRadius.all(Radius.circular(3)),
-              borderSide: BorderSide(color: colors.outlineVariant),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: const BorderRadius.all(Radius.circular(3)),
-              borderSide: BorderSide(color: colors.outlineVariant),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: const BorderRadius.all(Radius.circular(3)),
-              borderSide: BorderSide(color: colors.outlineVariant),
-            ),
-            disabledBorder: OutlineInputBorder(
-              borderRadius: const BorderRadius.all(Radius.circular(3)),
-              borderSide: BorderSide(
-                color: colors.outlineVariant.withValues(alpha: 0.5),
-              ),
-            ),
-            hintStyle: TextStyle(
-              color: colors.onSurfaceVariant.withValues(alpha: 0.33),
-            ),
           ),
         ),
         if (widget.threadUuid case final String threadUuid) ...<Widget>[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6, top: 18),
-            child: Text(
-              'Thread UUID',
-              style: Theme.of(context).textTheme.labelMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
+          const AppFieldLabel('Thread UUID'),
           Row(
             children: <Widget>[
               Expanded(
-                child: SizedBox(
-                  height: 32,
-                  child: Theme(
-                    data: settingsFormTheme(context),
-                    child: TextFormField(
-                      key: ValueKey<String>(threadUuid),
-                      initialValue: threadUuid,
-                      readOnly: true,
-                      maxLines: null,
-                      expands: true,
-                      textAlignVertical: TextAlignVertical.center,
-                      decoration: const InputDecoration(
-                        constraints: BoxConstraints.tightFor(height: 32),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                    ),
+                child: AppFormTheme(
+                  child: AppTextField(
+                    key: ValueKey<String>(threadUuid),
+                    initialValue: threadUuid,
+                    readOnly: true,
+                    height: 32,
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              SizedBox.square(
-                dimension: 32,
-                child: IconButton(
-                  tooltip: 'Copy thread UUID',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 32,
-                    height: 32,
-                  ),
-                  style: IconButton.styleFrom(
-                    backgroundColor: colors.surfaceContainerLowest,
-                    side: BorderSide(color: colors.outlineVariant),
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(3)),
-                    ),
-                  ),
-                  onPressed: () async {
-                    await Clipboard.setData(ClipboardData(text: threadUuid));
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Thread UUID copied')),
-                      );
-                    }
-                  },
-                  icon: const Icon(FluentIcons.copy_20_regular, size: 17),
-                ),
+              AppIconButton(
+                outlined: true,
+                iconSize: 17,
+                tooltip: 'Copy thread UUID',
+                icon: FluentIcons.copy_20_regular,
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: threadUuid));
+                  if (context.mounted) {
+                    showAppSnack(context, 'Thread UUID copied');
+                  }
+                },
               ),
             ],
           ),
@@ -2304,9 +2157,25 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
           ),
-        _buildBuiltinTools(context),
-        const SizedBox(height: 10),
-        _buildConfiguredTools(context),
+        ToolPolicyList(
+          catalog: _catalog,
+          editable: _toolsEditable,
+          builtinEnabled: _builtinEnabled,
+          configuredEnabled: _configuredEnabled,
+          builtinGroups: _builtinGroups,
+          builtinTools: _builtinTools,
+          configuredTools: _configuredTools,
+          onBuiltinEnabled: (bool value) =>
+              _change(() => _builtinEnabled = value),
+          onConfiguredEnabled: (bool value) =>
+              _change(() => _configuredEnabled = value),
+          onGroupChanged: (String group, bool value) =>
+              _change(() => _builtinGroups[group] = value),
+          onBuiltinToolChanged: (String group, String tool, bool value) =>
+              _change(() => _builtinTools[group]![tool] = value),
+          onConfiguredToolChanged: (String uuid, bool value) =>
+              _change(() => _configuredTools[uuid] = value),
+        ),
       ],
     );
   }
@@ -2336,221 +2205,10 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
             ],
           ),
         ),
-        _RectangularSwitch(
-          value: value,
-          onChanged: onChanged,
-          semanticLabel: title,
-        ),
+        AppSwitch(value: value, onChanged: onChanged, semanticLabel: title),
       ],
     ),
   );
-
-  Widget _toolCardHeader(
-    BuildContext context, {
-    required String title,
-    required String subtitle,
-    required bool value,
-    required ValueChanged<bool>? onChanged,
-    required String semanticLabel,
-    required bool expanded,
-    required VoidCallback onToggle,
-  }) => LayoutBuilder(
-    builder: (BuildContext context, BoxConstraints constraints) {
-      final Widget controls = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          _RectangularSwitch(
-            value: value,
-            onChanged: onChanged,
-            semanticLabel: semanticLabel,
-          ),
-          const SizedBox(width: 8),
-          Icon(
-            expanded
-                ? FluentIcons.chevron_up_20_regular
-                : FluentIcons.chevron_down_20_regular,
-            size: 17,
-          ),
-        ],
-      );
-      if (constraints.maxWidth >= 220) {
-        return ListTile(
-          onTap: onToggle,
-          title: Text(title),
-          subtitle: Text(subtitle),
-          trailing: controls,
-        );
-      }
-      return InkWell(
-        onTap: onToggle,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(title, style: Theme.of(context).textTheme.titleSmall),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              Align(alignment: Alignment.centerRight, child: controls),
-            ],
-          ),
-        ),
-      );
-    },
-  );
-
-  Widget _buildBuiltinTools(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    clipBehavior: Clip.antiAlias,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(6)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _toolCardHeader(
-          context,
-          title: 'Builtin Tools',
-          subtitle: 'Enable tools provided by the engine.',
-          value: _builtinEnabled,
-          onChanged: _toolsEditable
-              ? (bool value) => _change(() => _builtinEnabled = value)
-              : null,
-          semanticLabel: 'Enable built-in tools',
-          expanded: _builtinExpanded,
-          onToggle: () => setState(() => _builtinExpanded = !_builtinExpanded),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          alignment: Alignment.topCenter,
-          child: !_builtinExpanded
-              ? const SizedBox.shrink()
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    const Divider(height: 1),
-                    if (_catalog?.builtin.isEmpty ?? true)
-                      const ListTile(
-                        title: Text('No built-in tools are available.'),
-                      ),
-                    for (final MapEntry<String, List<BuiltinToolCatalogEntry>>
-                        group
-                        in _catalog?.builtin.entries ??
-                            const <String, List<BuiltinToolCatalogEntry>>{}
-                                .entries)
-                      ExpansionTile(
-                        title: Text(_displayName(group.key)),
-                        trailing: _RectangularSwitch(
-                          value: _builtinGroups[group.key] ?? true,
-                          onChanged: _toolsEditable && _builtinEnabled
-                              ? (bool value) => _change(
-                                  () => _builtinGroups[group.key] = value,
-                                )
-                              : null,
-                          semanticLabel:
-                              'Enable ${_displayName(group.key)} tools',
-                        ),
-                        children: <Widget>[
-                          for (final BuiltinToolCatalogEntry tool
-                              in group.value)
-                            _buildBuiltinToolRow(group.key, tool),
-                        ],
-                      ),
-                  ],
-                ),
-        ),
-      ],
-    ),
-  );
-
-  Widget _buildBuiltinToolRow(String group, BuiltinToolCatalogEntry tool) {
-    final bool value = _builtinTools[group]?[tool.name] ?? true;
-    final bool enabled =
-        _toolsEditable && _builtinEnabled && (_builtinGroups[group] ?? true);
-    final String label = _displayName(tool.name);
-    void toggle(bool next) =>
-        _change(() => _builtinTools[group]![tool.name] = next);
-    return ListTile(
-      title: Text(label),
-      subtitle: tool.doc.isEmpty ? null : Text(tool.doc),
-      onTap: enabled ? () => toggle(!value) : null,
-      trailing: _RectangularSwitch(
-        value: value,
-        onChanged: enabled ? toggle : null,
-        semanticLabel: 'Enable $label',
-      ),
-    );
-  }
-
-  Widget _buildConfiguredTools(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    clipBehavior: Clip.antiAlias,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(6)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _toolCardHeader(
-          context,
-          title: 'Custom Tools',
-          subtitle:
-              'Configured tools are addressed by their stable registry ID.',
-          value: _configuredEnabled,
-          onChanged: _toolsEditable
-              ? (bool value) => _change(() => _configuredEnabled = value)
-              : null,
-          semanticLabel: 'Enable custom tools',
-          expanded: _configuredExpanded,
-          onToggle: () =>
-              setState(() => _configuredExpanded = !_configuredExpanded),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          alignment: Alignment.topCenter,
-          child: !_configuredExpanded
-              ? const SizedBox.shrink()
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    const Divider(height: 1),
-                    if (_catalog?.configured.isEmpty ?? true)
-                      const ListTile(
-                        title: Text('No custom tools are configured.'),
-                      ),
-                    for (final ToolRegistryEntry tool
-                        in _catalog?.configured ?? const <ToolRegistryEntry>[])
-                      _buildConfiguredToolRow(tool),
-                  ],
-                ),
-        ),
-      ],
-    ),
-  );
-
-  Widget _buildConfiguredToolRow(ToolRegistryEntry tool) {
-    final bool value = _configuredTools[tool.uuid] ?? true;
-    final bool enabled = _toolsEditable && _configuredEnabled;
-    final String label = tool.alias?.trim().isNotEmpty ?? false
-        ? tool.alias!
-        : tool.name;
-    void toggle(bool next) => _change(() => _configuredTools[tool.uuid] = next);
-    return ListTile(
-      title: Text(label),
-      subtitle: Text(tool.uuid),
-      onTap: enabled ? () => toggle(!value) : null,
-      trailing: _RectangularSwitch(
-        value: value,
-        onChanged: enabled ? toggle : null,
-        semanticLabel: 'Enable $label',
-      ),
-    );
-  }
 
   bool get _toolsEditable => !_useWorkspaceDefaults && !_loading && !_saving;
 
@@ -2577,100 +2235,4 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
     String key, {
     required bool fallback,
   }) => value[key] is bool ? value[key] as bool : fallback;
-
-  static String _displayName(String value) => value
-      .split(RegExp('[_\\-\\s]+'))
-      .where((String part) => part.isNotEmpty)
-      .map(
-        (String part) =>
-            '${part.substring(0, 1).toUpperCase()}${part.substring(1)}',
-      )
-      .join(' ');
-}
-
-final class _RectangularSwitch extends StatelessWidget {
-  const _RectangularSwitch({
-    required this.value,
-    required this.onChanged,
-    required this.semanticLabel,
-  });
-
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-  final String semanticLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final bool enabled = onChanged != null;
-    final Color trackColor = enabled
-        ? (value ? colors.primary : colors.surfaceContainerHighest)
-        : (value
-              ? colors.primary.withValues(alpha: 0.38)
-              : colors.onSurface.withValues(alpha: 0.12));
-    final Color thumbColor = enabled
-        ? (value ? colors.onPrimary : colors.onSurfaceVariant)
-        : colors.onSurface.withValues(alpha: 0.38);
-
-    void toggle() => onChanged?.call(!value);
-
-    return Semantics(
-      label: semanticLabel,
-      button: true,
-      enabled: enabled,
-      toggled: value,
-      child: FocusableActionDetector(
-        enabled: enabled,
-        mouseCursor: enabled
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.basic,
-        shortcuts: const <ShortcutActivator, Intent>{
-          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-        },
-        actions: <Type, Action<Intent>>{
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (ActivateIntent intent) {
-              toggle();
-              return null;
-            },
-          ),
-        },
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: enabled ? toggle : null,
-          child: SizedBox.square(
-            dimension: 48,
-            child: Center(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: 40,
-                height: 24,
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: trackColor,
-                  borderRadius: const BorderRadius.all(Radius.circular(3)),
-                ),
-                child: AnimatedAlign(
-                  duration: const Duration(milliseconds: 150),
-                  alignment: value
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 16,
-                    height: 16,
-                    decoration: BoxDecoration(
-                      color: thumbColor,
-                      borderRadius: const BorderRadius.all(Radius.circular(3)),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

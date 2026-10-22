@@ -16,12 +16,7 @@ enum CardActionKind {
 }
 
 final class CardAction {
-  const CardAction(
-    this.label,
-    this.kind,
-    this.command, {
-    this.enabled = true,
-  });
+  const CardAction(this.label, this.kind, this.command, {this.enabled = true});
   final String label;
   final CardActionKind kind;
   final CardCommand command;
@@ -96,7 +91,9 @@ EngineCardView buildEngineCardView({
     case EngineLinkState.connected:
       return EngineCardView(
         title: 'Connected to ${connectedName ?? 'engine'}',
-        detail: 'Tasks run on this engine by default.',
+        detail: connectedName == null
+            ? 'Tasks run on the connected engine by default.'
+            : 'Tasks run on $connectedName by default.',
         showProgress: false,
         actions: const <CardAction>[
           CardAction(

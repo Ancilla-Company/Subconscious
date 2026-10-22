@@ -48,15 +48,22 @@ for graph_file in sorted((engine_pkg / "graphs").glob("*.json")):
 for icon_file in sorted(engine_pkg.glob("*.ico")):
     datas.append((str(icon_file), "subconscious_engine"))
 assert any(Path(src).name == "conscious.json" for src, _ in datas), "graphs/conscious.json missing"
-for package in ("genai_prices", "logfire"):
+# MCP client (configured tools: mcp.client.stdio / streamable_http). A previous production
+# crash came from package data that was not bundled, so collect these packages in full
+# rather than relying on import discovery.
+for package in ("genai_prices", "logfire", "mcp", "anyio"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
     binaries += package_binaries
     hiddenimports += package_hidden
 # Many libraries read their own version via importlib.metadata at import time.
-for distribution in ("pydantic-ai", "sentence-transformers", "keyring", "uvicorn"):
+for distribution in ("pydantic-ai", "sentence-transformers", "keyring", "uvicorn", "mcp"):
     datas += copy_metadata(distribution, recursive=True)
 hiddenimports += collect_submodules("uvicorn")
+# mcp.client.auth is the OAuth client (OAuthClientProvider) used by OAuth-protected remote tools;
+# collect_all("mcp") already covers it, but it is listed explicitly so it can never be dropped.
+hiddenimports += ["mcp.client.stdio", "mcp.client.streamable_http", "mcp.client.auth",
+                  "mcp.client.auth.oauth2", "mcp.client.auth.utils", "mcp.shared.auth"]
 hiddenimports += ["keyring.backends.Windows", "logging.handlers", "subconscious_engine.logging_setup", "pystray._win32", "tkinter"]
 
 analysis = Analysis(

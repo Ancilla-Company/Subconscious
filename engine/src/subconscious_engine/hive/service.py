@@ -660,6 +660,7 @@ class HiveService:
             try:
                 await self._account.restore()
             except AccountError as error:
+                _LOGGER.warning("Could not restore the account session: %s", error)
                 problems.append(f"Could not restore the account session: {error}")
             if self._pending_apply is not None:
                 with logged_suppress(Exception):
@@ -687,6 +688,9 @@ class HiveService:
                 await self._refresh_directory(name_caller=True)
                 await self._auto_approve_pending()
             except (HiveApiError, HiveError, AccountError) as error:
+                _LOGGER.warning(
+                    "Could not list devices: %s", getattr(error, "message", None) or error
+                )
                 problems.append(f"Could not list devices: {getattr(error, 'message', None) or error}")
         snapshot = self.snapshot()
         if not snapshot["signalling"]["connected"]:

@@ -92,6 +92,24 @@ class HealthAccessFilter(logging.Filter):
             return True
 
 
+CONNECTION_LOGGER_NAME = "subconscious_engine.connections"
+
+
+class _FileLevelFilter(logging.Filter):
+    """Holds the file to ``level`` except for connection lifecycle records."""
+
+    def __init__(self, level: int) -> None:
+        super().__init__()
+        self._level = level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return (
+            record.levelno >= self._level
+            or record.name == CONNECTION_LOGGER_NAME
+            or getattr(record, "always_keep", False)
+        )
+
+
 class SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
     """Rotation that survives Windows file locks held by another process."""
 
@@ -120,7 +138,11 @@ def _open_file_handler(directory: Path) -> tuple[logging.Handler | None, Path | 
             encoding="utf-8",
             delay=False,
         )
-        handler.setLevel(_resolve_file_level())
+        file_level = _resolve_file_level()
+        # Connection lifecycle lines are always kept (INFO); everything else is
+        # held to the configured file level.
+        handler.setLevel(min(file_level, logging.INFO))
+        handler.addFilter(_FileLevelFilter(file_level))
         return handler, path, None
     except Exception as error:  # noqa: BLE001 - reported through the returned note
         return None, None, f"{type(error).__name__}: {error}"
@@ -225,6 +247,7 @@ def _log_startup(
          logging.getLevelName(level), os.getpid(), _stderr_is_stream()),
         None,
     )
+    record.always_keep = True
     for handler in logging.getLogger().handlers:
         if getattr(handler, _HANDLER_MARKER, False):
             handler.handle(record)

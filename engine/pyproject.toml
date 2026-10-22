@@ -15,6 +15,7 @@ dependencies = [
   "cryptography==46.0.4",
   "httpx==0.28.1",
   "keyring==25.7.0",
+  "mcp==1.26.0",
   "openpyxl==3.1.5",
   "Pillow==12.3.0",
   "PyYAML==6.0.3",

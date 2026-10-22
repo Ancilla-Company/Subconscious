@@ -88,6 +88,9 @@ def test_real_tcp_host_is_ready_authenticated_discoverable_and_cleans_up(tmp_pat
         async with running_host(host):
             assert host.is_ready is True
             assert host.bound_port > 0
+            # OAuth sign-in for remote tools redirects the browser to the port that was actually bound.
+            assert host.app.state.oauth_broker.redirect_uri == (
+                f"http://127.0.0.1:{host.bound_port}/api/v1/oauth/callback")
             runtime_path = tmp_path / "runtime.json"
             runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
             assert runtime == {
@@ -103,7 +106,7 @@ def test_real_tcp_host_is_ready_authenticated_discoverable_and_cleans_up(tmp_pat
             ) as client:
                 health = await client.get("health")
                 assert health.status_code == 200
-                assert health.json() == {"status": "ok", "version": __version__}
+                assert health.json() == {"status": "ok", "version": __version__, "node_id": None}
                 denied = await client.get("workspaces")
                 assert denied.status_code == 401
                 allowed = await client.get(
@@ -347,6 +350,6 @@ def test_lan_server_is_reachable_through_real_non_loopback_interface(tmp_path):
                     f"http://{lan_ip}:{host.bound_port}/api/v1/health"
                 )
             assert response.status_code == 200
-            assert response.json() == {"status": "ok", "version": __version__}
+            assert response.json() == {"status": "ok", "version": __version__, "node_id": None}
 
     run(scenario())

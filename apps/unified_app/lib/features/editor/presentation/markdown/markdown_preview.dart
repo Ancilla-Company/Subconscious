@@ -4,6 +4,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:markdown/markdown.dart' as md;
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../editor_fonts.dart';
@@ -115,30 +116,27 @@ final class _MarkdownPreviewState extends State<MarkdownPreview> {
   Future<void> _open(md.Element link) async {
     final String? href = link.attributes['href']?.trim();
     final Uri? uri = href == null ? null : Uri.tryParse(href);
-    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
     if (uri == null ||
-        !(uri.scheme == 'http' || uri.scheme == 'https' || uri.scheme == 'mailto')) {
-      messenger
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Only web and email links open from the preview.'),
-            duration: Duration(seconds: 3),
-          ),
-        );
+        !(uri.scheme == 'http' ||
+            uri.scheme == 'https' ||
+            uri.scheme == 'mailto')) {
+      showAppSnack(
+        context,
+        'Only web and email links open from the preview.',
+        duration: const Duration(seconds: 3),
+      );
       return;
     }
     try {
       await widget.launcher(uri);
     } on Object {
-      messenger
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text("Couldn't open that link."),
-            duration: Duration(seconds: 3),
-          ),
-        );
+      if (!mounted) return;
+      showAppSnack(
+        context,
+        "Couldn't open that link.",
+        isError: true,
+        duration: const Duration(seconds: 3),
+      );
     }
   }
 
@@ -315,12 +313,18 @@ final class _Renderer {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text.rich(
-                TextSpan(children: inline(element.children, style), style: style),
+                TextSpan(
+                  children: inline(element.children, style),
+                  style: style,
+                ),
               ),
               if (level <= 2)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Divider(height: 1, color: styles.colors.outlineVariant),
+                  child: Divider(
+                    height: 1,
+                    color: styles.colors.outlineVariant,
+                  ),
                 ),
             ],
           ),
@@ -392,7 +396,7 @@ final class _Renderer {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: styles.colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: AppRadii.md,
         border: Border.all(color: styles.colors.outlineVariant),
       ),
       child: Column(
@@ -439,7 +443,9 @@ final class _Renderer {
     return SizedBox(
       width: 20,
       height: line,
-      child: Center(child: SizedBox.square(dimension: size, child: shape)),
+      child: Center(
+        child: SizedBox.square(dimension: size, child: shape),
+      ),
     );
   }
 
@@ -508,7 +514,10 @@ final class _Renderer {
       index++;
     }
     return Padding(
-      padding: EdgeInsets.only(left: depth == 0 ? 4 : 12, bottom: depth == 0 ? 12 : 4),
+      padding: EdgeInsets.only(
+        left: depth == 0 ? 4 : 12,
+        bottom: depth == 0 ? 12 : 4,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: items,
@@ -529,7 +538,8 @@ final class _Renderer {
                 cell,
           ]);
           headerRow.add(
-            rows.last.isNotEmpty && rows.last.every((md.Element c) => c.tag == 'th'),
+            rows.last.isNotEmpty &&
+                rows.last.every((md.Element c) => c.tag == 'th'),
           );
         } else if (child.tag == 'thead' ||
             child.tag == 'tbody' ||
@@ -670,9 +680,7 @@ final class _Renderer {
         case 'mark':
           spans.add(
             TextSpan(
-              style: TextStyle(
-                backgroundColor: Colors.amber.withValues(alpha: 0.35),
-              ),
+              style: TextStyle(backgroundColor: AppColors.highlightFind),
               children: inline(node.children, base, link: link),
             ),
           );
@@ -767,7 +775,7 @@ final class _Renderer {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
             color: styles.colors.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: AppRadii.sm,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,

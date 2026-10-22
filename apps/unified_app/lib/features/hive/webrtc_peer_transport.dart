@@ -119,9 +119,8 @@ final class WebRtcPeerTransport implements PeerTransport {
   }
 
   @override
-  Future<void> setRemoteAnswer(String sdp) => _connection.setRemoteDescription(
-    RTCSessionDescription(sdp, 'answer'),
-  );
+  Future<void> setRemoteAnswer(String sdp) =>
+      _connection.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
 
   @override
   Future<void> addRemoteCandidate(Map<String, dynamic> candidate) =>

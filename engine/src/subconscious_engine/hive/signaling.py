@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from . import PROTOCOL_VERSION
 from .directory import HiveApi, HiveApiError
 from .identity import NodeIdentity, signal_auth_message
+from ..connection_log import connection_event, connection_problem
 from ..logging_setup import logged_suppress, spawn_logged
 from ..tls import ssl_for_url
 
@@ -173,12 +174,22 @@ class SignalingClient:
                 reason = f"HiveApiError:{error.status_code}"
                 self.last_error = reason
                 self.last_error_detail = error.message
+                _LOGGER.debug("Signalling session ended (%s: %s).", reason, error.message)
             except Exception as error:  # reconnect on anything transient
                 reason = type(error).__name__
                 self.last_error = reason
                 self.last_error_detail = str(error)[:300] or reason
                 _LOGGER.debug("Signalling disconnected (%s).", reason, exc_info=True)
             finally:
+                if self._connected.is_set():
+                    # An established session ended: this node now shows offline.
+                    connection_problem(
+                        "signalling.dropped",
+                        node_id=self._identity.node_id,
+                        reason=reason,
+                        detail=self.last_error_detail,
+                        up_for_s=f"{loop.time() - started:.0f}",
+                    )
                 self._connected.clear()
                 await self._close_socket()
             if loop.time() - started >= STABLE_AFTER_SECONDS:
@@ -195,8 +206,8 @@ class SignalingClient:
     async def _backoff(self, delay: float) -> None:
         """Sleep ``delay`` unless :meth:`wake` is called first."""
         self._wake.clear()
-        sleeper = asyncio.ensure_future(self._sleep(delay))
-        waker = asyncio.ensure_future(self._wake.wait())
+        sleeper = spawn_logged(self._sleep(delay))
+        waker = spawn_logged(self._wake.wait())
         try:
             await asyncio.wait({sleeper, waker}, return_when=asyncio.FIRST_COMPLETED)
         finally:
@@ -245,6 +256,11 @@ class SignalingClient:
         self._connected.set()
         self.last_error = None
         self.last_error_detail = None
+        connection_event(
+            "signalling.connected",
+            node_id=self._identity.node_id,
+            after_failures=self.failures,
+        )
         if self._last_reported is not None:
             # Pair the earlier failure warnings with their recovery in the production log.
             _LOGGER.warning(

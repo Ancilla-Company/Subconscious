@@ -59,7 +59,8 @@ abstract final class MarkdownCommands {
 
     // Markers just outside the text, as in **word**.
     int before = 0;
-    while (start - before - 1 >= 0 && text.codeUnitAt(start - before - 1) == unit) {
+    while (start - before - 1 >= 0 &&
+        text.codeUnitAt(start - before - 1) == unit) {
       before++;
     }
     int after = 0;
@@ -88,7 +89,8 @@ abstract final class MarkdownCommands {
         lead++;
       }
       int trail = 0;
-      while (end - trail - 1 >= start && text.codeUnitAt(end - trail - 1) == unit) {
+      while (end - trail - 1 >= start &&
+          text.codeUnitAt(end - trail - 1) == unit) {
         trail++;
       }
       final int inside = lead < trail ? lead : trail;
@@ -150,7 +152,9 @@ abstract final class MarkdownCommands {
           if (line.trim().isNotEmpty) _headingLevel(line),
       ];
       final bool allHaveLevel =
-          level > 0 && current.isNotEmpty && current.every((int c) => c == level);
+          level > 0 &&
+          current.isNotEmpty &&
+          current.every((int c) => c == level);
       final bool remove = level == 0 || allHaveLevel;
       return <String>[
         for (final String line in lines)
@@ -302,7 +306,9 @@ abstract final class MarkdownCommands {
     final String text = value.text;
     final TextRange range = _selectionRange(value);
     final int firstStart = _lineStart(text, range.start);
-    final bool multiline = text.substring(range.start, range.end).contains('\n');
+    final bool multiline = text
+        .substring(range.start, range.end)
+        .contains('\n');
     final String firstLine = text.substring(
       firstStart,
       _lineEnd(text, range.start),
@@ -375,7 +381,8 @@ abstract final class MarkdownCommands {
 
     int shift(int offset) {
       if (offset < blockStart) return offset;
-      if (offset >= blockEnd) return offset + replacement.length - (blockEnd - blockStart);
+      if (offset >= blockEnd)
+        return offset + replacement.length - (blockEnd - blockStart);
       // Inside the block: keep the same position within the same line.
       int consumed = blockStart;
       int produced = blockStart;
@@ -606,7 +613,9 @@ final class MarkdownEnterFormatter extends TextInputFormatter {
           inside = true;
           unit = fenceUnit;
           length = run;
-        } else if (fenceUnit == unit && run >= length && line.substring(run).trim().isEmpty) {
+        } else if (fenceUnit == unit &&
+            run >= length &&
+            line.substring(run).trim().isEmpty) {
           inside = false;
         }
       }
@@ -661,7 +670,9 @@ abstract final class PlainTextCommands {
     final String text = value.text;
     final TextSelection selection = value.selection;
     final int length = text.length;
-    final int start = selection.isValid ? selection.start.clamp(0, length) : length;
+    final int start = selection.isValid
+        ? selection.start.clamp(0, length)
+        : length;
     final int end = selection.isValid ? selection.end.clamp(0, length) : length;
     final bool multiline = text.substring(start, end).contains('\n');
     if (!outdent && !multiline) {
@@ -670,7 +681,9 @@ abstract final class PlainTextCommands {
         selection: TextSelection.collapsed(offset: start + 1),
       );
     }
-    final int blockStart = start == 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
+    final int blockStart = start == 0
+        ? 0
+        : text.lastIndexOf('\n', start - 1) + 1;
     int effectiveEnd = end;
     if (end > start && text.codeUnitAt(end - 1) == 0x0A) effectiveEnd = end - 1;
     final int newline = text.indexOf('\n', effectiveEnd);
@@ -685,7 +698,10 @@ abstract final class PlainTextCommands {
         text.substring(0, blockStart) + replacement + text.substring(blockEnd);
     if (start == end) {
       final int delta = mapped.first.length - lines.first.length;
-      final int caret = (start + delta).clamp(blockStart, blockStart + mapped.first.length);
+      final int caret = (start + delta).clamp(
+        blockStart,
+        blockStart + mapped.first.length,
+      );
       return TextEditingValue(
         text: result,
         selection: TextSelection.collapsed(offset: caret),

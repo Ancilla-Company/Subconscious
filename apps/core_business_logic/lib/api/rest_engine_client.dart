@@ -565,6 +565,76 @@ final class RestEngineClient {
   Future<void> deleteTool(String uuid) =>
       _delete('tool-registry/${_segment(uuid)}');
 
+  /// POST /api/v1/tool-registry/{uuid}/test: connects and lists the tools.
+  Future<ToolTestResult> testTool(String uuid) async => ToolTestResult.fromJson(
+    await _sendMap(
+      'POST',
+      'tool-registry/${_segment(uuid)}/test',
+      <String, dynamic>{},
+    ),
+  );
+
+  /// POST /api/v1/tool-registry/{uuid}/authorize: starts an OAuth sign-in, or
+  /// reports `connected` when a valid token already exists.
+  Future<ToolAuthorizeResult> authorizeTool(String uuid) async =>
+      ToolAuthorizeResult.fromJson(
+        await _sendMap(
+          'POST',
+          'tool-registry/${_segment(uuid)}/authorize',
+          <String, dynamic>{},
+        ),
+      );
+
+  /// DELETE /api/v1/tool-registry/{uuid}/oauth: forgets the stored tokens.
+  Future<void> disconnectToolOAuth(String uuid) =>
+      _delete('tool-registry/${_segment(uuid)}/oauth');
+
+  /// GET /api/v1/oauth/pending: sign-ins still waiting on the user.
+  Future<List<OAuthAuthorization>> listPendingOAuth() =>
+      _getList('oauth/pending', OAuthAuthorization.fromJson);
+
+  /// POST /api/v1/oauth/{authId}/complete with the address the browser ended
+  /// on ([redirectUrl]) or the bare [code] (plus optional [state]).
+  Future<void> completeOAuth(
+    String authId, {
+    String? redirectUrl,
+    String? code,
+    String? state,
+  }) async {
+    if ((redirectUrl == null) == (code == null)) {
+      throw ArgumentError('Provide exactly one of redirectUrl or code.');
+    }
+    await _request(
+      'POST',
+      'oauth/${_segment(authId)}/complete',
+      body: <String, dynamic>{
+        'redirectUrl': ?redirectUrl,
+        'code': ?code,
+        'state': ?state,
+      },
+    );
+  }
+
+  /// POST /api/v1/oauth/{authId}/cancel.
+  Future<void> cancelOAuth(String authId) async {
+    await _request('POST', 'oauth/${_segment(authId)}/cancel');
+  }
+
+  Future<List<SkillEntry>> listSkills() async =>
+      _getList('skills', SkillEntry.fromJson);
+  Future<SkillEntry> getSkill(String uuid) async => SkillEntry.fromJson(
+    await _getMap('skills/${_segment(uuid)}', authenticate: true),
+  );
+  Future<SkillEntry> createSkill(SkillRequest skill) async =>
+      SkillEntry.fromJson(await _sendMap('POST', 'skills', skill.toJson()));
+  Future<SkillEntry> updateSkill({
+    required String uuid,
+    required SkillRequest skill,
+  }) async => SkillEntry.fromJson(
+    await _sendMap('PUT', 'skills/${_segment(uuid)}', skill.toJson()),
+  );
+  Future<void> deleteSkill(String uuid) => _delete('skills/${_segment(uuid)}');
+
   Future<AppStateEntry?> getAppState(String key) async {
     try {
       return AppStateEntry.fromJson(

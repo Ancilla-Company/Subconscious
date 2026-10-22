@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../controller/dashboard_controller.dart';
 import '../controller/shutdown_coordinator.dart';
@@ -169,10 +170,10 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
     if (!mounted) return true;
     _isConfirmingClose = true;
     try {
-      return await showDialog<bool>(
+      return await showAppDialog<bool>(
             context: context,
-            builder: (BuildContext context) => AlertDialog(
-              title: const Text("Unsaved changes couldn't be kept"),
+            builder: (BuildContext context) => AppDialog(
+              title: "Unsaved changes couldn't be kept",
               content: const Text(
                 'The engine did not accept the text you have not saved yet, '
                 'so it cannot be restored next time. If you quit now it is '

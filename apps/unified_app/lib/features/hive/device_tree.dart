@@ -36,11 +36,10 @@ List<DeviceGroup> buildDeviceTree(List<NodeView> nodes) {
     for (final NodeView root in roots)
       DeviceGroup(
         root,
-        (children[_key(root.node.id)] ?? const <NodeView>[]).toList()
-          ..sort(
-            (NodeView a, NodeView b) =>
-                a.node.name.toLowerCase().compareTo(b.node.name.toLowerCase()),
-          ),
+        (children[_key(root.node.id)] ?? const <NodeView>[]).toList()..sort(
+          (NodeView a, NodeView b) =>
+              a.node.name.toLowerCase().compareTo(b.node.name.toLowerCase()),
+        ),
       ),
   ];
 }

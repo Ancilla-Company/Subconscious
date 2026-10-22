@@ -21,10 +21,15 @@ from subconscious_engine.agents import AgentManager
 from subconscious_engine.audio import AudioServices, audio_routes
 from subconscious_engine.capabilities import CapabilityResolver
 from subconscious_engine.auth import BearerAuthMiddleware, EngineAuthToken
+from subconscious_engine.pairing import PairedClientStore, PairingService, RateLimiter
+from subconscious_engine.client_tools import ClientToolCatalog
 from subconscious_engine.configuration import EncryptedModelConfigurationStore
 from subconscious_engine.events import EventBus
 from subconscious_engine.graph_engine import GraphEngine
 from subconscious_engine.subconscious_loop import SubconsciousWorker
+from subconscious_engine.services.configured_tools import ConfiguredToolRuntime
+from subconscious_engine.services.oauth import OAuthBroker
+from subconscious_engine.services.tool_management import ToolManagement
 from subconscious_engine.services.rag_service import WorkspaceRagService
 from subconscious_engine.storage import Database
 from subconscious_engine.tools import ToolRegistry
@@ -51,6 +56,9 @@ from .thread_routes import (
     list_threads,
     update_thread,
 )
+from .oauth_routes import oauth_routes
+from .pair_routes import pair_routes
+from .skill_routes import skill_routes
 from .tool_routes import tool_routes
 from .websocket import ClientRegistry, websocket_endpoint
 from .workspace_routes import (
@@ -66,7 +74,11 @@ from ..logging_setup import logged_suppress, spawn_logged
 async def health(_: Request) -> JSONResponse:
     from subconscious_engine import __version__
 
-    return JSONResponse({"status": "ok", "version": __version__})
+    hive = getattr(_.app.state, "hive_service", None)
+    identity = getattr(hive, "identity", None)
+    return JSONResponse(
+        {"status": "ok", "version": __version__, "node_id": getattr(identity, "node_id", None)}
+    )
 
 
 async def agui(_: Request) -> JSONResponse:
@@ -132,6 +144,8 @@ def create_app(
                         await task
             if graph_engine is not None:
                 await graph_engine.telemetry.close()
+            # Stop every MCP server process the chat runtime started.
+            await app.state.configured_tools.close()
             await account_service.close()
             await database.close()
 
@@ -158,20 +172,27 @@ def create_app(
         *model_routes(),
         *audio_routes(),
         *tool_routes(),
+        *oauth_routes(),
+        *pair_routes(),
+        *skill_routes(),
         *rag_routes(),
         *event_routes(),
         WebSocketRoute("/api/v1/events", websocket_endpoint),
     ]
+    paired_clients = PairedClientStore(database.path.parent / "paired_clients.json")
+    client_registry = ClientRegistry()
+    oauth_broker = OAuthBroker(event_bus=bus, client_registry=client_registry)
+    configured_tools = ConfiguredToolRuntime(database, store, oauth_broker=oauth_broker)
     app = Starlette(
         routes=routes,
         middleware=[
             Middleware(
                 CORSMiddleware,
-                allow_origin_regex=r"^(https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|chrome-extension://[a-p]{32})$",
+                allow_origin_regex=r"^(https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|chrome-extension://[a-p]{32}|moz-extension://[0-9a-f-]{36})$",
                 allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                 allow_headers=["Authorization", "Content-Type"],
             ),
-            Middleware(BearerAuthMiddleware, token=token),
+            Middleware(BearerAuthMiddleware, token=token, paired_clients=paired_clients),
         ],
         lifespan=lifespan,
     )
@@ -183,17 +204,28 @@ def create_app(
             "audio_services": audio_services or AudioServices(),
             "event_bus": bus,
             "tool_registry": builtins,
+            "client_tool_catalog": ClientToolCatalog(),
+            "oauth_broker": oauth_broker,
+            "configured_tools": configured_tools,
+            "tool_management": ToolManagement(database, store, configured_tools, oauth_broker),
             "rag_service": rag,
             "agent_manager": agents,
             "graph_engine": graph_engine,
             "subconscious_worker": subconscious_worker,
             "account_session_service": account_service,
-            "client_registry": ClientRegistry(),
+            "client_registry": client_registry,
+            "paired_clients": paired_clients,
+            "pair_rate_limiter": RateLimiter(),
             "hive_service": None,
             "sync_engine": SyncEngine(database),
             "task_manager": TaskManager(app),
             "dev_models": dev_models,
         }
+    )
+    app.state.pairing_service = PairingService(
+        account_service,
+        lambda: getattr(getattr(app.state.hive_service, "identity", None), "node_id", None),
+        paired_clients,
     )
     # Remote tools (webrtc.md section 8): both halves are inert until a peer asks or a
     # workspace/thread opts in, and the owner side exports nothing by default.

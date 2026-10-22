@@ -347,8 +347,7 @@ final class _Tokenizer {
         (closingStart == contentStart ||
             _isSpace(text.codeUnitAt(closingStart - 1)))) {
       int trimmed = closingStart;
-      while (trimmed > contentStart &&
-          _isSpace(text.codeUnitAt(trimmed - 1))) {
+      while (trimmed > contentStart && _isSpace(text.codeUnitAt(trimmed - 1))) {
         trimmed--;
       }
       _emit(start, contentStart, base | MdFlag.marker | hashes);
@@ -396,7 +395,8 @@ final class _Tokenizer {
       markerEnd = cursor + 1;
     } else if (_isDigit(unit)) {
       int digits = 0;
-      while (cursor + digits < end && _isDigit(text.codeUnitAt(cursor + digits))) {
+      while (cursor + digits < end &&
+          _isDigit(text.codeUnitAt(cursor + digits))) {
         digits++;
       }
       if (digits > 9 || cursor + digits >= end) return false;
@@ -426,8 +426,11 @@ final class _Tokenizer {
         }
       }
     }
-    _emit(cursor, taskEnd > contentStart ? taskEnd : contentStart,
-        base | MdFlag.listMarker);
+    _emit(
+      cursor,
+      taskEnd > contentStart ? taskEnd : contentStart,
+      base | MdFlag.listMarker,
+    );
     _inline(taskEnd > contentStart ? taskEnd : contentStart, end, base);
     return true;
   }
@@ -519,7 +522,8 @@ final class _Tokenizer {
         final int? close = _codeSpanEnd(index, end);
         if (close != null) {
           int ticks = 0;
-          while (index + ticks < end && text.codeUnitAt(index + ticks) == _backtick) {
+          while (index + ticks < end &&
+              text.codeUnitAt(index + ticks) == _backtick) {
             ticks++;
           }
           paint(index, index + ticks, MdFlag.code | MdFlag.marker);
@@ -551,7 +555,10 @@ final class _Tokenizer {
           continue;
         }
       }
-      if (unit == _lbracket || (unit == _bang && index + 1 < end && text.codeUnitAt(index + 1) == _lbracket)) {
+      if (unit == _lbracket ||
+          (unit == _bang &&
+              index + 1 < end &&
+              text.codeUnitAt(index + 1) == _lbracket)) {
         final int? close = _link(index, end, paint, block);
         if (close != null) {
           index = close;
@@ -566,8 +573,18 @@ final class _Tokenizer {
           urlEnd++;
         }
         while (urlEnd > index &&
-            const <int>[0x2E, 0x2C, 0x3B, 0x3A, 0x21, 0x3F, 0x27, 0x22, _rparen, _rbracket]
-                .contains(text.codeUnitAt(urlEnd - 1))) {
+            const <int>[
+              0x2E,
+              0x2C,
+              0x3B,
+              0x3A,
+              0x21,
+              0x3F,
+              0x27,
+              0x22,
+              _rparen,
+              _rbracket,
+            ].contains(text.codeUnitAt(urlEnd - 1))) {
           urlEnd--;
         }
         paint(index, urlEnd, MdFlag.link);
@@ -622,7 +639,8 @@ final class _Tokenizer {
   int? _angleEnd(int start, int end) {
     if (start + 1 >= end) return null;
     final int first = text.codeUnitAt(start + 1);
-    final bool letter = (first >= 0x41 && first <= 0x5A) || (first >= 0x61 && first <= 0x7A);
+    final bool letter =
+        (first >= 0x41 && first <= 0x5A) || (first >= 0x61 && first <= 0x7A);
     if (!letter && first != 0x2F && first != _bang) return null;
     for (int index = start + 1; index < end; index++) {
       final int unit = text.codeUnitAt(index);
@@ -661,13 +679,18 @@ final class _Tokenizer {
     if (index > 0) {
       final int before = text.codeUnitAt(index - 1);
       final bool boundary =
-          _isWhitespace(before) || before == _lparen || before == _lt || before == _lbracket || before == 0x22;
+          _isWhitespace(before) ||
+          before == _lparen ||
+          before == _lt ||
+          before == _lbracket ||
+          before == 0x22;
       if (!boundary) return false;
     }
     const List<String> schemes = <String>['http://', 'https://'];
     for (final String scheme in schemes) {
       if (index + scheme.length < end &&
-          text.substring(index, index + scheme.length).toLowerCase() == scheme) {
+          text.substring(index, index + scheme.length).toLowerCase() ==
+              scheme) {
         return true;
       }
     }
@@ -759,13 +782,17 @@ final class _Tokenizer {
         count++;
       }
       final int before = index == 0 ? 0x20 : text.codeUnitAt(index - 1);
-      final int after = index + count >= text.length ? 0x20 : text.codeUnitAt(index + count);
+      final int after = index + count >= text.length
+          ? 0x20
+          : text.codeUnitAt(index + count);
       final bool beforeSpace = _isWhitespace(before);
       final bool afterSpace = _isWhitespace(after);
       final bool beforePunct = _isPunctuation(before);
       final bool afterPunct = _isPunctuation(after);
-      final bool leftFlanking = !afterSpace && (!afterPunct || beforeSpace || beforePunct);
-      final bool rightFlanking = !beforeSpace && (!beforePunct || afterSpace || afterPunct);
+      final bool leftFlanking =
+          !afterSpace && (!afterPunct || beforeSpace || beforePunct);
+      final bool rightFlanking =
+          !beforeSpace && (!beforePunct || afterSpace || afterPunct);
       bool canOpen;
       bool canClose;
       if (unit == _underscore) {

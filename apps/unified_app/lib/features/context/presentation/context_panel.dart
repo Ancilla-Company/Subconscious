@@ -5,23 +5,28 @@ import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../dashboard/controller/dashboard_controller.dart';
 import '../../editor/controller/file_gateway.dart' show PreviewKind;
 import '../../settings/controller/settings_controller.dart';
-import '../../settings/presentation/settings_main_panel.dart';
 
 final class ContextPanel extends StatefulWidget {
   const ContextPanel({
     required this.screen,
     required this.controller,
     this.onSelection,
+    this.minTouchTarget,
     super.key,
   });
 
   final DashboardSection screen;
   final DashboardController controller;
   final VoidCallback? onSelection;
+
+  /// Minimum height of every tappable row and button (the mobile flyout
+  /// passes 48); null keeps the compact desktop sizes.
+  final double? minTouchTarget;
 
   @override
   State<ContextPanel> createState() => _ContextPanelState();
@@ -111,30 +116,49 @@ final class _ContextPanelState extends State<ContextPanel> {
   }
 
   @override
-  Widget build(BuildContext context) => ColoredBox(
-    color: Theme.of(context).colorScheme.surface,
-    child: AnimatedBuilder(
-      animation: widget.controller,
-      builder: (BuildContext context, Widget? child) => switch (widget.screen) {
-        DashboardSection.threads => _ThreadsSection(
-          controller: widget.controller,
-          onSelection: widget.onSelection,
-        ),
-        DashboardSection.files => _FilesSection(
-          controller: widget.controller,
-          onSelection: widget.onSelection,
-        ),
-        DashboardSection.workspaces => _WorkspacesSection(
-          controller: widget.controller,
-          onSelection: widget.onSelection,
-        ),
-        DashboardSection.settings => _SettingsSection(
-          controller: widget.controller,
-          onSelection: widget.onSelection,
-        ),
-      },
+  Widget build(BuildContext context) => _TouchTarget(
+    minTouchTarget: widget.minTouchTarget,
+    child: ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: AnimatedBuilder(
+        animation: widget.controller,
+        builder: (BuildContext context, Widget? child) =>
+            switch (widget.screen) {
+              DashboardSection.threads => _ThreadsSection(
+                controller: widget.controller,
+                onSelection: widget.onSelection,
+              ),
+              DashboardSection.files => _FilesSection(
+                controller: widget.controller,
+                onSelection: widget.onSelection,
+              ),
+              DashboardSection.workspaces => _WorkspacesSection(
+                controller: widget.controller,
+                onSelection: widget.onSelection,
+              ),
+              DashboardSection.settings => _SettingsSection(
+                controller: widget.controller,
+                onSelection: widget.onSelection,
+              ),
+            },
+      ),
     ),
   );
+}
+
+/// Carries [ContextPanel.minTouchTarget] to the rows and buttons below it.
+final class _TouchTarget extends InheritedWidget {
+  const _TouchTarget({required this.minTouchTarget, required super.child});
+
+  final double? minTouchTarget;
+
+  static double? of(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<_TouchTarget>()
+      ?.minTouchTarget;
+
+  @override
+  bool updateShouldNotify(_TouchTarget oldWidget) =>
+      oldWidget.minTouchTarget != minTouchTarget;
 }
 
 final class _SectionHeader extends StatelessWidget {
@@ -178,24 +202,23 @@ final class _HeaderButton extends StatelessWidget {
   final VoidCallback? onSelection;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
-    child: IconButton(
-      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-      onPressed: onPressed == null
-          ? null
-          : () {
-              onPressed!();
-              onSelection?.call();
-            },
-      padding: EdgeInsets.zero,
-      style: IconButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+  Widget build(BuildContext context) {
+    final double? touch = _TouchTarget.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(2, touch == null ? 4 : 0, 2, 0),
+      child: AppIconButton(
+        icon: icon,
+        tooltip: tooltip,
+        minTouchTarget: touch,
+        onPressed: onPressed == null
+            ? null
+            : () {
+                onPressed!();
+                onSelection?.call();
+              },
       ),
-      tooltip: tooltip,
-      icon: Icon(icon, size: 20),
-    ),
-  );
+    );
+  }
 }
 
 final class _PanelMessage extends StatelessWidget {
@@ -206,22 +229,8 @@ final class _PanelMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          if (action case final Widget action) ...<Widget>[
-            const SizedBox(height: 12),
-            action,
-          ],
-        ],
-      ),
+    child: SingleChildScrollView(
+      child: AppEmptyMessage(message, action: action),
     ),
   );
 }
@@ -244,40 +253,37 @@ final class _ThreadsSection extends StatelessWidget {
             const SizedBox(width: 6),
             SizedBox(
               width: 142,
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  isExpanded: true,
-                  value: controller.threadsWorkspace?.uuid ?? '',
-                  items: <DropdownMenuItem<String>>[
-                    const DropdownMenuItem<String>(
-                      value: '',
+              child: AppCompactDropdown<String>(
+                value: controller.threadsWorkspace?.uuid ?? '',
+                items: <DropdownMenuItem<String>>[
+                  const DropdownMenuItem<String>(
+                    value: '',
+                    child: Text(
+                      'All workspaces',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  for (final Workspace workspace in controller.workspaces)
+                    DropdownMenuItem<String>(
+                      value: workspace.uuid,
                       child: Text(
-                        'All workspaces',
+                        workspace.name,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    for (final Workspace workspace in controller.workspaces)
-                      DropdownMenuItem<String>(
-                        value: workspace.uuid,
-                        child: Text(
-                          workspace.name,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  onChanged: (String? uuid) {
-                    Workspace? workspace;
-                    for (final Workspace candidate in controller.workspaces) {
-                      if (candidate.uuid == uuid) {
-                        workspace = candidate;
-                        break;
-                      }
+                ],
+                onChanged: (String? uuid) {
+                  Workspace? workspace;
+                  for (final Workspace candidate in controller.workspaces) {
+                    if (candidate.uuid == uuid) {
+                      workspace = candidate;
+                      break;
                     }
-                    // The sidebar stays open: switching the workspace only
-                    // changes which threads the list shows.
-                    controller.selectThreadWorkspace(workspace);
-                  },
-                ),
+                  }
+                  // The sidebar stays open: switching the workspace only
+                  // changes which threads the list shows.
+                  controller.selectThreadWorkspace(workspace);
+                },
               ),
             ),
           ],
@@ -347,6 +353,7 @@ final class _NavigationRow extends StatelessWidget {
     required this.onTap,
     this.onSelection,
     this.subtitle,
+    this.titleBold = false,
   });
 
   final bool selected;
@@ -354,49 +361,24 @@ final class _NavigationRow extends StatelessWidget {
   final String? subtitle;
   final VoidCallback onTap;
   final VoidCallback? onSelection;
+  final bool titleBold;
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Material(
-      color: selected ? colors.secondaryContainer : Colors.transparent,
-      borderRadius: BorderRadius.circular(6),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: () {
-          onTap();
-          onSelection?.call();
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    if (subtitle case final String subtitle)
-                      Text(
-                        subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall
-                            ?.copyWith(color: colors.onSurfaceVariant),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-          ),
-        ),
-      ),
+    final double? touch = _TouchTarget.of(context);
+    return AppListRow(
+      selected: selected,
+      title: label,
+      subtitle: subtitle,
+      titleBold: titleBold,
+      // Pointer layouts use the height of a sidebar button; touch layouts
+      // keep their larger tap target.
+      dense: touch == null,
+      minHeight: touch,
+      onTap: () {
+        onTap();
+        onSelection?.call();
+      },
     );
   }
 }
@@ -461,6 +443,7 @@ final class _WorkspacesSection extends StatelessWidget {
         return _NavigationRow(
           selected: controller.selectedWorkspace?.uuid == workspace.uuid,
           label: workspace.name,
+          titleBold: true,
           subtitle: workspace.description?.trim().isEmpty ?? true
               ? null
               : workspace.description,
@@ -807,54 +790,16 @@ final class _FileTreeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-
-    Widget buildRow(bool dropHighlighted) {
-      final bool emphasized = selected || dropHighlighted;
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Material(
-          color: emphasized ? colors.secondaryContainer : Colors.transparent,
-          borderRadius: const BorderRadius.all(Radius.circular(4)),
-          child: InkWell(
-            borderRadius: const BorderRadius.all(Radius.circular(4)),
-            onTap: onTap,
-            child: SizedBox(
-              height: 30,
-              child: Padding(
-                padding: EdgeInsets.only(left: 6 + depth * 14, right: 6),
-                child: Row(
-                  children: <Widget>[
-                    SizedBox(width: 18, child: Center(child: leading)),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Tooltip(
-                        message: label,
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: emphasized
-                                    ? colors.onSecondaryContainer
-                                    : null,
-                              ),
-                        ),
-                      ),
-                    ),
-                    if (trailing != null) ...<Widget>[
-                      const SizedBox(width: 4),
-                      trailing!,
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
+    Widget buildRow(bool dropHighlighted) => AppTreeRow(
+      depth: depth,
+      selected: selected,
+      highlighted: dropHighlighted,
+      minHeight: _TouchTarget.of(context),
+      onTap: onTap,
+      leading: leading,
+      label: label,
+      trailing: trailing,
+    );
 
     final ValueChanged<_WorkspaceFileTreeDragData>? acceptDrop = onAcceptDrop;
     Widget result = acceptDrop == null
@@ -990,87 +935,46 @@ Future<({int rootIndex, String path})?> _showCreateFolderDialog(
   }
   String? validationError;
   try {
-    return await showDialog<({int rootIndex, String path})>(
+    return await showAppDialog<({int rootIndex, String path})>(
       context: context,
-      builder: (BuildContext context) => Theme(
-        data: settingsFormTheme(context),
-        child: StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) => AlertDialog(
-            backgroundColor: Theme.of(context).colorScheme.surface,
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(6)),
-            ),
-            title: const Text('New folder'),
-            content: SizedBox(
-              width: 360,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  DropdownButtonFormField<int>(
-                    initialValue: selectedRoot.index,
-                    decoration: const InputDecoration(labelText: 'Location'),
-                    items: <DropdownMenuItem<int>>[
-                      for (final WorkspaceDirectoryRoot root in roots)
-                        DropdownMenuItem<int>(
-                          value: root.index,
-                          child: Text(
-                            root.name,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (int? rootIndex) {
-                      if (rootIndex == null) return;
-                      setState(() {
-                        selectedRoot = roots.firstWhere(
-                          (WorkspaceDirectoryRoot root) =>
-                              root.index == rootIndex,
-                        );
-                        pathController.clear();
-                        validationError = null;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: pathController,
-                    autofocus: true,
-                    textInputAction: TextInputAction.done,
-                    decoration: InputDecoration(
-                      labelText: 'Folder name',
-                      hintText: 'e.g. notes or src/components',
-                      errorText: validationError,
-                    ),
-                    onChanged: (_) {
-                      if (validationError != null) {
-                        setState(() => validationError = null);
-                      }
-                    },
-                    onSubmitted: (_) {
-                      final String? path = _workspaceRelativeFolderPath(
-                        pathController.text,
-                      );
-                      if (path == null) {
-                        setState(
-                          () => validationError = 'Enter a relative folder name without . or .. segments.',
-                        );
-                        return;
-                      }
-                      Navigator.of(context)
-                          .pop((rootIndex: selectedRoot.index, path: path));
-                    },
-                  ),
+      builder: (BuildContext context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setState) => AppDialog(
+          title: 'New folder',
+          width: 360,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              AppDropdown(
+                label: 'Location',
+                value: selectedRoot.name,
+                options: <String>[
+                  for (final WorkspaceDirectoryRoot root in roots) root.name,
                 ],
+                onChanged: (String name) {
+                  setState(() {
+                    selectedRoot = roots.firstWhere(
+                      (WorkspaceDirectoryRoot root) => root.name == name,
+                    );
+                    pathController.clear();
+                    validationError = null;
+                  });
+                },
               ),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
+              const SizedBox(height: 16),
+              AppTextField(
+                label: 'Folder name',
+                controller: pathController,
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                hintText: 'e.g. notes or src/components',
+                errorText: validationError,
+                onChanged: (_) {
+                  if (validationError != null) {
+                    setState(() => validationError = null);
+                  }
+                },
+                onSubmitted: (_) {
                   final String? path = _workspaceRelativeFolderPath(
                     pathController.text,
                   );
@@ -1083,10 +987,31 @@ Future<({int rootIndex, String path})?> _showCreateFolderDialog(
                   Navigator.of(context)
                       .pop((rootIndex: selectedRoot.index, path: path));
                 },
-                child: const Text('Create'),
               ),
             ],
           ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final String? path = _workspaceRelativeFolderPath(
+                  pathController.text,
+                );
+                if (path == null) {
+                  setState(
+                    () => validationError = 'Enter a relative folder name without . or .. segments.',
+                  );
+                  return;
+                }
+                Navigator.of(context)
+                    .pop((rootIndex: selectedRoot.index, path: path));
+              },
+              child: const Text('Create'),
+            ),
+          ],
         ),
       ),
     );
@@ -1250,33 +1175,13 @@ void _showPanelToast(
   bool isError = false,
   Duration duration = const Duration(seconds: 5),
 }) {
-  final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
-  if (messenger == null) return;
-  final ColorScheme colors = Theme.of(context).colorScheme;
-  final Color backgroundColor = isError
-      ? colors.errorContainer
-      : colors.secondaryContainer;
-  final Color foregroundColor = isError
-      ? colors.onErrorContainer
-      : colors.onSecondaryContainer;
-  messenger
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: foregroundColor),
-        ),
-        behavior: SnackBarBehavior.floating,
-        margin: _panelToastMargin(context),
-        duration: duration,
-        showCloseIcon: true,
-        backgroundColor: backgroundColor,
-        closeIconColor: foregroundColor,
-      ),
-    );
+  showAppSnack(
+    context,
+    message,
+    isError: isError,
+    duration: duration,
+    margin: _panelToastMargin(context),
+  );
 }
 
 final class _SettingsSection extends StatelessWidget {

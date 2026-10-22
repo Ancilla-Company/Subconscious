@@ -122,6 +122,10 @@ final class EngineRepository {
             if (taskId != null && event.taskId == taskId) yield event;
           case ToolApprovalResolved():
             if (taskId != null && event.taskId == taskId) yield event;
+          case OAuthRequested():
+            if (taskId != null && event.taskId == taskId) yield event;
+          case OAuthResolved():
+            if (taskId != null && event.taskId == taskId) yield event;
           case ThreadSubscribed():
             break;
         }

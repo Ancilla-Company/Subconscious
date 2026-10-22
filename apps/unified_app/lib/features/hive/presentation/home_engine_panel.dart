@@ -61,9 +61,7 @@ final class HomeEnginePanel extends StatelessWidget {
                 if (failure != null && !pending) ...<Widget>[
                   const SizedBox(height: 12),
                   Text(
-                    failure is HiveApiException
-                        ? failure.message
-                        : '$failure',
+                    failure is HiveApiException ? failure.message : '$failure',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.error,
                     ),

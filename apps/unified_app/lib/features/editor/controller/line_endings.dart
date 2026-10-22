@@ -32,9 +32,7 @@ final class LineEndings {
       }
     }
     final bool uniformCrlf =
-        crlfPairs > 0 &&
-        carriageReturns == crlfPairs &&
-        lineFeeds == crlfPairs;
+        crlfPairs > 0 && carriageReturns == crlfPairs && lineFeeds == crlfPairs;
     return uniformCrlf
         ? LineEndings._(text: disk.replaceAll('\r\n', '\n'), crlf: true)
         : LineEndings._(text: disk, crlf: false);

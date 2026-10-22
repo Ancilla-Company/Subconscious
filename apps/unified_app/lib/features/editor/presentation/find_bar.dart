@@ -151,7 +151,7 @@ final class _EditorFindBarState extends State<EditorFindBar> {
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: AppRadii.sm,
         borderSide: BorderSide(color: colors.outlineVariant),
       ),
     );
@@ -166,7 +166,7 @@ final class _EditorFindBarState extends State<EditorFindBar> {
       child: Material(
         elevation: 4,
         color: colors.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: AppRadii.lg,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 460),
           child: Padding(
@@ -177,17 +177,14 @@ final class _EditorFindBarState extends State<EditorFindBar> {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    SidebarButton(
+                    AppIconButton(
                       icon: model.replaceVisible
-                          ? FluentIcons.chevron_down_20_regular
-                          : FluentIcons.chevron_right_20_regular,
-                      selectedIcon: model.replaceVisible
                           ? FluentIcons.chevron_down_20_regular
                           : FluentIcons.chevron_right_20_regular,
                       tooltip: model.replaceVisible
                           ? 'Hide replace'
                           : 'Show replace',
-                      dimension: 28,
+
                       onPressed: model.toggleReplace,
                     ),
                     const SizedBox(width: 4),
@@ -202,28 +199,27 @@ final class _EditorFindBarState extends State<EditorFindBar> {
                             errorText: null,
                           ),
                           style: Theme.of(context).textTheme.bodyMedium,
-                          onChanged: (String value) =>
-                              _configure(query: value),
+                          onChanged: (String value) => _configure(query: value),
                           onEditingComplete: () {},
                         ),
                       ),
                     ),
                     const SizedBox(width: 4),
-                    _FindToggle(
+                    AppTextToggle(
                       label: 'Aa',
                       tooltip: 'Match case',
                       selected: model.caseSensitive,
                       onPressed: () =>
                           _configure(caseSensitive: !model.caseSensitive),
                     ),
-                    _FindToggle(
+                    AppTextToggle(
                       label: 'ab',
                       tooltip: 'Whole word',
                       selected: model.wholeWord,
                       underline: true,
                       onPressed: () => _configure(wholeWord: !model.wholeWord),
                     ),
-                    _FindToggle(
+                    AppTextToggle(
                       label: '.*',
                       tooltip: 'Regular expression',
                       selected: model.useRegex,
@@ -242,25 +238,22 @@ final class _EditorFindBarState extends State<EditorFindBar> {
                         ),
                       ),
                     ),
-                    SidebarButton(
+                    AppIconButton(
                       icon: FluentIcons.arrow_up_20_regular,
-                      selectedIcon: FluentIcons.arrow_up_20_regular,
                       tooltip: 'Previous match (Shift+Enter)',
-                      dimension: 28,
+
                       onPressed: () => _step(forward: false),
                     ),
-                    SidebarButton(
+                    AppIconButton(
                       icon: FluentIcons.arrow_down_20_regular,
-                      selectedIcon: FluentIcons.arrow_down_20_regular,
                       tooltip: 'Next match (Enter)',
-                      dimension: 28,
+
                       onPressed: () => _step(forward: true),
                     ),
-                    SidebarButton(
+                    AppIconButton(
                       icon: FluentIcons.dismiss_20_regular,
-                      selectedIcon: FluentIcons.dismiss_20_regular,
                       tooltip: 'Close (Esc)',
-                      dimension: 28,
+
                       onPressed: widget.onClose,
                     ),
                   ],
@@ -307,66 +300,6 @@ final class _EditorFindBarState extends State<EditorFindBar> {
                     ),
                   ),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A small toggle that shows a short text label, like the case and word
-/// options of a find bar.
-final class _FindToggle extends StatelessWidget {
-  const _FindToggle({
-    required this.label,
-    required this.tooltip,
-    required this.selected,
-    required this.onPressed,
-    this.underline = false,
-  });
-
-  final String label;
-  final String tooltip;
-  final bool selected;
-  final bool underline;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        toggled: selected,
-        label: tooltip,
-        child: SizedBox.square(
-          dimension: 28,
-          child: Material(
-            color: selected ? colors.secondaryContainer : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(4),
-              canRequestFocus: false,
-              onTap: onPressed,
-              child: Center(
-                child: ExcludeSemantics(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      decoration: underline
-                          ? TextDecoration.underline
-                          : TextDecoration.none,
-                      color: selected
-                          ? colors.onSecondaryContainer
-                          : colors.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ),
             ),
           ),
         ),

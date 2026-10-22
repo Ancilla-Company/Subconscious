@@ -5,10 +5,9 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../hive/presentation/nodes_page.dart';
-import '../../settings/presentation/settings_main_panel.dart'
-    show settingsFormTheme;
 import '../account_controller.dart';
 
 final class AccountPanel extends StatelessWidget {
@@ -32,7 +31,7 @@ final class AccountPanel extends StatelessWidget {
       };
       final ThemeData theme = Theme.of(context);
       return Theme(
-        data: _accountPanelTheme(settingsFormTheme(context)),
+        data: appFormTheme(context),
         child: ColoredBox(
           color: theme.colorScheme.surface,
           child: Column(
@@ -89,51 +88,11 @@ final class AccountPanel extends StatelessWidget {
   );
 }
 
-/// The account page and every dialog opened from it (reset, remove, approve)
-/// share the app's form template ([settingsFormTheme]); this only fills the
-/// gaps on platforms where that template leaves the stock Material theme.
-ThemeData _accountPanelTheme(ThemeData base) => base.copyWith(
-  filledButtonTheme: FilledButtonThemeData(
-    style: _rectangularControlStyle(base.filledButtonTheme.style),
-  ),
-  outlinedButtonTheme: OutlinedButtonThemeData(
-    style: _rectangularControlStyle(base.outlinedButtonTheme.style),
-  ),
-  textButtonTheme: TextButtonThemeData(
-    style: _rectangularControlStyle(base.textButtonTheme.style),
-  ),
-  iconButtonTheme: IconButtonThemeData(
-    style: _rectangularControlStyle(base.iconButtonTheme.style),
-  ),
-  segmentedButtonTheme: SegmentedButtonThemeData(
-    style: _rectangularControlStyle(base.segmentedButtonTheme.style),
-  ),
-  dialogTheme: base.dialogTheme.copyWith(
-    shape: RoundedRectangleBorder(
-      borderRadius: platformSurfaceRadius(base.platform),
-    ),
-  ),
-);
-
 /// Corner radius for larger surfaces (avatar, dialogs), following each
 /// platform's design language: Fluent uses 8 for cards and overlays, Material
 /// 3 and Apple platforms use a larger radius.
 BorderRadius platformSurfaceRadius(TargetPlatform platform) =>
-    BorderRadius.circular(switch (platform) {
-      TargetPlatform.windows => 8,
-      TargetPlatform.linux => 6,
-      TargetPlatform.macOS || TargetPlatform.iOS => 12,
-      TargetPlatform.android || TargetPlatform.fuchsia => 12,
-    });
-
-ButtonStyle _rectangularControlStyle(ButtonStyle? inherited) =>
-    (inherited ?? const ButtonStyle()).copyWith(
-      shape: const WidgetStatePropertyAll<OutlinedBorder>(
-        RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(3)),
-        ),
-      ),
-    );
+    AppRadii.surfaceFor(platform);
 
 final class _SignedInAccount extends StatelessWidget {
   const _SignedInAccount({required this.controller});
@@ -189,42 +148,39 @@ final class _SignedInAccount extends StatelessWidget {
       children: <Widget>[
         SizedBox(
           width: double.infinity,
-          child: Card(
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints constraints) {
-                  if (constraints.maxWidth < 520) {
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        avatar,
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              details,
-                              const SizedBox(height: 16),
-                              signOutButton,
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-                  }
+          child: AppCard(
+            padding: const EdgeInsets.all(20),
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                if (constraints.maxWidth < 520) {
                   return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       avatar,
                       const SizedBox(width: 16),
-                      Expanded(child: details),
-                      const SizedBox(width: 20),
-                      signOutButton,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            details,
+                            const SizedBox(height: 16),
+                            signOutButton,
+                          ],
+                        ),
+                      ),
                     ],
                   );
-                },
-              ),
+                }
+                return Row(
+                  children: <Widget>[
+                    avatar,
+                    const SizedBox(width: 16),
+                    Expanded(child: details),
+                    const SizedBox(width: 20),
+                    signOutButton,
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -279,20 +235,20 @@ final class _AnonymousAccountState extends State<_AnonymousAccount> {
           },
         )
       else ...<Widget>[
-        SegmentedButton<_AccountForm>(
-          segments: const <ButtonSegment<_AccountForm>>[
-            ButtonSegment<_AccountForm>(
+        AppSegmentedControl<_AccountForm>(
+          segments: const <AppSegment<_AccountForm>>[
+            AppSegment<_AccountForm>(
               value: _AccountForm.signIn,
-              label: Text('Sign in'),
+              label: 'Sign in',
             ),
-            ButtonSegment<_AccountForm>(
+            AppSegment<_AccountForm>(
               value: _AccountForm.signUp,
-              label: Text('Create account'),
+              label: 'Create account',
             ),
           ],
-          selected: <_AccountForm>{_form},
-          onSelectionChanged: (Set<_AccountForm> selection) => setState(() {
-            _form = selection.single;
+          selected: _form,
+          onChanged: (_AccountForm form) => setState(() {
+            _form = form;
             widget.controller.clearFeedback();
           }),
         ),
@@ -329,7 +285,6 @@ final class _SignInFormState extends State<_SignInForm> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _email = TextEditingController();
   final TextEditingController _password = TextEditingController();
-  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -354,13 +309,9 @@ final class _SignInFormState extends State<_SignInForm> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         _EmailField(controller: _email, enabled: !widget.controller.isBusy),
-        const SizedBox(height: 12),
         _PasswordField(
           controller: _password,
           enabled: !widget.controller.isBusy,
-          obscure: _obscurePassword,
-          onToggleObscure: () =>
-              setState(() => _obscurePassword = !_obscurePassword),
           onSubmitted: widget.controller.isBusy ? null : _submit,
         ),
         Align(
@@ -404,7 +355,6 @@ final class _SignupFormState extends State<_SignupForm> {
   Timer? _resendTimer;
   int _secondsUntilResend = 0;
   bool _codeRequested = false;
-  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -475,8 +425,8 @@ final class _SignupFormState extends State<_SignupForm> {
       children: <Widget>[
         _EmailField(controller: _email, enabled: !widget.controller.isBusy),
         if (_codeRequested) ...<Widget>[
-          const SizedBox(height: 12),
-          TextFormField(
+          AppTextField(
+            label: 'Verification code',
             controller: _code,
             enabled: !widget.controller.isBusy,
             keyboardType: TextInputType.number,
@@ -486,27 +436,21 @@ final class _SignupFormState extends State<_SignupForm> {
             autocorrect: false,
             enableSuggestions: false,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(labelText: 'Verification code'),
+            hintText: 'Code from your email',
             validator: (String? value) => value == null || value.trim().isEmpty
                 ? 'Enter the code from your email.'
                 : null,
           ),
-          const SizedBox(height: 12),
-          TextFormField(
+          AppTextField(
+            label: 'Display name (optional)',
             controller: _displayName,
             enabled: !widget.controller.isBusy,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(
-              labelText: 'Display name (optional)',
-            ),
+            hintText: 'How you appear to others',
           ),
-          const SizedBox(height: 12),
           _PasswordField(
             controller: _password,
             enabled: !widget.controller.isBusy,
-            obscure: _obscurePassword,
-            onToggleObscure: () =>
-                setState(() => _obscurePassword = !_obscurePassword),
           ),
         ],
         const SizedBox(height: 12),
@@ -572,7 +516,6 @@ final class _ForgotPasswordFormState extends State<_ForgotPasswordForm> {
   Timer? _resendTimer;
   int _secondsUntilResend = 0;
   bool _codeSent = false;
-  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -672,7 +615,8 @@ final class _ForgotPasswordFormState extends State<_ForgotPasswordForm> {
               ),
             ),
             const SizedBox(height: 4),
-            TextFormField(
+            AppTextField(
+              label: 'Reset code',
               controller: _code,
               enabled: !busy,
               keyboardType: TextInputType.number,
@@ -684,20 +628,16 @@ final class _ForgotPasswordFormState extends State<_ForgotPasswordForm> {
               autocorrect: false,
               enableSuggestions: false,
               textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(labelText: 'Reset code'),
+              hintText: 'Code from your email',
               validator: (String? value) =>
                   value == null || value.trim().isEmpty
                   ? 'Enter the code from your email.'
                   : null,
             ),
-            const SizedBox(height: 12),
             _PasswordField(
               controller: _password,
               enabled: !busy,
-              obscure: _obscurePassword,
               label: 'New password',
-              onToggleObscure: () =>
-                  setState(() => _obscurePassword = !_obscurePassword),
               validator: (String? value) {
                 final String password = value ?? '';
                 if (password.length < 8) return 'Use at least 8 characters.';
@@ -758,14 +698,15 @@ final class _EmailField extends StatelessWidget {
   final bool enabled;
 
   @override
-  Widget build(BuildContext context) => TextFormField(
+  Widget build(BuildContext context) => AppTextField(
+    label: 'Email address',
     controller: controller,
     enabled: enabled,
     keyboardType: TextInputType.emailAddress,
     autocorrect: false,
     enableSuggestions: false,
     textInputAction: TextInputAction.next,
-    decoration: const InputDecoration(labelText: 'Email address'),
+    hintText: 'you@example.com',
     validator: (String? value) {
       final String email = value?.trim() ?? '';
       return email.contains('@') && email.contains('.')
@@ -779,8 +720,6 @@ final class _PasswordField extends StatelessWidget {
   const _PasswordField({
     required this.controller,
     required this.enabled,
-    required this.obscure,
-    required this.onToggleObscure,
     this.label = 'Password',
     this.validator,
     this.onSubmitted,
@@ -788,32 +727,21 @@ final class _PasswordField extends StatelessWidget {
 
   final TextEditingController controller;
   final bool enabled;
-  final bool obscure;
-  final VoidCallback onToggleObscure;
   final String label;
   final String? Function(String?)? validator;
   final VoidCallback? onSubmitted;
 
   @override
-  Widget build(BuildContext context) => TextFormField(
+  Widget build(BuildContext context) => AppTextField(
+    label: label,
     controller: controller,
     enabled: enabled,
-    obscureText: obscure,
+    obscureText: true,
     enableSuggestions: false,
     autocorrect: false,
     textInputAction: TextInputAction.done,
-    onFieldSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
-    decoration: InputDecoration(
-      labelText: label,
-      helperText: 'At least 8 characters',
-      suffixIcon: IconButton(
-        tooltip: obscure ? 'Show password' : 'Hide password',
-        onPressed: enabled ? onToggleObscure : null,
-        icon: Icon(
-          obscure ? FluentIcons.eye_20_regular : FluentIcons.eye_off_20_regular,
-        ),
-      ),
-    ),
+    onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
+    hintText: 'At least 8 characters',
     validator:
         validator ??
         (String? value) =>
@@ -828,30 +756,18 @@ final class _FeedbackMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String? message = controller.error ?? controller.notice;
-    if (message == null) return const SizedBox.shrink();
-    final bool isError = controller.error != null;
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String? error = controller.error;
+    final String? notice = controller.notice;
+    if (error == null && notice == null) return const SizedBox.shrink();
     return Semantics(
       liveRegion: true,
       container: true,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: isError ? colors.errorContainer : colors.secondaryContainer,
-          borderRadius: const BorderRadius.all(Radius.circular(3)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text(
-            message,
-            style: TextStyle(
-              color: isError
-                  ? colors.onErrorContainer
-                  : colors.onSecondaryContainer,
+      child: error != null
+          ? AppFormError(error: error)
+          : Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: AppBanner(message: notice!),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

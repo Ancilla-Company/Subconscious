@@ -78,7 +78,11 @@ final class _CodeEditorSurfaceState extends State<CodeEditorSurface> {
   void _onControllerChanged() {
     // Folded blocks are hidden from the visible text, so the full text is the
     // one that belongs in the file.
-    widget.store.edited(widget.tab, _controller.fullText, _controller.selection);
+    widget.store.edited(
+      widget.tab,
+      _controller.fullText,
+      _controller.selection,
+    );
   }
 
   @override

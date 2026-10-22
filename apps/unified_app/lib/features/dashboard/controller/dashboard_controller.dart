@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../chat/engine_llm_provider.dart';
 import '../../editor/controller/editor_document_store.dart';
@@ -71,10 +72,12 @@ final class DashboardController extends ChangeNotifier {
     String? initialToken,
     this.executors,
     this.engineStartup,
+    this.oauthLauncher = _launchExternally,
   }) : _explicitEndpoint = initialEndpoint,
        _explicitToken = initialToken {
     settings = DashboardSettingsController(
       repositoryProvider: () => repository,
+      urlLauncher: oauthLauncher,
     );
     documents =
         EditorDocumentStore(
@@ -90,6 +93,16 @@ final class DashboardController extends ChangeNotifier {
 
   static const Duration reconnectInterval = Duration(seconds: 3);
   static const Duration requestTimeout = Duration(seconds: 5);
+
+  /// Setting up a new engine session (discovery plus, for a remote engine, a
+  /// WebRTC handshake) legitimately takes longer than one request. A shorter
+  /// limit abandons a link that is about to come up, leaving the device list
+  /// saying "Connected" while the session is down.
+  static const Duration resolveTimeout = Duration(seconds: 30);
+
+  /// Called when a connection attempt fails, even if the visible status did
+  /// not change, so a link that was set up for it can be abandoned.
+  VoidCallback? onConnectionAttemptFailed;
   static const Duration healthProbeInterval = Duration(seconds: 30);
   DateTime? _lastHealthProbe;
   static const Duration appStateSaveDebounce = Duration(milliseconds: 300);
@@ -98,6 +111,12 @@ final class DashboardController extends ChangeNotifier {
   static const String navigationTag = 'navigation';
 
   final EngineRepositoryResolver _repositoryResolver;
+
+  /// Opens a sign-in page outside the app; returns whether it was opened.
+  final Future<bool> Function(Uri uri) oauthLauncher;
+
+  static Future<bool> _launchExternally(Uri uri) =>
+      launchUrl(uri, mode: LaunchMode.externalApplication);
 
   /// Starts the local engine before the first connection attempt (production
   /// desktop only); null leaves starting the engine to the user.
@@ -240,6 +259,15 @@ final class DashboardController extends ChangeNotifier {
   ToolApprovalRequest? pendingToolApproval;
   final List<ToolApprovalRequest> _toolApprovalQueue = <ToolApprovalRequest>[];
   final Map<String, int> _approvedUiToolActions = <String, int>{};
+
+  /// Head of the queue of tool sign-ins waiting on the user.
+  OAuthAuthorization? pendingOAuth;
+  final List<OAuthAuthorization> _oauthQueue = <OAuthAuthorization>[];
+  final Map<String, Timer> _oauthExpiryTimers = <String, Timer>{};
+
+  /// Why the sign-in card could not proceed (browser, paste or cancel failed).
+  Object? oauthError;
+  bool isSubmittingOAuth = false;
   bool isLoadingWorkspaces = false;
   bool isLoadingThreads = false;
   bool isLoadingChat = false;
@@ -965,16 +993,16 @@ final class DashboardController extends ChangeNotifier {
       final EngineRepository? discoveredRepository = await _repositoryResolver(
         explicitEndpoint: _explicitEndpoint,
         explicitToken: _explicitToken,
-      ).timeout(requestTimeout);
+      ).timeout(resolveTimeout);
       if (discoveredRepository == null) {
         throw StateError(
           'No reachable Subconscious engine was discovered. Start the engine or configure an explicit endpoint.',
         );
       }
       _repository = discoveredRepository;
-      await discoveredRepository.rest.health().timeout(requestTimeout);
+      await discoveredRepository.rest.health().timeout(resolveTimeout);
       _lastHealthProbe = DateTime.now();
-      await discoveredRepository.connect().timeout(requestTimeout);
+      await discoveredRepository.connect().timeout(resolveTimeout);
       await _listenToEngineEvents(discoveredRepository);
       chatProvider?.replaceRepository(discoveredRepository);
       for (final EngineLlmProvider provider in _runningProviders.values) {
@@ -1015,6 +1043,7 @@ final class DashboardController extends ChangeNotifier {
         EngineConnectionStatus.disconnected,
         failure: _engineStartupError ?? caughtError,
       );
+      onConnectionAttemptFailed?.call();
     } finally {
       _connectionCheckInProgress = false;
     }
@@ -1033,6 +1062,7 @@ final class DashboardController extends ChangeNotifier {
     pendingToolApproval = null;
     _toolApprovalQueue.clear();
     _approvedUiToolActions.clear();
+    _clearOAuth();
     _engineEventRepository = eventRepository;
     _watchedThread = null;
     _engineEventSubscription = eventRepository.socket.frames.listen(
@@ -1042,6 +1072,7 @@ final class DashboardController extends ChangeNotifier {
     eventRepository.socket.registerUiTools();
     final ThreadInfo? openThread = selectedThread;
     if (openThread != null) _watchThread(eventRepository, openThread.uuid);
+    unawaited(_recoverPendingOAuth(eventRepository));
   }
 
   void _handleEngineEvent(WireFrame frame) {
@@ -1055,6 +1086,26 @@ final class DashboardController extends ChangeNotifier {
         // Another UI answered; dismiss the prompt here.
         final Object? resolved = data['approval_id'];
         if (resolved is String) _dismissToolApproval(resolved);
+        return;
+      case 'oauth.request':
+        if (parseTaskEvent(frame) case OAuthRequested(:final authorization)) {
+          _enqueueOAuth(authorization);
+        } else {
+          debugPrint('Ignored a malformed oauth.request frame.');
+        }
+        return;
+      case 'oauth.resolved':
+        if (parseTaskEvent(frame) case OAuthResolved(
+          :final authId,
+          :final status,
+        )) {
+          _dismissOAuth(authId);
+          if (status == OAuthStatus.authorized) {
+            unawaited(settings.refreshTools());
+          }
+        } else {
+          debugPrint('Ignored a malformed oauth.resolved frame.');
+        }
         return;
       case 'task.status':
         final Object? taskThread = data['thread_uuid'];
@@ -1199,6 +1250,155 @@ final class DashboardController extends ChangeNotifier {
     } on Object catch (caughtError) {
       error = caughtError;
       notifyListeners();
+    }
+  }
+
+  void _enqueueOAuth(OAuthAuthorization authorization) {
+    if (pendingOAuth?.authId == authorization.authId ||
+        _oauthQueue.any(
+          (OAuthAuthorization item) => item.authId == authorization.authId,
+        )) {
+      return;
+    }
+    final DateTime? expiresAt = authorization.expiresAt;
+    if (expiresAt != null) {
+      final Duration remaining = expiresAt.difference(DateTime.now());
+      if (remaining <= Duration.zero) return;
+      _oauthExpiryTimers[authorization.authId] = Timer(
+        remaining,
+        () => _dismissOAuth(authorization.authId),
+      );
+    }
+    if (pendingOAuth == null) {
+      pendingOAuth = authorization;
+      oauthError = null;
+    } else {
+      _oauthQueue.add(authorization);
+    }
+    // Like an approval: consent must be visible even when the chat is hidden.
+    chatPanelVisible = true;
+    notifyListeners();
+  }
+
+  void _dismissOAuth(String authId) {
+    _oauthExpiryTimers.remove(authId)?.cancel();
+    final int before = _oauthQueue.length;
+    _oauthQueue.removeWhere((OAuthAuthorization item) => item.authId == authId);
+    bool changed = _oauthQueue.length != before;
+    if (pendingOAuth?.authId == authId) {
+      pendingOAuth = _oauthQueue.isEmpty ? null : _oauthQueue.removeAt(0);
+      oauthError = null;
+      changed = true;
+    }
+    if (changed && !_disposed) notifyListeners();
+  }
+
+  void _clearOAuth() {
+    for (final Timer timer in _oauthExpiryTimers.values) {
+      timer.cancel();
+    }
+    _oauthExpiryTimers.clear();
+    _oauthQueue.clear();
+    pendingOAuth = null;
+    oauthError = null;
+  }
+
+  /// Picks up sign-ins that started while this client was not listening.
+  Future<void> _recoverPendingOAuth(EngineRepository source) async {
+    try {
+      final List<OAuthAuthorization> pending = await source.rest
+          .listPendingOAuth()
+          .timeout(requestTimeout);
+      if (_disposed || !identical(_engineEventRepository, source)) return;
+      pending.forEach(_enqueueOAuth);
+    } on Object catch (caughtError) {
+      // An older engine has no such route; frames still deliver new prompts.
+      debugPrint('Could not list pending OAuth sign-ins: $caughtError');
+    }
+  }
+
+  /// Opens the sign-in page of [pendingOAuth] in the browser.
+  Future<void> openOAuthSignIn() async {
+    final OAuthAuthorization? authorization = pendingOAuth;
+    if (authorization == null) return;
+    oauthError = null;
+    final Uri? uri = Uri.tryParse(authorization.url);
+    if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
+      oauthError = 'The sign-in address is not a web link.';
+      notifyListeners();
+      return;
+    }
+    try {
+      if (!await oauthLauncher(uri)) {
+        oauthError =
+            'Could not open the browser. Copy this address and open '
+            'it yourself: ${authorization.url}';
+        notifyListeners();
+      }
+    } on Object catch (caughtError) {
+      debugPrint('Opening the OAuth sign-in page failed: $caughtError');
+      oauthError = 'Could not open the browser: $caughtError';
+      notifyListeners();
+    }
+  }
+
+  /// Finishes [pendingOAuth] with what the user pasted: the full address the
+  /// browser ended on, a `code=...&state=...` query, or a bare code. The card
+  /// stays (with the engine's reason in [oauthError]) when the engine refuses.
+  Future<void> completeOAuthFromPaste(String pasted) async {
+    final OAuthAuthorization? authorization = pendingOAuth;
+    final RestEngineClient? client = repository?.rest;
+    if (authorization == null || client == null || isSubmittingOAuth) return;
+    final OAuthPaste? parsed = parseOAuthPaste(pasted);
+    if (parsed == null) {
+      oauthError = 'Paste the address from your browser or the code.';
+      notifyListeners();
+      return;
+    }
+    oauthError = null;
+    isSubmittingOAuth = true;
+    notifyListeners();
+    try {
+      await client
+          .completeOAuth(
+            authorization.authId,
+            redirectUrl: parsed.redirectUrl,
+            code: parsed.code,
+            state: parsed.state,
+          )
+          .timeout(requestTimeout);
+      isSubmittingOAuth = false;
+      _dismissOAuth(authorization.authId);
+      unawaited(settings.refreshTools());
+    } on Object catch (caughtError) {
+      isSubmittingOAuth = false;
+      oauthError = caughtError is EngineApiException
+          ? (caughtError.engineMessage ?? caughtError.toString())
+          : caughtError;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Abandons [pendingOAuth]; the engine fails the waiting tool call.
+  Future<void> cancelOAuth() async {
+    final OAuthAuthorization? authorization = pendingOAuth;
+    final RestEngineClient? client = repository?.rest;
+    if (authorization == null || client == null) return;
+    oauthError = null;
+    try {
+      await client.cancelOAuth(authorization.authId).timeout(requestTimeout);
+      _dismissOAuth(authorization.authId);
+    } on EngineApiException catch (caughtError) {
+      if (caughtError.statusCode == 404) {
+        // Already finished or expired on the engine.
+        _dismissOAuth(authorization.authId);
+        return;
+      }
+      oauthError = caughtError.engineMessage ?? caughtError.toString();
+      if (!_disposed) notifyListeners();
+    } on Object catch (caughtError) {
+      oauthError = caughtError;
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -1799,13 +1999,15 @@ final class DashboardController extends ChangeNotifier {
       if (!_disposed && requestVersion == _chatRequestVersion) {
         chatError = caughtError;
         // Keep the composer: fall back to the cached history.
-        chatProvider ??= EngineLlmProvider(
-          repository: currentRepository,
-          threadUuid: thread.uuid,
-          modelId: thread.defaultModelId ?? threadsWorkspace?.defaultModelId,
-        )..replaceEngineHistory(
-            _messageCache[thread.uuid] ?? const <ChatMessage>[],
-          );
+        chatProvider ??=
+            EngineLlmProvider(
+              repository: currentRepository,
+              threadUuid: thread.uuid,
+              modelId:
+                  thread.defaultModelId ?? threadsWorkspace?.defaultModelId,
+            )..replaceEngineHistory(
+              _messageCache[thread.uuid] ?? const <ChatMessage>[],
+            );
       }
     } finally {
       if (!_disposed && requestVersion == _chatRequestVersion) {
@@ -2520,6 +2722,10 @@ final class DashboardController extends ChangeNotifier {
     _reconnectTimer = null;
     _appStateSaveTimer?.cancel();
     _appStateSaveTimer = null;
+    for (final Timer timer in _oauthExpiryTimers.values) {
+      timer.cancel();
+    }
+    _oauthExpiryTimers.clear();
     final StreamSubscription<WireFrame>? subscription =
         _engineEventSubscription;
     _engineEventSubscription = null;
@@ -2538,6 +2744,10 @@ final class DashboardController extends ChangeNotifier {
     _disposed = true;
     _reconnectTimer?.cancel();
     _appStateSaveTimer?.cancel();
+    for (final Timer timer in _oauthExpiryTimers.values) {
+      timer.cancel();
+    }
+    _oauthExpiryTimers.clear();
     _engineEventRepository = null;
     final StreamSubscription<WireFrame>? subscription =
         _engineEventSubscription;

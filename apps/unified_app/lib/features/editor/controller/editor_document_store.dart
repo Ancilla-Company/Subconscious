@@ -10,12 +10,11 @@ import 'line_endings.dart';
 import 'workspace_paths.dart';
 
 /// Called whenever the set of open tabs, or the active one, changes.
-typedef TabsChangedCallback =
-    void Function(
-      String workspaceUuid,
-      List<WorkspaceFileReference> files,
-      String? activeKey,
-    );
+typedef TabsChangedCallback = void Function(
+  String workspaceUuid,
+  List<WorkspaceFileReference> files,
+  String? activeKey,
+);
 
 /// The files a workspace has open. Kept for as long as the app runs, so
 /// switching away from a workspace never throws away its unsaved edits.
@@ -210,8 +209,7 @@ final class EditorDocumentStore extends ChangeNotifier {
       ...session.remembered,
     ];
     final Set<String> known = <String>{
-      for (final WorkspaceFileReference reference in references)
-        reference.key,
+      for (final WorkspaceFileReference reference in references) reference.key,
     };
     for (final EditorDraft draft in stored.values) {
       if (known.add(draft.key)) {
@@ -911,8 +909,7 @@ final class EditorDocumentStore extends ChangeNotifier {
   // Internals
   // ---------------------------------------------------------------------------
 
-  _DraftTracker _tracker(TextTab tab) =>
-      _trackers[tab] ??= _DraftTracker();
+  _DraftTracker _tracker(TextTab tab) => _trackers[tab] ??= _DraftTracker();
 
   EditorTab? _find(_Session session, String key) {
     for (final EditorTab tab in session.tabs) {

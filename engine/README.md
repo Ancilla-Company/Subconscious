@@ -67,7 +67,7 @@ The tray's Connected Clients menu shows readable labels such as `Desktop (local)
 | `client_name` | `clientName` | Free text, max 64 characters, control characters stripped. |
 | `client_version` | `clientVersion` | Max 32 characters. |
 
-Local vs remote is decided by the engine from the peer address (loopback or one of this machine's own addresses is local); `X-Forwarded-For` is ignored and hive/WebRTC peers are always remote. The existing `client=flutter` settings-scope parameter is unrelated and unchanged. No browser extension exists in this repository yet; a future one should connect with `client_type=browser_extension`.
+Local vs remote is decided by the engine from the peer address (loopback or one of this machine's own addresses is local); `X-Forwarded-For` is ignored and hive/WebRTC peers are always remote. The existing `client=flutter` settings-scope parameter is unrelated and unchanged. The Chromium extension (`apps/chromium_extension`) connects with `client_type=browser_extension` while its popup or side panel is open.
 
 ## Selenium web smoke check
 
@@ -94,7 +94,55 @@ Besides workspace/thread/message CRUD, the authenticated `/api/v1` surface inclu
 
 Workspace directories remain the scope for the workspace file API and RAG indexing. The `filesystem` model tools instead accept any user-specified path (absolute or process-relative), including paths outside workspace directories; they rely on the operating system's permissions and the configured tool-approval policy rather than a workspace-root block. `read_filesystem_file` and `write_filesystem_file` handle UTF-8 text directly and use structured extraction/generation for PDF, DOCX, XLSX, and PPTX files. Document generation preserves the supported normalized content, not arbitrary source formatting.
 
-Only `/api/v1/health` is public. HTTP endpoints require an `Authorization: Bearer ...` header; the `token` query parameter is accepted only during WebSocket connection setup for client compatibility. Model API keys and configured-tool headers are encrypted in `data.enc` and are never returned by API responses.
+Only `/api/v1/health` (plus the OAuth callback and `POST /api/v1/pair`, see below) is public. HTTP endpoints require an `Authorization: Bearer ...` header; the `token` query parameter is accepted only during WebSocket connection setup for client compatibility. Model API keys and configured-tool headers are encrypted in `data.enc` and are never returned by API responses.
+
+## Pairing a browser extension
+
+Instead of pasting the joining token, the extension can pair through the cloud account:
+
+1. The user signs in to the server from the extension; it reads `node_id` from the public `GET /api/v1/health` (the hive node id, or `null` before the hive identity exists).
+2. The extension asks the server for `POST /nodes/{node_id}/pairing-assertion` with a random `client_nonce` and its `chrome-extension://` or `moz-extension://` origin.
+3. The extension calls `POST /api/v1/pair` on the engine with `{assertion, client_nonce}`. The engine requires a matching extension `Origin` header (otherwise 403), then verifies the assertion at `POST {server}/nodes/{node_id}/pairing-assertion/verify` using its own account session, and checks that the returned `user_id` is the engine's signed-in user.
+4. On success it returns `{token, client_id, expires_at}`. The `scp_...` token is used exactly like the joining token (HTTP bearer, WebSocket `?token=`).
+
+Errors: 401 engine not signed in or assertion from another account, 403 bad/missing origin, 404 invalid/used/expired assertion, 429 more than 5 attempts a minute per origin and IP, 503 server unreachable.
+
+Management (master engine token only; paired tokens get 401): `GET /api/v1/pair/clients` lists `{id, origin, label, created_at, last_used_at, expires_at}` (never hashes) and `DELETE /api/v1/pair/clients/{client_id}` revokes.
+
+Security notes:
+- The assertion is single use, lasts 60 seconds, and is bound to the engine node, the client nonce and the extension origin; replaying or changing any of them fails.
+- Only SHA-256 hashes of client tokens are stored (`paired_clients.json` in the engine data directory, written atomically, `0600` on POSIX). Hashes are compared in constant time.
+- Tokens expire after 30 days of inactivity (sliding; `last_used_at` is refreshed at most once a minute). At most 20 clients are kept; the oldest is evicted.
+- A paired client has the same privileges as a joining token, except it cannot mint, list or revoke clients. Remote hive peers cannot reach `/api/v1/pair` (not in the role allowlist).
+
+## Client-defined tools
+
+A client (browser extension, VS Code extension, ...) can offer tools to the model over its `/api/v1/events` WebSocket. Frames use the usual `{"v":1,"type":...,"id":...,"data":...}` envelope.
+
+Register (or replace) a group; the call replaces every tool of that group for this connection, so re-register whenever your tools change. An empty `tools` list removes the group. `tool.unregister` with `{"group": "..."}` also removes it.
+
+```json
+{"v":1,"type":"tool.register","id":"1","data":{
+  "group":"browser", "title":"Browser",
+  "tools":[{"id":"read_page","description":"Read the visible text of a tab.",
+            "input_schema":{"type":"object","properties":{"tab_id":{"type":"integer"}}},
+            "operation":"read","read_only":true,"timeout_seconds":30}]}}
+```
+
+- `group`: `^[a-z][a-z0-9_]{0,31}$`, not the slug of a built-in group. `title` is shown to the model and user.
+- tool `id`: `^[A-Za-z][A-Za-z0-9_.\-]{0,63}$`; `description` up to 2000 chars; `input_schema` a JSON object with `"type":"object"`, up to 32 KiB. At most 64 tools per group and 8 groups per connection.
+- `operation`: `read`, `create`, `update`, `delete` or `execute` (default `update`). `execute` is treated as `update` for approval. `read_only: true` forces `read`. `timeout_seconds` (optional, up to 300) overrides the 60 s default.
+- Invalid payloads get an `error` frame (`tool.register rejected: <reason>`); nothing is registered. Hive peers cannot register schema-bearing tools (`error` frame); they keep the legacy UI tool ids only. A payload without `group`/`input_schema` is the legacy desktop UI registration and is unchanged.
+
+The model sees each tool as `<group>__<id>` (non `[A-Za-z0-9_]` characters become `_`, max 64 chars, de-duplicated with a numeric suffix) with the description prefixed `[<title> via <client name>]`. When the model calls it, the engine sends, with the chat turn id as the envelope `id`:
+
+```json
+{"v":1,"type":"client.tool.request","id":"<turn id>","data":{"request_id":"...","tool_name":"read_page","group":"browser","arguments":{"tab_id":3}}}
+```
+
+The client answers on the same connection with `{"type":"client.tool.result","id":"<turn id>","data":{"request_id":"...","ok":true,"result":<json>}}` or `{"ok":false,"error":"..."}`. No answer in time (60 s or `timeout_seconds`) is reported to the model as a failure.
+
+Permissions follow the built-in model. A tool needs approval iff the workspace/thread approval settings require it for its operation, and `tool.approval.request` reports the declared `operation` (including `execute`). Client tools are offered only when the turn has `tools_enabled`, and honour `tools_config`: `builtin_enabled: false`, `builtin[<group>].enabled` and `builtin[<group>].tools[<id>]` (default enabled). `GET /api/v1/tools/catalog` lists client groups under `builtin` (`{name, doc, operation}` per tool) while a client has them registered and, after it disconnects, until the engine restarts, so settings can still toggle them.
 
 ## Trust model: local, signed in, LAN
 

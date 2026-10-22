@@ -119,7 +119,27 @@ class ToolRegistryRecord(Base):
     endpoint_url: Mapped[str | None] = mapped_column(Text)
     auth_type: Mapped[str | None] = mapped_column(String)
     auth_env_var: Mapped[str | None] = mapped_column(String)
+    # JSON {"command","args","env","cwd"} for mcp (stdio) and cli tools. ``env`` is NOT
+    # secret: it is stored in plain text. Secrets belong in the encrypted api_key headers.
+    config_json: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, default="active")
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class SkillRecord(Base):
+    """A reusable instruction set (a SKILL.md folder/file or stored text) the model can read on demand."""
+
+    __tablename__ = "skills"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String, unique=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    alias: Mapped[str | None] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text)
+    source_type: Mapped[str] = mapped_column(String, default="folder")
+    source: Mapped[str | None] = mapped_column(Text)
+    instructions: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now)
 

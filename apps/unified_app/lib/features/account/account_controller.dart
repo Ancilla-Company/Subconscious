@@ -81,7 +81,8 @@ final class AccountController extends ChangeNotifier {
     final String address = email.trim();
     return _performAction(
       () => session.account.loginWithEmail(email: address, password: password),
-      linkEngine: (RestEngineClient client) => _loginEngine(client, address, password),
+      linkEngine: (RestEngineClient client) =>
+          _loginEngine(client, address, password),
     );
   }
 
@@ -133,7 +134,8 @@ final class AccountController extends ChangeNotifier {
         password: password,
         displayName: displayName,
       ),
-      linkEngine: (RestEngineClient client) => _loginEngine(client, address, password),
+      linkEngine: (RestEngineClient client) =>
+          _loginEngine(client, address, password),
     );
   }
 
@@ -168,7 +170,8 @@ final class AccountController extends ChangeNotifier {
         code: code.trim(),
         newPassword: newPassword,
       ),
-      linkEngine: (RestEngineClient client) => _loginEngine(client, address, newPassword),
+      linkEngine: (RestEngineClient client) =>
+          _loginEngine(client, address, newPassword),
       messageFor: _resetMessageFor,
     );
   }

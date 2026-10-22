@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../account/account_controller.dart';
 import '../device_tree.dart';
@@ -38,9 +39,9 @@ final class _NodesPageState extends State<NodesPage> {
           title: const Text('Devices'),
           actions: <Widget>[
             if (runtime.isSignedIn) ...<Widget>[
-              IconButton(
+              AppIconButton(
                 tooltip: 'Refresh',
-                icon: const Icon(FluentIcons.arrow_clockwise_20_regular),
+                icon: FluentIcons.arrow_clockwise_20_regular,
                 onPressed: runtime.refreshing ? null : runtime.forceRefresh,
               ),
               TextButton(
@@ -86,7 +87,8 @@ final class DevicesSection extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          if (runtime.status == HiveStatus.busy) const LinearProgressIndicator(),
+          if (runtime.status == HiveStatus.busy)
+            const LinearProgressIndicator(),
           _NodeList(runtime: runtime, embedded: true),
         ],
       );
@@ -131,23 +133,11 @@ final class _OfflineProblemNotice extends StatelessWidget {
   final String problem;
 
   @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Card(
-      key: const ValueKey<String>('devices-offline-problem'),
-      color: theme.colorScheme.errorContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Semantics(
-          liveRegion: true,
-          child: Text(
-            'This device is offline. $problem',
-            style: TextStyle(color: theme.colorScheme.onErrorContainer),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => AppBanner(
+    key: const ValueKey<String>('devices-offline-problem'),
+    tone: AppBannerTone.error,
+    message: 'This device is offline. $problem',
+  );
 }
 
 final class _NodeList extends StatelessWidget {
@@ -161,7 +151,8 @@ final class _NodeList extends StatelessWidget {
     final NodeView? local = runtime.localNode;
     final ThemeData theme = Theme.of(context);
     final Object? error = runtime.error;
-    final bool errorIsUnavailable = error != null && _isServerUnavailable(error);
+    final bool errorIsUnavailable =
+        error != null && _isServerUnavailable(error);
     final bool showEngineCard =
         !runtime.hasLocalFullNode &&
         !runtime.linkingLocalEngine &&
@@ -169,7 +160,9 @@ final class _NodeList extends StatelessWidget {
     return ListView(
       shrinkWrap: embedded,
       physics: embedded ? const NeverScrollableScrollPhysics() : null,
-      padding: embedded ? const EdgeInsets.only(top: 12) : const EdgeInsets.all(16),
+      padding: embedded
+          ? const EdgeInsets.only(top: 12)
+          : const EdgeInsets.all(16),
       children: <Widget>[
         if (error != null)
           Padding(
@@ -208,38 +201,24 @@ final class _NodeList extends StatelessWidget {
             child: _OfflineProblemNotice(problem: problem),
           ),
         if (runtime.hasLocalFullNode && runtime.engineHiveState == 'signed_out')
-          Card(
+          AppBanner(
             key: const ValueKey<String>('engine-signed-out-banner'),
-            color: theme.colorScheme.errorContainer,
-            child: const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Engine is not signed in. Sign out and sign in again to link it.',
-              ),
-            ),
+            tone: AppBannerTone.error,
+            message: 'Engine is not signed in. Sign out and sign in again to link it.',
           ),
-        if (runtime.hasLocalFullNode && runtime.engineHiveState == 'hive_mismatch')
-          Card(
+        if (runtime.hasLocalFullNode &&
+            runtime.engineHiveState == 'hive_mismatch')
+          AppBanner(
             key: const ValueKey<String>('engine-hive-mismatch'),
-            color: theme.colorScheme.errorContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(runtime.engineHiveDetail ?? hiveMismatchMessage),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton(
-                      key: const ValueKey<String>('engine-reset-local-hive'),
-                      onPressed: () => _confirmResetLocalHive(context, runtime),
-                      child: const Text('Reset local hive data'),
-                    ),
-                  ),
-                ],
+            tone: AppBannerTone.error,
+            message: runtime.engineHiveDetail ?? hiveMismatchMessage,
+            actions: <Widget>[
+              OutlinedButton(
+                key: const ValueKey<String>('engine-reset-local-hive'),
+                onPressed: () => _confirmResetLocalHive(context, runtime),
+                child: const Text('Reset local hive data'),
               ),
-            ),
+            ],
           ),
         if (runtime.linkingLocalEngine) const _LinkingCard(),
         if (runtime.localEngineMissing) _EngineMissingCard(runtime: runtime),
@@ -269,15 +248,10 @@ final class _NodeList extends StatelessWidget {
             child: Text(note),
           ),
         if (nodes.isEmpty && error == null) const Text('No devices yet.'),
-        for (final DeviceGroup group in buildDeviceTree(nodes)) ...<Widget>[
-          _NodeTile(runtime: runtime, view: group.root),
-          for (final NodeView child in group.children)
-            Padding(
-              padding: const EdgeInsets.only(left: 24),
-              child: _NodeTile(runtime: runtime, view: child),
-            ),
-        ],
-        if (runtime.executorCandidates.isNotEmpty) _ExecutorSection(runtime: runtime),
+        for (final DeviceGroup group in buildDeviceTree(nodes))
+          _DeviceGroupCard(runtime: runtime, group: group),
+        if (runtime.executorCandidates.isNotEmpty)
+          _ExecutorSection(runtime: runtime),
       ],
     );
   }
@@ -287,12 +261,11 @@ Future<void> _confirmResetLocalHive(
   BuildContext context,
   HiveRuntime runtime,
 ) async {
-  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-  final bool? confirmed = await showDialog<bool>(
+  final bool? confirmed = await showAppDialog<bool>(
     context: context,
-    builder: (BuildContext dialog) => AlertDialog(
+    builder: (BuildContext dialog) => AppDialog(
       key: const ValueKey<String>('engine-reset-local-hive-dialog'),
-      title: const Text('Reset local hive data?'),
+      title: 'Reset local hive data?',
       content: const Text(
         'The engine backs up its database, then clears its local hive '
         'bookkeeping. Your threads and files are kept. You will need to sign '
@@ -315,9 +288,8 @@ Future<void> _confirmResetLocalHive(
   try {
     await runtime.resetLocalHive();
   } on Object catch (error) {
-    messenger.showSnackBar(
-      SnackBar(content: Text('Could not reset local hive data: $error')),
-    );
+    if (!context.mounted) return;
+    showAppSnack(context, 'Could not reset local hive data: $error');
   }
 }
 
@@ -344,18 +316,15 @@ final class _LinkingCard extends StatelessWidget {
   const _LinkingCard();
 
   @override
-  Widget build(BuildContext context) => const Card(
+  Widget build(BuildContext context) => const AppCard(
     key: ValueKey<String>('linking-card'),
-    child: Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('Linking to the engine on this computer...'),
-          SizedBox(height: 8),
-          LinearProgressIndicator(),
-        ],
-      ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('Linking to the engine on this computer...'),
+        SizedBox(height: 8),
+        LinearProgressIndicator(),
+      ],
     ),
   );
 }
@@ -366,30 +335,26 @@ final class _EngineMissingCard extends StatelessWidget {
   final HiveRuntime runtime;
 
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) => AppCard(
     key: const ValueKey<String>('engine-missing-card'),
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Text('Engine did not start. Retry, or check the engine log.'),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: <Widget>[
-              FilledButton(
-                onPressed: runtime.retryLocalEngineLink,
-                child: const Text('Retry'),
-              ),
-              TextButton(
-                onPressed: runtime.useThisPcAsRemoteClient,
-                child: const Text('Use this PC as a remote client'),
-              ),
-            ],
-          ),
-        ],
-      ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Text('Engine did not start. Retry, or check the engine log.'),
+        const SizedBox(height: 8),
+        AppButtonRow(
+          children: <Widget>[
+            FilledButton(
+              onPressed: runtime.retryLocalEngineLink,
+              child: const Text('Retry'),
+            ),
+            TextButton(
+              onPressed: runtime.useThisPcAsRemoteClient,
+              child: const Text('Use this PC as a remote client'),
+            ),
+          ],
+        ),
+      ],
     ),
   );
 }
@@ -409,10 +374,7 @@ final class _ExecutorSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            'Run tasks on',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
+          Text('Run tasks on', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(
             'Pick a device for a conversation with the run-on control next to '
@@ -420,32 +382,74 @@ final class _ExecutorSection extends StatelessWidget {
             'connected to.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          for (final ExecutorOption option in options)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                option.isHome
-                    ? FluentIcons.laptop_20_regular
-                    : FluentIcons.phone_laptop_20_regular,
+          if (!runtime.hasDefaultEngine)
+            Padding(
+              key: const ValueKey<String>('executor-no-engine'),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'Not connected to an engine.',
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
-              title: Text(option.name),
-              subtitle: option.subtitle.isEmpty ? null : Text(option.subtitle),
-              trailing: option.isHome ? const Text('Default') : null,
             ),
+          for (final ExecutorOption option in options)
+            if (!option.isHome || runtime.hasDefaultEngine)
+              AppListRow(
+                dense: true,
+                leading: Icon(
+                  option.isHome
+                      ? FluentIcons.laptop_20_regular
+                      : FluentIcons.phone_laptop_20_regular,
+                ),
+                title: option.name,
+                subtitle: option.subtitle.isEmpty ? null : option.subtitle,
+                trailing: option.isHome ? const AppBadge('Default') : null,
+                onTap: null,
+              ),
         ],
       ),
     );
   }
 }
 
+/// One device and the clients folded under it, always drawn the same way: a
+/// single card with the device first and its clients as indented rows inside it
+/// (wherever the group sits in the list).
+final class _DeviceGroupCard extends StatelessWidget {
+  const _DeviceGroupCard({required this.runtime, required this.group});
+  final HiveRuntime runtime;
+  final DeviceGroup group;
+
+  @override
+  Widget build(BuildContext context) => AppCard(
+    padding: EdgeInsets.zero,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _NodeTile(runtime: runtime, view: group.root),
+        for (final NodeView child in group.children) ...<Widget>[
+          const Divider(height: 1),
+          _NodeTile(runtime: runtime, view: child, nested: true),
+        ],
+      ],
+    ),
+  );
+}
+
 final class _NodeTile extends StatelessWidget {
-  const _NodeTile({required this.runtime, required this.view});
+  const _NodeTile({
+    required this.runtime,
+    required this.view,
+    this.nested = false,
+  });
   final HiveRuntime runtime;
   final NodeView view;
 
+  /// A client row inside its device's card: indented, with no card of its own.
+  final bool nested;
+
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     final DirectoryNode node = view.node;
     final String? home = runtime.homeEngineId;
     final String? preferred = runtime.preferredEngineId;
@@ -466,12 +470,17 @@ final class _NodeTile extends StatelessWidget {
       ...details,
     ].join(', ');
     final bool canRemove = node.status == 'pending' && !view.isLocal;
-    final Widget? action = canApprove
+    final bool isTrustedEngine = node.isEngine && view.trusted && !view.isLocal;
+    final Widget? badge = canApprove || !isTrustedEngine
+        ? null
+        : _engineBadge(isHome, isPreferred);
+    final Widget? approveButton = canApprove
         ? FilledButton.tonal(
             onPressed: () => _showApproval(context, runtime, node),
             child: const Text('Approve'),
           )
-        : (node.isEngine && view.trusted && !view.isLocal)
+        : null;
+    final Widget? connectButton = !canApprove && isTrustedEngine
         ? _engineAction(isHome, isPreferred)
         : null;
     final Widget? removeButton = canRemove
@@ -480,23 +489,59 @@ final class _NodeTile extends StatelessWidget {
             child: const Text('Remove'),
           )
         : null;
-    return Card(
-      child: ListTile(
-        title: Text(view.isLocal ? '${node.name} (this device)' : node.name),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(subtitle),
-            if (node.isEngine && view.clients.isNotEmpty)
-              Text('Clients: ${view.clients.join(', ')}'),
+    final List<Widget> actions = <Widget>[
+      if (approveButton != null) approveButton,
+      if (connectButton != null) connectButton,
+      if (removeButton != null) removeButton,
+    ];
+    return Padding(
+      padding: nested
+          ? const EdgeInsetsDirectional.only(
+              start: 36,
+              end: 16,
+              top: 8,
+              bottom: 8,
+            )
+          : const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      view.isLocal ? '${node.name} (this device)' : node.name,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (node.isEngine && view.clients.isNotEmpty)
+                      Text(
+                        'Clients: ${view.clients.join(', ')}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (badge != null) ...<Widget>[const SizedBox(width: 8), badge],
+            ],
+          ),
+          if (actions.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            AppButtonRow(children: actions),
           ],
-        ),
-        trailing: (action != null && removeButton != null)
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[action, removeButton],
-              )
-            : (action ?? removeButton),
+        ],
       ),
     );
   }
@@ -506,10 +551,10 @@ final class _NodeTile extends StatelessWidget {
     HiveRuntime runtime,
     DirectoryNode node,
   ) async {
-    final bool? confirmed = await showDialog<bool>(
+    final bool? confirmed = await showAppDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text('Remove ${node.name}?'),
+      builder: (BuildContext context) => AppDialog(
+        title: 'Remove ${node.name}?',
         content: const Text(
           'This device is removed from your account. It can sign in again.',
         ),
@@ -528,11 +573,16 @@ final class _NodeTile extends StatelessWidget {
     if (confirmed == true) await runtime.revoke(node);
   }
 
+  /// The status pill for a trusted remote engine: Connected while this device
+  /// is linked to it, Preferred for an offline preferred engine.
+  Widget? _engineBadge(bool isHome, bool isPreferred) {
+    if (isHome) return const AppBadge('Connected', tone: AppBadgeTone.accent);
+    if (!view.online && isPreferred) return const AppBadge('Preferred');
+    return null;
+  }
+
   Widget? _engineAction(bool isHome, bool isPreferred) {
-    if (isHome) return const Chip(label: Text('Connected'));
-    if (!view.online) {
-      return isPreferred ? const Chip(label: Text('Preferred')) : null;
-    }
+    if (isHome || !view.online) return null;
     // While the card says it is (re)connecting, no Connect is offered.
     if (engineCardViewFor(runtime).showProgress) return null;
     return TextButton(
@@ -552,39 +602,33 @@ final class _EngineCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final EngineCardView view = engineCardViewFor(runtime);
-    return Card(
+    return AppCard(
       key: const ValueKey<String>('engine-card'),
-      color: theme.colorScheme.secondaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Semantics(
-              liveRegion: true,
-              child: Text(view.title, style: theme.textTheme.titleMedium),
-            ),
-            const SizedBox(height: 4),
-            Text(view.detail),
-            if (view.showProgress) ...<Widget>[
-              const SizedBox(height: 8),
-              const LinearProgressIndicator(),
-            ],
+      selected: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Semantics(
+            liveRegion: true,
+            child: Text(view.title, style: theme.textTheme.titleMedium),
+          ),
+          const SizedBox(height: 4),
+          Text(view.detail),
+          if (view.showProgress) ...<Widget>[
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                for (final CardAction action in view.actions)
-                  _cardButton(action),
-              ],
-            ),
-            if (view.caption case final String caption) ...<Widget>[
-              const SizedBox(height: 4),
-              Text(caption, style: theme.textTheme.bodySmall),
-            ],
+            const LinearProgressIndicator(),
           ],
-        ),
+          const SizedBox(height: 8),
+          AppButtonRow(
+            children: <Widget>[
+              for (final CardAction action in view.actions) _cardButton(action),
+            ],
+          ),
+          if (view.caption case final String caption) ...<Widget>[
+            const SizedBox(height: 4),
+            Text(caption, style: theme.textTheme.bodySmall),
+          ],
+        ],
       ),
     );
   }
@@ -607,10 +651,8 @@ final class _EngineCard extends StatelessWidget {
       return TextButton(onPressed: onPressed, child: label);
     }
     return switch (action.command) {
-      CardCommand.disconnect || CardCommand.cancel => OutlinedButton(
-        onPressed: onPressed,
-        child: label,
-      ),
+      CardCommand.disconnect ||
+      CardCommand.cancel => OutlinedButton(onPressed: onPressed, child: label),
       _ => FilledButton(onPressed: onPressed, child: label),
     };
   }
@@ -653,33 +695,30 @@ final class _PendingBannerState extends State<_PendingBanner> {
       for (final NodeView v in widget.nodes)
         if (!v.isLocal && v.trusted && v.node.status == 'active') v,
     ];
-    return Card(
-      color: Theme.of(context).colorScheme.secondaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              _fallback ? 'Waiting for approval' : 'Connecting to your account',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _fallback
-                  ? 'No signed-in device has approved this one yet. Open '
-                        'Account > Devices on a signed-in computer. If asked, '
-                        'both screens must show the same code.'
-                  : 'Your account devices approve this one automatically.',
-            ),
-            if (_fallback)
-              for (final NodeView approver in approvers)
+    return AppCard(
+      selected: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            _fallback ? 'Waiting for approval' : 'Connecting to your account',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _fallback
+                ? 'No signed-in device has approved this one yet. Open '
+                      'Account > Devices on a signed-in computer. If asked, '
+                      'both screens must show the same code.'
+                : 'Your account devices approve this one automatically.',
+          ),
+          if (_fallback)
+            for (final NodeView approver in approvers)
               _CodeRow(
                 label: 'Code with ${approver.node.name}',
                 code: runtime.codeFor(approver.node),
               ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -717,7 +756,7 @@ Future<void> _showApproval(
   HiveRuntime runtime,
   DirectoryNode pending,
 ) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (BuildContext context) =>
         ApproveNodeDialog(runtime: runtime, pending: pending),
@@ -746,8 +785,8 @@ final class _ApproveNodeDialogState extends State<ApproveNodeDialog> {
   Object? _error;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text('Approve ${widget.pending.name}?'),
+  Widget build(BuildContext context) => AppDialog(
+    title: 'Approve ${widget.pending.name}?',
     content: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -764,9 +803,8 @@ final class _ApproveNodeDialogState extends State<ApproveNodeDialog> {
                 child: Text(
                   snapshot.data ?? '······',
                   semanticsLabel: snapshot.data?.split('').join(' '),
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    letterSpacing: 6,
-                  ),
+                  style: Theme.of(context).textTheme.displaySmall
+                      ?.copyWith(letterSpacing: 6),
                 ),
               ),
         ),

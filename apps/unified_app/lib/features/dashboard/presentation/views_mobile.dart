@@ -12,11 +12,11 @@ import '../../account/presentation/account_panel.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
 import '../../context/presentation/context_panel.dart';
 import '../../hive/hive_runtime.dart';
-import '../../settings/controller/settings_controller.dart';
-import '../../settings/presentation/settings_main_panel.dart'
-    show settingsFormTheme;
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
+
+/// Minimum height and width of anything tappable on the mobile layout.
+const double _mobileTouchTarget = 48;
 
 final class MobileDashboardView extends StatelessWidget {
   const MobileDashboardView({
@@ -34,13 +34,12 @@ final class MobileDashboardView extends StatelessWidget {
     builder: (BuildContext context, Widget? child) => Theme(
       // The app bar, drawer and every panel share the form template, as on the
       // wide layout.
-      data: settingsFormTheme(context),
+      data: appFormTheme(context),
       child: _scaffold(context),
     ),
   );
 
   Widget _scaffold(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
     return Scaffold(
       drawer: Drawer(
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
@@ -52,35 +51,46 @@ final class MobileDashboardView extends StatelessWidget {
         ),
       ),
       appBar: AppBar(
-        // Flat and on the surface colour with a hairline, like the desktop top bar.
-        backgroundColor: colors.surface,
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        shape: Border(bottom: BorderSide(color: colors.outlineVariant)),
+        leadingWidth: _mobileTouchTarget + 8,
         leading: Builder(
-          builder: (BuildContext context) => IconButton(
-            tooltip: 'Open navigation menu',
-            onPressed: Scaffold.of(context).openDrawer,
-            icon: const Icon(FluentIcons.navigation_24_regular),
+          builder: (BuildContext context) => Align(
+            child: AppIconButton(
+              tooltip: 'Open navigation menu',
+              onPressed: Scaffold.of(context).openDrawer,
+              icon: FluentIcons.navigation_24_regular,
+              size: AppIconButtonSize.regular,
+              minTouchTarget: _mobileTouchTarget,
+              iconSize: 24,
+            ),
           ),
         ),
         title: const Text('Subconscious'),
         actions: <Widget>[
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: _MobileConnectionStatus(status: controller.connectionStatus),
+            child: AppStatusDot(
+              status: switch (controller.connectionStatus) {
+                EngineConnectionStatus.connected => AppStatus.connected,
+                EngineConnectionStatus.connecting => AppStatus.connecting,
+                EngineConnectionStatus.disconnected => AppStatus.disconnected,
+              },
+            ),
           ),
         ],
       ),
-      body: _body(),
+      // Keeps the composer clear of the iOS home indicator and landscape
+      // notch; Scaffold already shrinks the inset while the keyboard is up.
+      body: SafeArea(top: false, child: _body()),
     );
   }
 
   Widget _body() {
     // The chat only has room under Threads on mobile, so show it while a tool
-    // approval is waiting, without changing the selected section.
+    // approval or tool sign-in is waiting, without changing the selected
+    // section.
     if (controller.selectedSection != DashboardSection.threads &&
-        controller.pendingToolApproval == null) {
+        controller.pendingToolApproval == null &&
+        controller.pendingOAuth == null) {
       return DashboardMainPanel(
         controller: controller,
         accountController: accountController,
@@ -115,6 +125,7 @@ final class MobileDashboardView extends StatelessWidget {
                       : controller.error ??
                             'Select a workspace to start chatting.'),
         borderlessComposer: true,
+        minTouchTarget: _mobileTouchTarget,
         onOpenDevices: controller.openAccountShortcut,
         workspace: controller.threadsWorkspace,
         activeFile: controller.activeFileReference == null
@@ -131,6 +142,14 @@ final class MobileDashboardView extends StatelessWidget {
         toolApproval: controller.pendingToolApproval,
         onToolApproval: (bool approved) =>
             unawaited(controller.respondToToolApproval(approved)),
+        oauth: controller.pendingOAuth,
+        onOAuthOpen: () => unawaited(controller.openOAuthSignIn()),
+        onOAuthPaste: (String pasted) =>
+            unawaited(controller.completeOAuthFromPaste(pasted)),
+        onOAuthCancel: () => unawaited(controller.cancelOAuth()),
+        oauthError: controller.oauthError == null
+            ? null
+            : describeChatError(controller.oauthError!),
         onUpdateThread:
             ({
               required ThreadInfo thread,
@@ -148,8 +167,6 @@ final class MobileDashboardView extends StatelessWidget {
         title: controller.selectedThread?.title ?? controller.pendingDraftTitle,
         draftToolsConfig: controller.pendingDraftToolsConfig,
         executors: controller.executors,
-        useNeutralUserBubbleForeground:
-            controller.settings.accentTheme == AppAccentTheme.neutral,
       );
     }
   }
@@ -183,6 +200,7 @@ final class _MobileFlyout extends StatelessWidget {
       icon: icon,
       selectedIcon: selectedIcon,
       label: label,
+      height: _mobileTouchTarget,
       selected: controller.selectedSection == section,
       onPressed: () => _selectSection(section),
     ),
@@ -200,33 +218,12 @@ final class _MobileFlyout extends StatelessWidget {
       color: colors.surface,
       child: Column(
         children: <Widget>[
-          SizedBox(
-            height: 48,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  SvgPicture.asset(
-                    'windows/runner/resources/icon_title.svg',
-                    height: 24,
-                    width: 24,
-                    colorFilter: ColorFilter.mode(
-                      colors.onSurface,
-                      BlendMode.srcIn,
-                    ),
-                    semanticsLabel: 'Subconscious logo',
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      'Subconscious',
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                ],
-              ),
+          AppFlyoutHeader(
+            title: 'Subconscious',
+            logo: SvgPicture.asset(
+              'windows/runner/resources/icon_title.svg',
+              colorFilter: ColorFilter.mode(colors.onSurface, BlendMode.srcIn),
+              semanticsLabel: 'Subconscious logo',
             ),
           ),
           Padding(
@@ -259,6 +256,7 @@ final class _MobileFlyout extends StatelessWidget {
             child: ContextPanel(
               screen: controller.selectedSection,
               controller: controller,
+              minTouchTarget: _mobileTouchTarget,
               onSelection: () => Navigator.of(context).pop(),
             ),
           ),
@@ -275,7 +273,7 @@ final class _MobileFlyout extends StatelessWidget {
                       controller.selectedSection == DashboardSection.settings &&
                       !controller.accountShortcutSelected,
                   onPressed: () => _selectSection(DashboardSection.settings),
-                  dimension: 40,
+                  dimension: _mobileTouchTarget,
                   borderRadius: 6,
                 ),
                 const SizedBox(width: 8),
@@ -287,7 +285,7 @@ final class _MobileFlyout extends StatelessWidget {
                           icon: FluentIcons.person_24_regular,
                           selectedIcon: FluentIcons.person_24_filled,
                           label: accountController.sidebarTooltip,
-                          height: 40,
+                          height: _mobileTouchTarget,
                           selected:
                               controller.selectedSection ==
                                   DashboardSection.settings &&
@@ -301,36 +299,6 @@ final class _MobileFlyout extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-final class _MobileConnectionStatus extends StatelessWidget {
-  const _MobileConnectionStatus({required this.status});
-
-  final EngineConnectionStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    final (Color, String) presentation = switch (status) {
-      EngineConnectionStatus.connected => (Colors.green, 'connected'),
-      EngineConnectionStatus.connecting => (Colors.amber, 'connecting'),
-      EngineConnectionStatus.disconnected => (Colors.red, 'disconnected'),
-    };
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: presentation.$1,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(presentation.$2, style: Theme.of(context).textTheme.labelMedium),
-      ],
     );
   }
 }

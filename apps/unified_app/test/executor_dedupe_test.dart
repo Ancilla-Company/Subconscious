@@ -50,7 +50,7 @@ void main() {
       // Before the app knows which node it is talking to, the same engine
       // appears twice: as the default and as a directory entry.
       expect(runtime.options.map((ExecutorOption o) => o.name).toList(), <String>[
-        'This engine',
+        'Connected engine',
         'Brian-XPS',
       ]);
 
@@ -73,6 +73,24 @@ void main() {
       'Brian-XPS (home)',
       'Studio',
     ]);
+  });
+
+  test('a client with no session does not call itself "this engine"', () {
+    final HiveRuntime runtime = HiveRuntime()
+      ..nodes = <NodeView>[_engine('e1', 'Brian-XPS')]
+      ..engineSessionUp = () => false;
+
+    expect(runtime.hasDefaultEngine, isFalse);
+    expect(runtime.options.first.name, 'No engine connected');
+
+    // Connected through a remote engine: never "this engine" off localhost.
+    runtime.engineSessionUp = () => true;
+    expect(runtime.hasDefaultEngine, isTrue);
+    expect(runtime.options.first.name, 'Connected engine');
+
+    // A platform that runs an engine next to the app reaches it on localhost.
+    runtime.expectsLocalEngine = true;
+    expect(runtime.options.first.name, 'This engine');
   });
 
   test('an engine that is not signed in changes nothing', () async {

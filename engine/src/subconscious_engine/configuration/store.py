@@ -166,6 +166,69 @@ class EncryptedModelConfigurationStore:
     async def remove_tool_auth_config(self, identifier: str) -> None:
         await self.update_tool_auth_config(identifier, None, clear=True)
 
+    # --- OAuth state of MCP tools -------------------------------------------------------------
+    # ``tool_oauth: {tool uuid: {"tokens", "client_info", "client_secret", ...}}``. Tokens, the
+    # client registration and the client secret live ONLY here (never in SQLite, logs or DTOs).
+    async def get_tool_oauth(self, identifier: str) -> dict[str, Any]:
+        def operation() -> dict[str, Any]:
+            section = self._read_unlocked().get("tool_oauth")
+            value = section.get(identifier) if isinstance(section, dict) else None
+            return dict(value) if isinstance(value, dict) else {}
+        return await asyncio.to_thread(self._locked, operation)
+
+    async def patch_tool_oauth(self, identifier: str, changes: Mapping[str, Any]) -> dict[str, Any]:
+        """Merge ``changes`` into the tool's OAuth state; a ``None`` value removes the key."""
+        def operation() -> dict[str, Any]:
+            secrets = self._read_unlocked()
+            section = secrets.get("tool_oauth")
+            if not isinstance(section, dict):
+                section = {}
+                secrets["tool_oauth"] = section
+            state = section.get(identifier)
+            if not isinstance(state, dict):
+                state = {}
+            for key, value in changes.items():
+                if value is None:
+                    state.pop(key, None)
+                else:
+                    state[key] = value
+            if state:
+                section[identifier] = state
+            else:
+                section.pop(identifier, None)
+            self._write_unlocked(secrets)
+            return dict(state)
+        return await asyncio.to_thread(self._locked, operation)
+
+    async def clear_tool_oauth(self, identifier: str, *, keep_client_secret: bool = False) -> None:
+        """Forget tokens and the client registration (optionally keeping a user-supplied secret)."""
+        def operation() -> None:
+            secrets = self._read_unlocked()
+            section = secrets.get("tool_oauth")
+            if not isinstance(section, dict) or identifier not in section:
+                return
+            state = section.get(identifier)
+            kept = {"client_secret": state["client_secret"]} \
+                if keep_client_secret and isinstance(state, dict) and state.get("client_secret") else {}
+            if kept:
+                section[identifier] = kept
+            else:
+                section.pop(identifier, None)
+            self._write_unlocked(secrets)
+        await asyncio.to_thread(self._locked, operation)
+
+    async def get_tool_oauth_connected_ids(self) -> set[str]:
+        """Tool uuids that currently hold OAuth tokens."""
+        def operation() -> set[str]:
+            section = self._read_unlocked().get("tool_oauth")
+            if not isinstance(section, dict):
+                return set()
+            return {key for key, value in section.items() if isinstance(value, dict) and value.get("tokens")}
+        return await asyncio.to_thread(self._locked, operation)
+
+    async def has_tool_oauth_tokens(self, identifier: str) -> bool:
+        return bool((await self.get_tool_oauth(identifier)).get("tokens"))
+
     def get_account_refresh_token(self) -> str | None:
         """Return the engine-owned cloud refresh token without exposing it via the API."""
         def operation() -> str | None:

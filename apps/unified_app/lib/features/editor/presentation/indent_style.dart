@@ -32,7 +32,8 @@ final class IndentStyle {
         tabLines++;
       } else if (first == 0x20) {
         int spaces = 0;
-        while (cursor + spaces < length && text.codeUnitAt(cursor + spaces) == 0x20) {
+        while (cursor + spaces < length &&
+            text.codeUnitAt(cursor + spaces) == 0x20) {
           spaces++;
         }
         final int after = cursor + spaces;
@@ -50,8 +51,11 @@ final class IndentStyle {
       cursor = newline + 1;
     }
     final bool goFile = path.toLowerCase().endsWith('.go');
-    final bool useTabs = tabLines > spaceLines || (tabLines == spaceLines && goFile);
-    final int width = twoSpaceLines > 0 && twoSpaceLines * 5 >= spaceLines ? 2 : 4;
+    final bool useTabs =
+        tabLines > spaceLines || (tabLines == spaceLines && goFile);
+    final int width = twoSpaceLines > 0 && twoSpaceLines * 5 >= spaceLines
+        ? 2
+        : 4;
     return IndentStyle(useTabs: useTabs, width: width);
   }
 }

@@ -172,6 +172,27 @@ final class ToolApprovalResolved extends TaskEvent {
   final String? taskId;
 }
 
+/// `oauth.request`: a tool needs the user to sign in through a browser.
+final class OAuthRequested extends TaskEvent {
+  const OAuthRequested(this.authorization, {this.taskId});
+  final OAuthAuthorization authorization;
+  final String? taskId;
+}
+
+/// `oauth.resolved`: the sign-in finished (or gave up), dismiss the prompt.
+final class OAuthResolved extends TaskEvent {
+  const OAuthResolved({
+    required this.authId,
+    required this.toolUuid,
+    required this.status,
+    this.taskId,
+  });
+  final String authId;
+  final String toolUuid;
+  final OAuthStatus status;
+  final String? taskId;
+}
+
 /// Parses [frame] into a [TaskEvent], or null when it is not task related or
 /// is malformed.
 TaskEvent? parseTaskEvent(WireFrame frame) {
@@ -260,6 +281,29 @@ TaskEvent? parseTaskEvent(WireFrame frame) {
               : null,
         ),
         taskId: data['task_id'] is String ? data['task_id'] as String : id,
+      );
+    case 'oauth.request':
+      final OAuthAuthorization? authorization = OAuthAuthorization.tryParseFrame(
+        data,
+        turnId: frame.id,
+      );
+      if (authorization == null) return null;
+      return OAuthRequested(
+        authorization,
+        taskId: data['task_id'] is String ? data['task_id'] as String : frame.id,
+      );
+    case 'oauth.resolved':
+      final Object? authId = data['auth_id'];
+      final Object? toolUuid = data['tool_uuid'];
+      final OAuthStatus? status = OAuthStatus.tryParse(data['status']);
+      if (authId is! String || authId.isEmpty || toolUuid is! String || status == null) {
+        return null;
+      }
+      return OAuthResolved(
+        authId: authId,
+        toolUuid: toolUuid,
+        status: status,
+        taskId: frame.id,
       );
     case 'tool.approval.resolved':
       final Object? approval = data['approval_id'];

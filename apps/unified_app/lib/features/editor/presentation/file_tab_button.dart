@@ -1,6 +1,7 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 /// One tab in the editor's tab bar.
 ///
@@ -37,7 +38,7 @@ final class FileTabButton extends StatelessWidget {
           color: selected
               ? colors.secondaryContainer
               : colors.surfaceContainerLow,
-          borderRadius: const BorderRadius.all(Radius.circular(6)),
+          borderRadius: AppRadii.md,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,
@@ -82,23 +83,11 @@ final class FileTabButton extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(width: 3),
-                    IconButton(
+                    AppIconButton(
                       tooltip: 'Close $label',
                       onPressed: onClose,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 26,
-                        height: 26,
-                      ),
-                      style: IconButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      icon: const Icon(
-                        FluentIcons.dismiss_20_regular,
-                        size: 14,
-                      ),
+                      icon: FluentIcons.dismiss_20_regular,
+                      iconSize: 14,
                     ),
                   ],
                 ),

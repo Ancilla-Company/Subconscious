@@ -6,6 +6,18 @@ DateTime? _dateTimeFromJson(Object? value) {
   return DateTime.tryParse(value)?.toUtc();
 }
 
+List<String> _stringListValue(Object? value) => value is List
+    ? <String>[for (final Object? item in value) if (item is String) item]
+    : const <String>[];
+
+Map<String, String> _stringMapValue(Object? value) => value is Map
+    ? <String, String>{
+        for (final MapEntry<Object?, Object?> entry in value.entries)
+          if (entry.key is String && entry.value is String)
+            entry.key! as String: entry.value! as String,
+      }
+    : const <String, String>{};
+
 String? _dateTimeToJson(DateTime? value) => value?.toUtc().toIso8601String();
 
 Object? _jsonValue(
@@ -684,6 +696,14 @@ final class ToolRegistryEntry {
     this.endpointUrl,
     this.authType,
     this.hasAuthConfig = false,
+    this.oauthClientId,
+    this.oauthScopes,
+    this.oauthConnected,
+    this.command,
+    this.args = const <String>[],
+    this.env = const <String, String>{},
+    this.cwd,
+    this.transport,
     this.createdAt,
     this.updatedAt,
   });
@@ -699,6 +719,16 @@ final class ToolRegistryEntry {
   final String? endpointUrl;
   final String? authType;
   final bool hasAuthConfig;
+  final String? oauthClientId;
+  final String? oauthScopes;
+
+  /// Null unless [authType] is `oauth`.
+  final bool? oauthConnected;
+  final String? command;
+  final List<String> args;
+  final Map<String, String> env;
+  final String? cwd;
+  final String? transport;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -720,6 +750,21 @@ final class ToolRegistryEntry {
     authType: _stringValue(json, 'authType', 'auth_type'),
     hasAuthConfig:
         _jsonValue(json, 'hasAuthConfig', 'has_auth_config') as bool? ?? false,
+    oauthClientId: _stringValue(json, 'oauthClientId', 'oauth_client_id'),
+    oauthScopes: _stringValue(json, 'oauthScopes', 'oauth_scopes'),
+    oauthConnected: switch (_jsonValue(
+      json,
+      'oauthConnected',
+      'oauth_connected',
+    )) {
+      final bool connected => connected,
+      _ => null,
+    },
+    command: _stringValue(json, 'command', 'command'),
+    args: _stringListValue(json['args']),
+    env: _stringMapValue(json['env']),
+    cwd: _stringValue(json, 'cwd', 'cwd'),
+    transport: _stringValue(json, 'transport', 'transport'),
     createdAt: _dateTimeFromJson(_jsonValue(json, 'createdAt', 'created_at')),
     updatedAt: _dateTimeFromJson(_jsonValue(json, 'updatedAt', 'updated_at')),
   );
@@ -737,6 +782,16 @@ final class ToolRegistryRequest {
     this.authType,
     this.authConfigJson,
     this.clearAuthConfig = false,
+    this.oauthClientId,
+    this.oauthClientSecret,
+    this.clearOauthClientSecret = false,
+    this.oauthScopes,
+    this.command,
+    this.args,
+    this.env,
+    this.cwd,
+    this.clearEndpointUrl = false,
+    this.clearCommand = false,
     this.status,
   });
   final String? name;
@@ -749,6 +804,25 @@ final class ToolRegistryRequest {
   final String? authType;
   final String? authConfigJson;
   final bool clearAuthConfig;
+  final String? oauthClientId;
+
+  /// Write-only: the engine never returns it.
+  final String? oauthClientSecret;
+  final bool clearOauthClientSecret;
+
+  /// Space separated scopes.
+  final String? oauthScopes;
+  final String? command;
+  final List<String>? args;
+  final Map<String, String>? env;
+  final String? cwd;
+
+  /// Sends an explicit ndpointUrl: null, so switching a tool away from HTTP
+  /// does not leave the old URL behind.
+  final bool clearEndpointUrl;
+
+  /// Sends explicit nulls for command/args/env/cwd (switching away from stdio).
+  final bool clearCommand;
   final String? status;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -762,7 +836,256 @@ final class ToolRegistryRequest {
     if (authType != null) 'authType': authType,
     if (authConfigJson != null) 'authConfigJson': authConfigJson,
     if (clearAuthConfig) 'clearAuthConfig': true,
+    if (oauthClientId != null) 'oauthClientId': oauthClientId,
+    if (oauthClientSecret != null) 'oauthClientSecret': oauthClientSecret,
+    if (clearOauthClientSecret) 'clearOauthClientSecret': true,
+    if (oauthScopes != null) 'oauthScopes': oauthScopes,
+    if (clearEndpointUrl) 'endpointUrl': null,
+    if (clearCommand) ...<String, dynamic>{
+      'command': null,
+      'args': null,
+      'env': null,
+      'cwd': null,
+    } else ...<String, dynamic>{
+      if (command != null) 'command': command,
+      if (args != null) 'args': args,
+      if (env != null) 'env': env,
+      if (cwd != null) 'cwd': cwd,
+    },
     if (status != null) 'status': status,
+  };
+}
+
+/// One tool a registered server exposes, as reported by a connection test.
+final class ToolTestTool {
+  const ToolTestTool({
+    required this.name,
+    this.description = '',
+    this.operation = 'read',
+  });
+  final String name;
+  final String description;
+  final String operation;
+
+  factory ToolTestTool.fromJson(Map<String, dynamic> json) => ToolTestTool(
+    name: _stringValue(json, 'name', 'name') ?? '',
+    description: _stringValue(json, 'description', 'description') ?? '',
+    operation: _stringValue(json, 'operation', 'operation') ?? 'read',
+  );
+}
+
+/// Result of POST /api/v1/tool-registry/{uuid}/test.
+final class ToolTestResult {
+  const ToolTestResult({
+    required this.ok,
+    this.tools = const <ToolTestTool>[],
+    this.error,
+    this.needsAuth = false,
+  });
+  final bool ok;
+  final List<ToolTestTool> tools;
+  final String? error;
+
+  /// True when the server requires an OAuth sign-in first.
+  final bool needsAuth;
+
+  factory ToolTestResult.fromJson(Map<String, dynamic> json) => ToolTestResult(
+    ok: json['ok'] as bool? ?? false,
+    tools: json['tools'] is List
+        ? <ToolTestTool>[
+            for (final Object? item in json['tools'] as List<Object?>)
+              if (item is Map<String, dynamic>) ToolTestTool.fromJson(item),
+          ]
+        : const <ToolTestTool>[],
+    error: _stringValue(json, 'error', 'error'),
+    needsAuth: json['needsAuth'] == true || json['needs_auth'] == true,
+  );
+}
+
+/// An OAuth sign-in the engine is waiting on (`oauth.request` frame or
+/// `GET oauth/pending`).
+final class OAuthAuthorization {
+  const OAuthAuthorization({
+    required this.authId,
+    required this.toolUuid,
+    required this.toolName,
+    required this.url,
+    this.redirectUri = '',
+    this.expiresAt,
+    this.turnId,
+    this.threadUuid,
+  });
+  final String authId;
+  final String toolUuid;
+  final String toolName;
+  final String url;
+  final String redirectUri;
+
+  /// When the engine stops accepting the sign-in; null when unknown.
+  final DateTime? expiresAt;
+  final String? turnId;
+  final String? threadUuid;
+
+  /// Frame payload (snake_case); `expires_in` seconds are counted from [now].
+  static OAuthAuthorization? tryParseFrame(
+    Map<String, dynamic> data, {
+    String? turnId,
+    DateTime? now,
+  }) {
+    final Object? authId = data['auth_id'];
+    final Object? toolUuid = data['tool_uuid'];
+    final Object? url = data['url'];
+    if (authId is! String ||
+        authId.isEmpty ||
+        toolUuid is! String ||
+        url is! String ||
+        url.isEmpty) {
+      return null;
+    }
+    final Object? expires = data['expires_in'];
+    return OAuthAuthorization(
+      authId: authId,
+      toolUuid: toolUuid,
+      toolName: data['tool_name'] is String ? data['tool_name'] as String : '',
+      url: url,
+      redirectUri: data['redirect_uri'] is String
+          ? data['redirect_uri'] as String
+          : '',
+      expiresAt: expires is num
+          ? (now ?? DateTime.now()).add(Duration(seconds: expires.toInt()))
+          : null,
+      turnId: turnId,
+      threadUuid: data['thread_uuid'] is String
+          ? data['thread_uuid'] as String
+          : null,
+    );
+  }
+
+  /// Element of `GET oauth/pending` (camelCase).
+  factory OAuthAuthorization.fromJson(Map<String, dynamic> json) =>
+      OAuthAuthorization(
+        authId:
+            _stringValue(json, 'authId', 'auth_id') ??
+            (throw const FormatException('OAuth authId is required.')),
+        toolUuid: _stringValue(json, 'toolUuid', 'tool_uuid') ?? '',
+        toolName: _stringValue(json, 'toolName', 'tool_name') ?? '',
+        url:
+            _stringValue(json, 'url', 'url') ??
+            (throw const FormatException('OAuth url is required.')),
+        redirectUri: _stringValue(json, 'redirectUri', 'redirect_uri') ?? '',
+        expiresAt: _dateTimeFromJson(
+          _jsonValue(json, 'expiresAt', 'expires_at'),
+        ),
+      );
+}
+
+/// Outcome reported by an `oauth.resolved` frame.
+enum OAuthStatus {
+  authorized,
+  denied,
+  expired,
+  cancelled;
+
+  static OAuthStatus? tryParse(Object? value) {
+    for (final OAuthStatus status in OAuthStatus.values) {
+      if (status.name == value) return status;
+    }
+    return null;
+  }
+}
+
+/// Result of `POST tool-registry/{uuid}/authorize`.
+final class ToolAuthorizeResult {
+  const ToolAuthorizeResult({this.authId, this.url, required this.status});
+  final String? authId;
+  final String? url;
+
+  /// `connected` or `pending`.
+  final String status;
+
+  bool get isConnected => status == 'connected';
+
+  factory ToolAuthorizeResult.fromJson(Map<String, dynamic> json) =>
+      ToolAuthorizeResult(
+        authId: _stringValue(json, 'authId', 'auth_id'),
+        url: _stringValue(json, 'url', 'url'),
+        status: _stringValue(json, 'status', 'status') ?? 'pending',
+      );
+}
+
+/// A skill: instructions the assistant can load when relevant.
+final class SkillEntry {
+  const SkillEntry({
+    required this.uuid,
+    required this.name,
+    required this.sourceType,
+    this.alias,
+    this.description,
+    this.source,
+    this.instructions,
+    this.enabled = true,
+    this.valid = true,
+    this.error,
+    this.createdAt,
+    this.updatedAt,
+  });
+  final String uuid;
+  final String name;
+  final String sourceType;
+  final String? alias;
+  final String? description;
+  final String? source;
+  final String? instructions;
+  final bool enabled;
+  final bool valid;
+  final String? error;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
+  factory SkillEntry.fromJson(Map<String, dynamic> json) => SkillEntry(
+    uuid:
+        _stringValue(json, 'uuid', 'uuid') ??
+        (throw const FormatException('Skill uuid is required.')),
+    name: _stringValue(json, 'name', 'name') ?? '',
+    sourceType: _stringValue(json, 'sourceType', 'source_type') ?? 'folder',
+    alias: _stringValue(json, 'alias', 'alias'),
+    description: _stringValue(json, 'description', 'description'),
+    source: _stringValue(json, 'source', 'source'),
+    instructions: _stringValue(json, 'instructions', 'instructions'),
+    enabled: json['enabled'] as bool? ?? true,
+    valid: json['valid'] as bool? ?? true,
+    error: _stringValue(json, 'error', 'error'),
+    createdAt: _dateTimeFromJson(_jsonValue(json, 'createdAt', 'created_at')),
+    updatedAt: _dateTimeFromJson(_jsonValue(json, 'updatedAt', 'updated_at')),
+  );
+}
+
+final class SkillRequest {
+  const SkillRequest({
+    required this.name,
+    required this.sourceType,
+    this.alias,
+    this.description,
+    this.source,
+    this.instructions,
+    this.enabled,
+  });
+  final String name;
+  final String sourceType;
+  final String? alias;
+  final String? description;
+  final String? source;
+  final String? instructions;
+  final bool? enabled;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'name': name,
+    'sourceType': sourceType,
+    if (alias != null) 'alias': alias,
+    if (description != null) 'description': description,
+    if (source != null) 'source': source,
+    if (instructions != null) 'instructions': instructions,
+    if (enabled != null) 'enabled': enabled,
   };
 }
 

@@ -18,6 +18,12 @@ _EXPLICIT: dict[str, str] = {
     "remember": CREATE, "save_note": CREATE, "search_knowledge": READ,
     "complete_todo": UPDATE, "replace_in_file": UPDATE, "run_command": UPDATE,
     "forget": DELETE, "forget_all": DELETE,
+    # Tool/skill management (see services.tool_management; approval is forced for these anyway).
+    "test_configured_tool": UPDATE, "connect_tool": UPDATE, "disconnect_tool": UPDATE,
+    "add_mcp_server": CREATE, "add_cli_tool": CREATE, "create_skill": CREATE,
+    "update_configured_tool": UPDATE, "update_skill": UPDATE,
+    "remove_configured_tool": DELETE, "remove_skill": DELETE,
+    "list_configured_tools": READ, "get_configured_tool": READ, "list_skills": READ, "get_skill_info": READ,
 }
 _PREFIXES: tuple[tuple[str, str], ...] = (
     (("add_", "create_", "insert_", "new_"), CREATE),
@@ -95,3 +101,9 @@ class ApprovalConfig:
 
     def requires(self, tool_name: str) -> bool:
         return bool(getattr(self, classify_operation(tool_name)))
+
+    def requires_operation(self, operation: str) -> bool:
+        """Approval needed for an already-classified operation; unknown operations always ask."""
+        if operation not in {CREATE, READ, UPDATE, DELETE}:
+            return True
+        return bool(getattr(self, operation))

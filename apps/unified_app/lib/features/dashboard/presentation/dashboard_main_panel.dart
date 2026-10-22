@@ -5,11 +5,13 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../account/account_controller.dart';
 import '../../editor/presentation/workspace_file_editor.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../../settings/presentation/settings_main_panel.dart';
+import '../../tools/presentation/tool_policy_list.dart';
 import '../controller/dashboard_controller.dart';
 
 final class DashboardMainPanel extends StatelessWidget {
@@ -29,8 +31,7 @@ final class DashboardMainPanel extends StatelessWidget {
       final Workspace? workspace = controller.selectedWorkspace;
       final MainPanelDestination destination = controller.settings.destination;
       final Widget panel = switch (destination) {
-        MainPanelDestination.workspace => Theme(
-          data: _workspaceFormTheme(context),
+        MainPanelDestination.workspace => AppFormTheme(
           child: controller.isCreatingWorkspace
               ? _WorkspaceCreatePanel(controller: controller)
               : workspace == null
@@ -63,70 +64,6 @@ final class DashboardMainPanel extends StatelessWidget {
     },
   );
 }
-
-ThemeData _workspaceFormTheme(BuildContext context) {
-  final ThemeData base = settingsFormTheme(context);
-  final ColorScheme colors = base.colorScheme;
-  return base.copyWith(
-    inputDecorationTheme: base.inputDecorationTheme.copyWith(
-      border: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      disabledBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(
-          color: colors.outlineVariant.withValues(alpha: 0.5),
-        ),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
-      hintStyle: TextStyle(
-        color: colors.onSurfaceVariant.withValues(alpha: 0.33),
-      ),
-    ),
-  );
-}
-
-Widget _dashboardIconButton({
-  required String tooltip,
-  required VoidCallback? onPressed,
-  required Widget icon,
-  Color? foregroundColor,
-}) => Builder(
-  builder: (BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return SizedBox.square(
-      dimension: 32,
-      child: IconButton(
-        tooltip: tooltip,
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-        padding: EdgeInsets.zero,
-        style: IconButton.styleFrom(
-          foregroundColor: foregroundColor,
-          backgroundColor: colors.surfaceContainerLowest,
-          side: BorderSide(color: colors.outlineVariant),
-        ),
-        onPressed: onPressed,
-        icon: icon,
-      ),
-    );
-  },
-);
 
 Widget _workspaceModelLabel(String name) =>
     Text(name, maxLines: 1, overflow: TextOverflow.ellipsis);
@@ -166,8 +103,6 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   bool _approveDelete = true;
   bool _builtinEnabled = true;
   bool _configuredEnabled = true;
-  bool _builtinExpanded = false;
-  bool _configuredExpanded = false;
   bool _isSynchronizing = false;
   bool _isLoadingOptions = true;
   bool _isSaving = false;
@@ -475,10 +410,10 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   Future<void> _confirmDelete() async {
     if (_isBusy || !widget.controller.isConnected) return;
     final bool confirmed =
-        await showDialog<bool>(
+        await showAppDialog<bool>(
           context: context,
-          builder: (BuildContext context) => AlertDialog(
-            title: const Text('Delete workspace?'),
+          builder: (BuildContext context) => AppDialog(
+            title: 'Delete workspace?',
             content: Text(
               'Delete “${widget.workspace.name}”? This also deletes its threads and cannot be undone.',
             ),
@@ -566,33 +501,25 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      _label(context, 'Name'),
-                      TextField(
+                      AppTextField(
+                        label: 'Name',
                         controller: _nameController,
                         enabled: !_isBusy,
                         textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          hintText: 'Workspace name',
-                        ),
+                        hintText: 'Workspace name',
                       ),
-                      const SizedBox(height: 16),
-                      _label(context, 'Description'),
-                      TextField(
+                      AppTextField(
+                        label: 'Description',
                         controller: _descriptionController,
                         enabled: !_isBusy,
                         minLines: 4,
                         maxLines: 8,
-                        decoration: const InputDecoration(
-                          hintText: 'Optional description',
-                        ),
+                        hintText: 'Optional description',
                       ),
-                      const SizedBox(height: 16),
-                      _label(context, 'Default model'),
+                      AppFieldLabel('Default model'),
                       _buildModelPicker(),
-                      const SizedBox(height: 18),
                       _buildPathEditor(context, colors),
-                      const SizedBox(height: 18),
-                      _label(context, 'Require approval'),
+                      AppFieldLabel('Require approval'),
                       _switchRow(
                         context,
                         title: 'Create',
@@ -621,8 +548,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                         onChanged: (bool value) =>
                             _change(() => _approveDelete = value),
                       ),
-                      const SizedBox(height: 18),
-                      _label(context, 'Tool allow list'),
+                      AppFieldLabel('Tool allow list'),
                       Text(
                         'Choose the built-in tool groups and individual functions this workspace may offer to agents. Thread policies may further restrict or override this default.',
                         style: Theme.of(context).textTheme.bodySmall
@@ -636,9 +562,29 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                         ),
-                      _buildBuiltinTools(context),
-                      const SizedBox(height: 10),
-                      _buildConfiguredTools(context),
+                      ToolPolicyList(
+                        catalog: _toolCatalog,
+                        editable: !_isBusy,
+                        builtinInitiallyExpanded: false,
+                        builtinEnabled: _builtinEnabled,
+                        configuredEnabled: _configuredEnabled,
+                        builtinGroups: _builtinGroups,
+                        builtinTools: _builtinTools,
+                        configuredTools: _configuredTools,
+                        onBuiltinEnabled: (bool value) =>
+                            _change(() => _builtinEnabled = value),
+                        onConfiguredEnabled: (bool value) =>
+                            _change(() => _configuredEnabled = value),
+                        onGroupChanged: (String group, bool value) =>
+                            _change(() => _builtinGroups[group] = value),
+                        onBuiltinToolChanged: (
+                          String group,
+                          String tool,
+                          bool value,
+                        ) => _change(() => _builtinTools[group]![tool] = value),
+                        onConfiguredToolChanged: (String uuid, bool value) =>
+                            _change(() => _configuredTools[uuid] = value),
+                      ),
                       const SizedBox(height: 20),
                       _buildMetadata(context),
                       if (_error case final Object error) ...<Widget>[
@@ -677,29 +623,25 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                     ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
-              _dashboardIconButton(
+              AppIconButton(
+                outlined: true,
+                iconSize: 17,
                 tooltip: 'Delete workspace',
                 onPressed: _isBusy || !widget.controller.isConnected
                     ? null
                     : _confirmDelete,
-                foregroundColor: colors.error,
-                icon: _isDeleting
-                    ? const SizedBox.square(
-                        dimension: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(FluentIcons.delete_20_regular, size: 17),
+                destructive: true,
+                busy: _isDeleting,
+                icon: FluentIcons.delete_20_regular,
               ),
               const SizedBox(width: 4),
-              _dashboardIconButton(
+              AppIconButton(
+                outlined: true,
+                iconSize: 17,
                 tooltip: 'Save workspace',
                 onPressed: _canSave ? _save : null,
-                icon: _isSaving
-                    ? const SizedBox.square(
-                        dimension: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(FluentIcons.save_20_regular, size: 17),
+                busy: _isSaving,
+                icon: FluentIcons.save_20_regular,
               ),
             ],
           ),
@@ -714,23 +656,22 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
         : null;
     final bool known = _models.any((ModelInfo model) => model.id == value);
     final bool hasOptions = _models.isNotEmpty || value != null;
-    return DropdownButtonFormField<String>(
+    return AppDropdownField<String>(
       key: ValueKey<String>('model:${value ?? ''}'),
-      initialValue: value,
+      value: value,
       hint: Text(
         _models.isEmpty ? 'No models available' : 'Select a model',
         overflow: TextOverflow.ellipsis,
       ),
-      style: Theme.of(context).textTheme.bodyMedium
-          ?.copyWith(fontWeight: FontWeight.normal),
-      decoration: const InputDecoration(),
       items: <DropdownMenuItem<String>>[
         if (value != null && !known)
           DropdownMenuItem<String>(
             value: value,
             child: _workspaceModelLabel(value),
           ),
-        for (final ModelInfo model in _models.where((ModelInfo m) => m.isChatModel))
+        for (final ModelInfo model in _models.where(
+          (ModelInfo m) => m.isChatModel,
+        ))
           DropdownMenuItem<String>(
             value: model.id,
             child: _workspaceModelLabel(model.name),
@@ -749,7 +690,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   Widget _buildPathEditor(BuildContext context, ColorScheme colors) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      _label(context, 'RAG & workspace folders'),
+      AppFieldLabel('RAG & workspace folders'),
       Text(
         'These folders appear in the Files view and, when RAG is enabled, are indexed daily for semantic RAG so the model can choose to search their content. Sensitive files are represented by name only.',
         style: Theme.of(context).textTheme.bodySmall
@@ -759,22 +700,22 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
       Row(
         children: <Widget>[
           Expanded(
-            child: TextField(
+            child: AppTextField(
               controller: _pathController,
               enabled: !_isBusy,
-              decoration: const InputDecoration(
-                hintText: r'C:\Projects\example',
-              ),
+              hintText: r'C:\Projects\example',
               onSubmitted: (_) {
                 if (_canAddPath) unawaited(_addPath());
               },
             ),
           ),
           const SizedBox(width: 8),
-          _dashboardIconButton(
+          AppIconButton(
+            outlined: true,
+            iconSize: 17,
             tooltip: 'Add workspace path',
             onPressed: _canAddPath ? _addPath : null,
-            icon: const Icon(FluentIcons.add_20_regular, size: 17),
+            icon: FluentIcons.add_20_regular,
           ),
         ],
       ),
@@ -796,16 +737,17 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
   Widget _buildPathRow(int rootIndex, String path) {
     final bool ragEnabled = _isRagEnabled(path);
     final bool isReindexing = _reindexingRootIndexes.contains(rootIndex);
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
+    return AppListRow(
       dense: true,
-      title: Text(path, overflow: TextOverflow.ellipsis),
+      onTap: null,
+      trailingInteractive: true,
+      title: path,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           const Text('RAG'),
           const SizedBox(width: 2),
-          _RectangularSwitch(
+          AppSwitch(
             value: ragEnabled,
             onChanged: _canPersistRag
                 ? (bool enabled) => unawaited(_toggleRag(path, enabled))
@@ -813,23 +755,23 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             semanticLabel: 'Enable RAG for $path',
           ),
           const SizedBox(width: 4),
-          _dashboardIconButton(
+          AppIconButton(
+            outlined: true,
+            iconSize: 17,
             tooltip: 'Reindex workspace folder: $path',
             onPressed: _isBusy || !widget.controller.isConnected || !ragEnabled
                 ? null
                 : () => unawaited(_reindexRoot(rootIndex, path)),
-            icon: isReindexing
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(FluentIcons.arrow_sync_20_regular, size: 17),
+            busy: isReindexing,
+            icon: FluentIcons.arrow_sync_20_regular,
           ),
           const SizedBox(width: 4),
-          _dashboardIconButton(
+          AppIconButton(
+            outlined: true,
+            iconSize: 17,
             tooltip: 'Remove workspace path: $path',
             onPressed: _isBusy ? null : () => _removePath(path),
-            icon: const Icon(FluentIcons.dismiss_20_regular, size: 17),
+            icon: FluentIcons.dismiss_20_regular,
           ),
         ],
       ),
@@ -861,7 +803,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             ],
           ),
         ),
-        _RectangularSwitch(
+        AppSwitch(
           value: value,
           onChanged: _isBusy ? null : onChanged,
           semanticLabel: title,
@@ -870,224 +812,34 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     ),
   );
 
-  Widget _buildBuiltinTools(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    clipBehavior: Clip.antiAlias,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(6)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        ListTile(
-          onTap: () => setState(() => _builtinExpanded = !_builtinExpanded),
-          title: const Text('Builtin Tools'),
-          subtitle: const Text('Enable tools provided by the engine.'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              _RectangularSwitch(
-                value: _builtinEnabled,
-                onChanged: _isBusy
-                    ? null
-                    : (bool value) => _change(() => _builtinEnabled = value),
-                semanticLabel: 'Enable built-in tools',
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                _builtinExpanded
-                    ? FluentIcons.chevron_up_20_regular
-                    : FluentIcons.chevron_down_20_regular,
-                size: 17,
-              ),
-            ],
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          alignment: Alignment.topCenter,
-          child: !_builtinExpanded
-              ? const SizedBox.shrink()
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    const Divider(height: 1),
-                    if (_toolCatalog?.builtin.isEmpty ?? true)
-                      const ListTile(
-                        title: Text('No built-in tools are available.'),
-                      ),
-                    for (final MapEntry<String, List<BuiltinToolCatalogEntry>>
-                        group
-                        in _toolCatalog?.builtin.entries ??
-                            const <String, List<BuiltinToolCatalogEntry>>{}
-                                .entries)
-                      ExpansionTile(
-                        title: Text(_displayName(group.key)),
-                        trailing: _RectangularSwitch(
-                          value: _builtinGroups[group.key] ?? true,
-                          onChanged: !_builtinEnabled || _isBusy
-                              ? null
-                              : (bool value) => _change(
-                                  () => _builtinGroups[group.key] = value,
-                                ),
-                          semanticLabel:
-                              'Enable ${_displayName(group.key)} tools',
-                        ),
-                        children: <Widget>[
-                          for (final BuiltinToolCatalogEntry tool
-                              in group.value)
-                            _buildBuiltinToolRow(context, group.key, tool),
-                        ],
-                      ),
-                  ],
-                ),
-        ),
-      ],
-    ),
-  );
-
-  Widget _buildBuiltinToolRow(
-    BuildContext context,
-    String group,
-    BuiltinToolCatalogEntry tool,
-  ) {
-    final bool value = _builtinTools[group]?[tool.name] ?? true;
-    final bool enabled =
-        _builtinEnabled && (_builtinGroups[group] ?? true) && !_isBusy;
-    final String label = _displayName(tool.name);
-    void toggle(bool next) =>
-        _change(() => _builtinTools[group]![tool.name] = next);
-    return ListTile(
-      title: Text(label),
-      subtitle: tool.doc.isEmpty ? null : Text(tool.doc),
-      onTap: enabled ? () => toggle(!value) : null,
-      trailing: _RectangularSwitch(
-        value: value,
-        onChanged: enabled ? toggle : null,
-        semanticLabel: 'Enable $label',
-      ),
-    );
-  }
-
-  Widget _buildConfiguredTools(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    clipBehavior: Clip.antiAlias,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(6)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        ListTile(
-          onTap: () =>
-              setState(() => _configuredExpanded = !_configuredExpanded),
-          title: const Text('Custom Tools'),
-          subtitle: const Text(
-            'Configured tools are addressed by their stable registry ID.',
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              _RectangularSwitch(
-                value: _configuredEnabled,
-                onChanged: _isBusy
-                    ? null
-                    : (bool value) => _change(() => _configuredEnabled = value),
-                semanticLabel: 'Enable custom tools',
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                _configuredExpanded
-                    ? FluentIcons.chevron_up_20_regular
-                    : FluentIcons.chevron_down_20_regular,
-                size: 17,
-              ),
-            ],
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          alignment: Alignment.topCenter,
-          child: !_configuredExpanded
-              ? const SizedBox.shrink()
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    const Divider(height: 1),
-                    if (_toolCatalog?.configured.isEmpty ?? true)
-                      const ListTile(
-                        title: Text('No custom tools are configured.'),
-                      ),
-                    for (final ToolRegistryEntry tool
-                        in _toolCatalog?.configured ??
-                            const <ToolRegistryEntry>[])
-                      _buildConfiguredToolRow(tool),
-                  ],
-                ),
-        ),
-      ],
-    ),
-  );
-
-  Widget _buildConfiguredToolRow(ToolRegistryEntry tool) {
-    final bool value = _configuredTools[tool.uuid] ?? true;
-    final bool enabled = _configuredEnabled && !_isBusy;
-    final String label = tool.alias?.trim().isNotEmpty ?? false
-        ? tool.alias!
-        : tool.name;
-    void toggle(bool next) => _change(() => _configuredTools[tool.uuid] = next);
-    return ListTile(
-      title: Text(label),
-      subtitle: Text(tool.uuid),
-      onTap: enabled ? () => toggle(!value) : null,
-      trailing: _RectangularSwitch(
-        value: value,
-        onChanged: enabled ? toggle : null,
-        semanticLabel: 'Enable $label',
-      ),
-    );
-  }
-
   Widget _buildMetadata(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
-      _label(context, 'UUID'),
+      AppFieldLabel('UUID'),
       Row(
         children: <Widget>[
           Expanded(
-            child: SizedBox(
+            child: AppTextField(
+              key: ValueKey<String>(widget.workspace.uuid),
+              initialValue: widget.workspace.uuid,
+              readOnly: true,
               height: 32,
-              child: Theme(
-                data: settingsFormTheme(context),
-                child: TextFormField(
-                  key: ValueKey<String>(widget.workspace.uuid),
-                  initialValue: widget.workspace.uuid,
-                  readOnly: true,
-                  maxLines: null,
-                  expands: true,
-                  textAlignVertical: TextAlignVertical.center,
-                  decoration: const InputDecoration(
-                    constraints: BoxConstraints.tightFor(height: 32),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10),
-                  ),
-                ),
-              ),
             ),
           ),
           const SizedBox(width: 8),
-          _dashboardIconButton(
+          AppIconButton(
+            outlined: true,
+            iconSize: 17,
             tooltip: 'Copy workspace UUID',
             onPressed: () async {
               await Clipboard.setData(
                 ClipboardData(text: widget.workspace.uuid),
               );
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Workspace UUID copied')),
-                );
+                showAppSnack(context, 'Workspace UUID copied');
               }
             },
-            icon: const Icon(FluentIcons.copy_20_regular, size: 17),
+            icon: FluentIcons.copy_20_regular,
           ),
         ],
       ),
@@ -1099,7 +851,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                _label(context, 'Created'),
+                AppFieldLabel('Created'),
                 Text(_formatDate(widget.workspace.createdAt)),
               ],
             ),
@@ -1108,7 +860,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                _label(context, 'Updated'),
+                AppFieldLabel('Updated'),
                 Text(_formatDate(widget.workspace.updatedAt)),
               ],
             ),
@@ -1116,15 +868,6 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
         ],
       ),
     ],
-  );
-
-  static Widget _label(BuildContext context, String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Text(
-      text,
-      style: Theme.of(context).textTheme.labelMedium
-          ?.copyWith(fontWeight: FontWeight.bold),
-    ),
   );
 
   static Map<String, dynamic> _decodeObject(String? raw) {
@@ -1212,15 +955,6 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     return normalized;
   }
 
-  static String _displayName(String value) => value
-      .split(RegExp('[_\\-\\s]+'))
-      .where((String part) => part.isNotEmpty)
-      .map(
-        (String part) =>
-            '${part.substring(0, 1).toUpperCase()}${part.substring(1)}',
-      )
-      .join(' ');
-
   static String _formatDate(DateTime? value) {
     if (value == null) return '—';
     final DateTime local = value.toLocal();
@@ -1278,15 +1012,6 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
     }
   }
 
-  static Widget _fieldLabel(BuildContext context, String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Text(
-      text,
-      style: Theme.of(context).textTheme.labelMedium
-          ?.copyWith(fontWeight: FontWeight.bold),
-    ),
-  );
-
   @override
   void dispose() {
     _nameController
@@ -1323,28 +1048,23 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
                             ),
                       ),
                       const Spacer(),
-                      _dashboardIconButton(
+                      AppIconButton(
+                        outlined: true,
+                        iconSize: 17,
                         tooltip: 'Cancel workspace creation',
                         onPressed: _isCreating
                             ? null
                             : widget.controller.cancelWorkspaceCreation,
-                        icon: const Icon(
-                          FluentIcons.dismiss_20_regular,
-                          size: 17,
-                        ),
+                        icon: FluentIcons.dismiss_20_regular,
                       ),
                       const SizedBox(width: 4),
-                      _dashboardIconButton(
+                      AppIconButton(
+                        outlined: true,
+                        iconSize: 17,
                         tooltip: 'Create workspace',
                         onPressed: _canCreate ? _create : null,
-                        icon: _isCreating
-                            ? const SizedBox.square(
-                                dimension: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(FluentIcons.add_20_regular, size: 17),
+                        busy: _isCreating,
+                        icon: FluentIcons.add_20_regular,
                       ),
                     ],
                   ),
@@ -1362,27 +1082,22 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      _fieldLabel(context, 'Name'),
-                      TextField(
+                      AppTextField(
+                        label: 'Name',
                         controller: _nameController,
                         autofocus: true,
                         enabled: !_isCreating,
                         textInputAction: TextInputAction.next,
                         onSubmitted: (_) => _create(),
-                        decoration: const InputDecoration(
-                          hintText: 'Workspace name',
-                        ),
+                        hintText: 'Workspace name',
                       ),
-                      const SizedBox(height: 16),
-                      _fieldLabel(context, 'Description'),
-                      TextField(
+                      AppTextField(
+                        label: 'Description',
                         controller: _descriptionController,
                         enabled: !_isCreating,
                         minLines: 4,
                         maxLines: 8,
-                        decoration: const InputDecoration(
-                          hintText: 'Optional description',
-                        ),
+                        hintText: 'Optional description',
                       ),
                       if (_error case final Object error) ...<Widget>[
                         const SizedBox(height: 16),
@@ -1434,91 +1149,4 @@ final class _UtilityPanel extends StatelessWidget {
       ),
     ),
   );
-}
-
-final class _RectangularSwitch extends StatelessWidget {
-  const _RectangularSwitch({
-    required this.value,
-    required this.onChanged,
-    required this.semanticLabel,
-  });
-
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-  final String semanticLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    final bool enabled = onChanged != null;
-    final Color trackColor = enabled
-        ? (value ? colors.primary : colors.surfaceContainerHighest)
-        : (value
-              ? colors.primary.withValues(alpha: 0.38)
-              : colors.onSurface.withValues(alpha: 0.12));
-    final Color thumbColor = enabled
-        ? (value ? colors.onPrimary : colors.onSurfaceVariant)
-        : colors.onSurface.withValues(alpha: 0.38);
-
-    void toggle() => onChanged?.call(!value);
-
-    return Semantics(
-      label: semanticLabel,
-      button: true,
-      enabled: enabled,
-      toggled: value,
-      child: FocusableActionDetector(
-        enabled: enabled,
-        mouseCursor: enabled
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.basic,
-        shortcuts: const <ShortcutActivator, Intent>{
-          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-        },
-        actions: <Type, Action<Intent>>{
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (ActivateIntent intent) {
-              toggle();
-              return null;
-            },
-          ),
-        },
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: enabled ? toggle : null,
-          child: SizedBox.square(
-            dimension: 48,
-            child: Center(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: 40,
-                height: 24,
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: trackColor,
-                  borderRadius: const BorderRadius.all(Radius.circular(3)),
-                ),
-                child: AnimatedAlign(
-                  duration: const Duration(milliseconds: 150),
-                  alignment: value
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 16,
-                    height: 16,
-                    decoration: BoxDecoration(
-                      color: thumbColor,
-                      borderRadius: const BorderRadius.all(Radius.circular(3)),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

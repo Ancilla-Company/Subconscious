@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 enum MainPanelDestination { utility, workspace, files, settings }
 
@@ -17,8 +18,44 @@ enum DashboardPanel { context, chat, main }
 
 typedef EngineRepositoryProvider = EngineRepository? Function();
 
+/// What the user pasted to finish an OAuth sign-in: exactly one of
+/// [redirectUrl] or [code] is set.
+typedef OAuthPaste = ({String? redirectUrl, String? code, String? state});
+
+/// Reads a pasted full address (sent as is), a `code=...&state=...` query or a
+/// bare code. Null when [pasted] is empty.
+OAuthPaste? parseOAuthPaste(String pasted) {
+  final String text = pasted.trim();
+  if (text.isEmpty) return null;
+  if (text.contains('://')) return (redirectUrl: text, code: null, state: null);
+  if (text.contains('code=')) {
+    try {
+      final Map<String, String> query = Uri.splitQueryString(
+        text.startsWith('?') ? text.substring(1) : text,
+      );
+      final String? code = query['code'];
+      if (code != null && code.isNotEmpty) {
+        return (redirectUrl: null, code: code, state: query['state']);
+      }
+    } on FormatException {
+      // Not a query string after all: treat it as the code itself.
+    }
+  }
+  return (redirectUrl: null, code: text, state: null);
+}
+
+Future<bool> _openExternally(Uri uri) =>
+    launchUrl(uri, mode: LaunchMode.externalApplication);
+
 final class DashboardSettingsController extends ChangeNotifier {
-  DashboardSettingsController({required this.repositoryProvider});
+  DashboardSettingsController({
+    required this.repositoryProvider,
+    this.urlLauncher = _openExternally,
+  });
+
+  /// Opens a web page outside the app (OAuth sign-in); returns whether it
+  /// was opened.
+  final Future<bool> Function(Uri uri) urlLauncher;
 
   static const Duration requestTimeout = Duration(seconds: 5);
   static const String settingsClient = 'flutter';
@@ -40,6 +77,14 @@ final class DashboardSettingsController extends ChangeNotifier {
   bool hasLoadedGeneralSettings = false;
   bool isLoadingModels = false;
   bool isLoadingTools = false;
+  List<SkillEntry> skills = const <SkillEntry>[];
+  bool isLoadingSkills = false;
+  Object? skillsError;
+
+  /// Last connection-test result per tool uuid, and the tests in flight.
+  final Map<String, ToolTestResult> toolTestResults =
+      <String, ToolTestResult>{};
+  final Set<String> testingToolUuids = <String>{};
   Object? generalError;
   Object? modelsError;
   Object? toolsError;
@@ -166,6 +211,7 @@ final class DashboardSettingsController extends ChangeNotifier {
       case SettingsPage.tools:
         unawaited(loadTools());
       case SettingsPage.skills:
+        unawaited(loadSkills());
       case SettingsPage.account:
       case SettingsPage.about:
         break;
@@ -412,6 +458,166 @@ final class DashboardSettingsController extends ChangeNotifier {
       return true;
     } on Object catch (error) {
       toolsError = error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Connects to the tool's server and lists what it offers. Returns null when
+  /// the request itself failed ([toolsError] is set then).
+  Future<ToolTestResult?> testTool(ToolRegistryEntry tool) async {
+    toolsError = null;
+    testingToolUuids.add(tool.uuid);
+    toolTestResults.remove(tool.uuid);
+    notifyListeners();
+    try {
+      final ToolTestResult result = await _client
+          .testTool(tool.uuid)
+          .timeout(requestTimeout);
+      toolTestResults[tool.uuid] = result;
+      return result;
+    } on Object catch (error) {
+      toolsError = error;
+      return null;
+    } finally {
+      testingToolUuids.remove(tool.uuid);
+      notifyListeners();
+    }
+  }
+
+  /// Starts an OAuth sign-in for [tool]. A `connected` result means a valid
+  /// token already exists (the tool list is refreshed). Returns null when the
+  /// request failed ([toolsError] is set then).
+  Future<ToolAuthorizeResult?> authorizeTool(ToolRegistryEntry tool) async {
+    toolsError = null;
+    try {
+      final ToolAuthorizeResult result = await _client
+          .authorizeTool(tool.uuid)
+          .timeout(requestTimeout);
+      if (result.isConnected) await _reloadTools();
+      return result;
+    } on Object catch (error) {
+      toolsError = error;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Forgets the stored OAuth tokens of [tool].
+  Future<bool> disconnectTool(ToolRegistryEntry tool) async {
+    toolsError = null;
+    try {
+      await _client.disconnectToolOAuth(tool.uuid).timeout(requestTimeout);
+      await _reloadTools();
+      return true;
+    } on Object catch (error) {
+      toolsError = error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Finishes a sign-in with the pasted [redirectUrl] (or [code]/[state]) and
+  /// refreshes the tools. On failure [toolsError] holds the engine's reason.
+  Future<bool> completeOAuth(
+    String authId, {
+    String? redirectUrl,
+    String? code,
+    String? state,
+  }) async {
+    toolsError = null;
+    try {
+      await _client
+          .completeOAuth(
+            authId,
+            redirectUrl: redirectUrl,
+            code: code,
+            state: state,
+          )
+          .timeout(requestTimeout);
+      await _reloadTools();
+      return true;
+    } on Object catch (error) {
+      toolsError = error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Re-reads the registry; unlike [loadTools] it is never skipped because a
+  /// load is already running, and it keeps [toolsError] from a failed refresh.
+  Future<void> _reloadTools() async {
+    try {
+      tools = await _client.listTools().timeout(requestTimeout);
+    } on Object catch (error) {
+      toolsError = error;
+    }
+    // Refreshes fire without being awaited, so the page may be gone by now.
+    if (!_disposed) notifyListeners();
+  }
+
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  /// Refreshes [tools] after the engine reported a finished sign-in.
+  Future<void> refreshTools() => _reloadTools();
+
+  Future<void> loadSkills() async {
+    if (isLoadingSkills) return;
+    isLoadingSkills = true;
+    skillsError = null;
+    notifyListeners();
+    try {
+      skills = await _client.listSkills().timeout(requestTimeout);
+    } on Object catch (error) {
+      skillsError = error;
+    } finally {
+      isLoadingSkills = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveSkill({
+    SkillEntry? existing,
+    required SkillRequest request,
+  }) async {
+    skillsError = null;
+    try {
+      final SkillEntry saved = existing == null
+          ? await _client.createSkill(request).timeout(requestTimeout)
+          : await _client
+                .updateSkill(uuid: existing.uuid, skill: request)
+                .timeout(requestTimeout);
+      skills = <SkillEntry>[
+        for (final SkillEntry skill in skills)
+          if (skill.uuid == saved.uuid) saved else skill,
+        if (existing == null) saved,
+      ];
+      notifyListeners();
+      return true;
+    } on Object catch (error) {
+      skillsError = error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> deleteSkill(SkillEntry skill) async {
+    skillsError = null;
+    try {
+      await _client.deleteSkill(skill.uuid).timeout(requestTimeout);
+      skills = skills
+          .where((SkillEntry item) => item.uuid != skill.uuid)
+          .toList(growable: false);
+      notifyListeners();
+      return true;
+    } on Object catch (error) {
+      skillsError = error;
       notifyListeners();
       return false;
     }

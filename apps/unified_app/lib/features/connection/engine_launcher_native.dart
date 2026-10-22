@@ -53,7 +53,9 @@ final class PlatformEngineLauncher implements EngineProcessLauncher {
     await Process.start(
       executable,
       const <String>[],
-      workingDirectory: separator > 0 ? executable.substring(0, separator) : null,
+      workingDirectory: separator > 0
+          ? executable.substring(0, separator)
+          : null,
       mode: ProcessStartMode.detached,
     );
   }
@@ -66,9 +68,8 @@ final class PlatformEngineLauncher implements EngineProcessLauncher {
     final RandomAccessFile handle;
     try {
       await Directory(directory).create(recursive: true);
-      handle = await File(
-        '$directory${Platform.pathSeparator}$_lockFileName',
-      ).open(mode: FileMode.append);
+      handle = await File('$directory${Platform.pathSeparator}$_lockFileName')
+          .open(mode: FileMode.append);
     } on FileSystemException {
       // Without a lock file, launching still beats showing nothing.
       return const _NoopLaunchLock();
