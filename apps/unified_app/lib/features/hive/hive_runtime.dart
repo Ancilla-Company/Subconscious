@@ -6,6 +6,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
+import '../../app_client.dart';
+import '../extension/extension_connection_resolver.dart';
+import '../extension/extension_host.dart';
 import 'executor_selection.dart';
 import 'reconcile_backoff.dart';
 import 'secure_storage_stores.dart';
@@ -94,12 +97,15 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
         hive ??
         HiveClient(
           account: accountClient,
-          seedStore: SecureIdentitySeedStore(_storage),
+          seedStore: SecureIdentitySeedStore(
+            _storage,
+            ExtensionHost.instance.instanceSlot,
+          ),
           pinStoreFactory: (String userId) =>
               SecurePinStore(userId, _storage).load(),
           transportFactory: const WebRtcPeerTransportFactory(),
           deviceName: _deviceName(),
-          platform: kIsWeb ? 'web' : defaultTargetPlatform.name,
+          platform: AppClient.platform,
           appVersion: '0.1.0',
         );
   }
@@ -409,6 +415,16 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
       _engineState = EngineLinkState.failed;
       notifyListeners();
     }
+  }
+
+  /// Whether the device list shows [view]. A web page or extension popup is
+  /// transient: once it is closed or offline it simply disappears from the
+  /// list (the server deletes it a little later). This device, the engine's
+  /// own client row and every durable device always stay.
+  bool isShownDevice(NodeView view) {
+    if (view.isLocal || isOwnClientRow(view)) return true;
+    if (!AppClient.isTransientPlatform(view.node.platform)) return true;
+    return view.online;
   }
 
   /// True for the device row that is this app's own client of the local
@@ -1213,7 +1229,12 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
         token: '',
         client: ReconnectingTunnelClient(link),
       ),
-      socket: PeerEngineSocket(linkProvider: link),
+      socket: PeerEngineSocket(
+        linkProvider: link,
+        identity: ExtensionHost.instance.isExtension
+            ? extensionClientIdentity(ExtensionHost.instance)
+            : null,
+      ),
     );
   }
 
@@ -1314,7 +1335,11 @@ String? engineOfflineProblem(Map<String, dynamic> snapshot) {
 }
 
 String _deviceName() {
-  if (kIsWeb) return 'Subconscious (web)';
+  // The extension is a browser client, not "the web app".
+  if (AppClient.kind == AppClientKind.browserExtension) {
+    return ExtensionHost.instance.deviceName;
+  }
+  if (AppClient.kind == AppClientKind.web) return 'Subconscious (web)';
   return switch (defaultTargetPlatform) {
     TargetPlatform.android => 'Android device',
     TargetPlatform.iOS => 'iPhone or iPad',

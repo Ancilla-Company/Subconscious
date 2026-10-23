@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener, AppLifecycleState;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../chat/engine_llm_provider.dart';
@@ -11,6 +12,7 @@ import '../../editor/controller/editor_tab.dart';
 import '../../editor/controller/file_gateway.dart';
 import '../../editor/controller/workspace_paths.dart';
 import '../../editor/data/engine_draft_store.dart';
+import '../../extension/extension_host.dart';
 import '../../hive/executor_selection.dart';
 import '../../settings/controller/settings_controller.dart';
 
@@ -73,8 +75,21 @@ final class DashboardController extends ChangeNotifier {
     this.executors,
     this.engineStartup,
     this.oauthLauncher = _launchExternally,
+    ExtensionHost? extensionHost,
   }) : _explicitEndpoint = initialEndpoint,
-       _explicitToken = initialToken {
+       _explicitToken = initialToken,
+       _extensionHost = extensionHost ?? ExtensionHost.instance {
+    if (_extensionHost.isExtension) {
+      // The host watches the page for WebMCP tools only while the panel is
+      // shown.
+      _extensionHost.setVisible(true);
+      _visibilityListener = AppLifecycleListener(
+        onStateChange: (AppLifecycleState state) => _extensionHost.setVisible(
+          state == AppLifecycleState.resumed ||
+              state == AppLifecycleState.inactive,
+        ),
+      );
+    }
     settings = DashboardSettingsController(
       repositoryProvider: () => repository,
       urlLauncher: oauthLauncher,
@@ -90,6 +105,8 @@ final class DashboardController extends ChangeNotifier {
           ..onTabsChanged = _onEditorTabsChanged
           ..onActiveChanged = _onEditorActiveChanged;
   }
+
+  final ExtensionHost _extensionHost;
 
   static const Duration reconnectInterval = Duration(seconds: 3);
   static const Duration requestTimeout = Duration(seconds: 5);
@@ -1070,9 +1087,116 @@ final class DashboardController extends ChangeNotifier {
       onError: (_) {},
     );
     eventRepository.socket.registerUiTools();
+    _startExtensionTools(eventRepository.socket);
     final ThreadInfo? openThread = selectedThread;
     if (openThread != null) _watchThread(eventRepository, openThread.uuid);
     unawaited(_recoverPendingOAuth(eventRepository));
+  }
+
+  /// Tool ids of every group the browser extension registered on the current
+  /// socket (empty outside the extension).
+  final Map<String, Set<String>> _extensionTools = <String, Set<String>>{};
+  void Function()? _unsubscribeExtensionTools;
+  AppLifecycleListener? _visibilityListener;
+
+  /// Registers the extension's tool groups on [socket] and keeps them in sync
+  /// while the host reports changes (for example WebMCP tools of a new page).
+  void _startExtensionTools(EngineSocket socket) {
+    _unsubscribeExtensionTools?.call();
+    _unsubscribeExtensionTools = null;
+    _extensionTools.clear();
+    if (!_extensionHost.isExtension) return;
+    _syncExtensionTools(socket, _extensionHost.toolGroups());
+    _unsubscribeExtensionTools = _extensionHost.onToolGroupsChanged(
+      (List<ClientToolGroup> groups) {
+        final EngineSocket? current = _engineEventRepository?.socket;
+        if (_disposed || current == null || !identical(current, socket)) return;
+        _syncExtensionTools(current, groups);
+      },
+    );
+  }
+
+  /// Sends one `tool.register` per group; a group that disappeared is sent
+  /// with no tools so the engine forgets it.
+  void _syncExtensionTools(EngineSocket socket, List<ClientToolGroup> groups) {
+    final List<ClientToolGroup> present = <ClientToolGroup>[
+      for (final ClientToolGroup group in groups)
+        if (!group.isEmpty) group,
+    ];
+    final Map<String, Set<String>> next = <String, Set<String>>{
+      for (final ClientToolGroup group in present)
+        group.group: <String>{
+          for (final ClientToolDefinition tool in group.tools) tool.id,
+        },
+    };
+    final List<ClientToolGroup> toSend = <ClientToolGroup>[
+      ...present,
+      for (final String removed in _extensionTools.keys)
+        if (!next.containsKey(removed))
+          ClientToolGroup(
+            group: removed,
+            title: removed,
+            tools: const <ClientToolDefinition>[],
+          ),
+    ];
+    _extensionTools
+      ..clear()
+      ..addAll(next);
+    if (toSend.isEmpty) return;
+    try {
+      socket.registerClientTools(toSend);
+    } on Object catch (error) {
+      debugPrint('Could not register the extension tools: $error');
+    }
+  }
+
+  /// Runs a tool of an extension group and answers the engine.
+  Future<void> _handleExtensionToolRequest(
+    EngineSocket socket,
+    String turnId,
+    String requestId,
+    String group,
+    String? toolName,
+    Object? rawArguments,
+  ) async {
+    void fail(String message) => socket.sendClientToolResult(
+      turnId: turnId,
+      requestId: requestId,
+      ok: false,
+      error: message,
+    );
+    final Set<String>? tools = _extensionTools[group];
+    if (!_extensionHost.isExtension || tools == null) {
+      fail('The tool group "$group" is not available.');
+      return;
+    }
+    if (toolName == null || !tools.contains(toolName)) {
+      fail('The tool "$toolName" is not available in "$group".');
+      return;
+    }
+    if (rawArguments != null && rawArguments is! Map) {
+      fail('The tool arguments are malformed.');
+      return;
+    }
+    try {
+      final ExtensionToolResult outcome = await _extensionHost.callTool(
+        group,
+        toolName,
+        jsonEncode(rawArguments ?? const <String, dynamic>{}),
+      );
+      if (outcome.ok) {
+        socket.sendClientToolResult(
+          turnId: turnId,
+          requestId: requestId,
+          ok: true,
+          result: outcome.result,
+        );
+      } else {
+        fail(outcome.error ?? 'The browser tool failed.');
+      }
+    } on Object catch (caughtError) {
+      fail('$caughtError');
+    }
   }
 
   void _handleEngineEvent(WireFrame frame) {
@@ -1416,6 +1540,19 @@ final class DashboardController extends ChangeNotifier {
         : null;
     final Object? rawArguments = data['arguments'];
     if (socket == null || turnId == null || requestId == null) return;
+    final Object? rawGroup = data['group'];
+    if (rawGroup is String && rawGroup.isNotEmpty) {
+      // A client tool group (browser extension), not one of the UI tools.
+      await _handleExtensionToolRequest(
+        socket,
+        turnId,
+        requestId,
+        rawGroup,
+        toolName,
+        rawArguments,
+      );
+      return;
+    }
     if (toolName == null || rawArguments is! Map) {
       socket.sendClientToolResult(
         turnId: turnId,
@@ -2749,6 +2886,12 @@ final class DashboardController extends ChangeNotifier {
     }
     _oauthExpiryTimers.clear();
     _engineEventRepository = null;
+    _unsubscribeExtensionTools?.call();
+    _unsubscribeExtensionTools = null;
+    _extensionTools.clear();
+    _visibilityListener?.dispose();
+    _visibilityListener = null;
+    if (_extensionHost.isExtension) _extensionHost.setVisible(false);
     final StreamSubscription<WireFrame>? subscription =
         _engineEventSubscription;
     _engineEventSubscription = null;

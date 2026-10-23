@@ -43,7 +43,12 @@ final class FlyoutNavButton extends StatelessWidget {
           child: SizedBox(
             height: height,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              // A compact row (32 dp, as in the extension) has no room for the
+              // default 8 dp of vertical padding around a 20 dp icon.
+              padding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: height != null && height! < 36 ? 6 : 8,
+              ),
               child: Row(
                 children: <Widget>[
                   Icon(

@@ -1,3 +1,4 @@
+import '../models/client_tool_models.dart';
 import '../models/engine_models.dart';
 import '../models/task_models.dart';
 
@@ -16,6 +17,10 @@ abstract interface class EngineSocket {
     ChatFileContext? fileContext,
   });
   void registerUiTools();
+
+  /// Sends one schema-bearing `tool.register` frame per group (an empty tool
+  /// list removes the group on the engine).
+  void registerClientTools(List<ClientToolGroup> groups);
   void respondToolApproval({
     required String turnId,
     required String approvalId,

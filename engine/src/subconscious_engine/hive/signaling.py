@@ -241,12 +241,21 @@ class SignalingClient:
         else:
             _LOGGER.info("Signalling closed (%s) retry in %.0fs", reason, delay)
 
+    async def _await_auth_reply(self, socket: Any) -> dict[str, Any]:
+        """The answer to our auth frame. The server may announce another node's presence first
+        (found by the live tests); that is not a rejection, so skip such frames, and the directory
+        poll and later presence updates restore the state they carried."""
+        while True:
+            reply = await self._receive(socket)
+            if reply.get("type") != "presence.update":
+                return reply
+
     async def _session(self) -> None:
         ticket = await self._api.signal_ticket(self._identity.node_id)
         socket = await self._connect(signal_url(self._api.base_url))
         self._socket = socket
         await self._send_auth(socket, ticket, "auth")
-        reply = await asyncio.wait_for(self._receive(socket), AUTH_TIMEOUT_SECONDS)
+        reply = await asyncio.wait_for(self._await_auth_reply(socket), AUTH_TIMEOUT_SECONDS)
         if reply.get("type") != "auth.ok":
             raise ConnectionError("Signalling authentication was rejected.")
         data = reply.get("data")

@@ -1,0 +1,10 @@
+html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; }
+
+/* The popup is sized by its document. Flutter web takes <body> out of the flow
+   (position: fixed, inset 0), so the body can no longer give the popup a size
+   and Chrome shrinks it to a few pixels. Size <html> instead; the fixed body
+   then fills it. */
+html:has(body.popup) { width: 400px; height: 560px; }
+body.popup { width: 400px; height: 560px; }
+
+html:has(body.panel), body.panel { width: 100%; height: 100vh; }

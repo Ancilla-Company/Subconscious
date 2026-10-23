@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../forms/app_form_widgets.dart';
 
-/// The kit's card: no border, 6px corners and a soft `surfaceContainerLow`
-/// fill, with a small vertical [margin] so stacked cards are spaced apart.
-/// It looks like the expansion panels of the models and tools settings.
-/// Tappable when [onTap] is set.
+/// The kit's card: no border, 6px corners and the `surfaceContainerLowest`
+/// fill (white in light mode), with a small vertical [margin] so stacked cards
+/// are spaced apart. Shape and spacing match the expansion panels of the
+/// models and tools settings. Tappable when [onTap] is set.
+///
+/// The browser extension mirrors this in `app.css` (`.account-card`,
+/// `.probe`, `.summary`); change both together.
 final class AppCard extends StatelessWidget {
   const AppCard({
     required this.child,
@@ -32,7 +35,9 @@ final class AppCard extends StatelessWidget {
     final Widget body = Padding(padding: padding, child: child);
     return Card(
       margin: margin,
-      color: selected ? colors.secondaryContainer : colors.surfaceContainerLow,
+      color: selected
+          ? colors.secondaryContainer
+          : colors.surfaceContainerLowest,
       elevation: 0,
       clipBehavior: Clip.antiAlias,
       shape: const RoundedRectangleBorder(

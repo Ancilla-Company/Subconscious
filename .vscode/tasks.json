@@ -2,6 +2,134 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Live: Start stack",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["scripts/live_stack.py", "--no-webrtc"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "group": "test",
+      "problemMatcher": {
+        "owner": "live-stack",
+        "pattern": { "regexp": "^live stack failed: (.*)$", "message": 1 },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^starting the server",
+          "endsPattern": "^LIVE-STACK-READY"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "detail": "Boots the real server + a real engine (signalling relay forced, as the Dart and Code clients have no WebRTC) on random loopback ports and writes build/live-stack/stack.json (ready when LIVE-STACK-READY is printed). Reuses a stack that is already running. Needs ../subconscious-server/.venv."
+    },
+    {
+      "label": "Live: Stop stack",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["scripts/live_stack.py", "--stop"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "detail": "Stops the live stack started by 'Live: Start stack' and removes build/live-stack/stack.json."
+    },
+    {
+      "label": "Test: Live (Python)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "pytest", "tests/live", "-m", "live", "-p", "no:cacheprovider"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "problemMatcher": [],
+      "detail": "End-to-end tests against the real server and real engines (starts its own hermetic stack; about 6-8 minutes)."
+    },
+    {
+      "label": "Test: Live (Dart core)",
+      "type": "shell",
+      "command": "flutter",
+      "args": ["test", "--tags", "live"],
+      "options": {
+        "cwd": "${workspaceFolder}/apps/core_business_logic",
+        "env": { "SC_LIVE_STACK": "${workspaceFolder}/build/live-stack/stack.json" }
+      },
+      "group": "test",
+      "problemMatcher": [],
+      "detail": "apps/core_business_logic live tests against a running stack (start it with 'Live: Start stack')."
+    },
+    {
+      "label": "Test: Live (Dart app)",
+      "type": "shell",
+      "command": "flutter",
+      "args": ["test", "--tags", "live"],
+      "options": {
+        "cwd": "${workspaceFolder}/apps/unified_app",
+        "env": { "SC_LIVE_STACK": "${workspaceFolder}/build/live-stack/stack.json" }
+      },
+      "group": "test",
+      "problemMatcher": [],
+      "detail": "apps/unified_app live tests against a running stack (start it with 'Live: Start stack')."
+    },
+    {
+      "label": "Test: Live (Dart)",
+      "type": "shell",
+      "command": "echo Dart live tests finished",
+      "dependsOn": [
+        "Live: Start stack",
+        "Test: Live (Dart core)",
+        "Test: Live (Dart app)"
+      ],
+      "dependsOrder": "sequence",
+      "group": "test",
+      "problemMatcher": [],
+      "detail": "Starts the live stack, then runs `flutter test --tags live` in core_business_logic and unified_app. If a stack is already running, run the two 'Test: Live (Dart ...)' tasks directly. Stop the stack with 'Live: Stop stack'."
+    },
+    {
+      "label": "Test: Live (Code)",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "test:live"],
+      "options": {
+        "cwd": "${workspaceFolder}/../subconscious-code",
+        "env": { "SC_LIVE_STACK": "${workspaceFolder}/build/live-stack/stack.json" }
+      },
+      "group": "test",
+      "problemMatcher": [],
+      "detail": "subconscious-code (VS Code extension) live tests against a running stack (start it with 'Live: Start stack')."
+    },
+    {
+      "label": "Test: Live (all)",
+      "type": "shell",
+      "command": "echo all live tests finished",
+      "dependsOn": [
+        "Live: Start stack",
+        "Test: Live (Dart core)",
+        "Test: Live (Dart app)",
+        "Test: Live (Code)",
+        "Test: Live (Python)",
+        "Live: Stop stack"
+      ],
+      "dependsOrder": "sequence",
+      "group": "test",
+      "problemMatcher": [],
+      "detail": "Starts the stack, runs the Dart, VS Code extension and Python live tests, then stops the stack. If a step fails the stack is left running: use 'Live: Stop stack'."
+    },    {
+      "label": "Extension: Build (Dev)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/build_extension.ps1", "-Dev"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Builds the Flutter web app into apps/chromium_extension/app (dev engine/server) and generates popup.html/sidepanel.html."
+    },
+    {
+      "label": "Extension: Build (Production)",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/build_extension.ps1"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Production server URL build of the extension."
+    },
+    {
       "label": "Flutter: Start Android Emulator",
       "type": "shell",
       "command": "flutter",

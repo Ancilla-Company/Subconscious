@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import '../models/client_tool_models.dart';
 import '../models/engine_models.dart';
 import '../models/task_models.dart';
 
@@ -8,6 +9,13 @@ import '../models/task_models.dart';
 mixin TaskSocketMixin {
   Stream<WireFrame> get frames;
   String send({required String type, Map<String, dynamic>? data, String? id});
+
+  /// One `tool.register` frame per group, shared by every transport.
+  void registerClientTools(List<ClientToolGroup> groups) {
+    for (final ClientToolGroup group in groups) {
+      send(type: 'tool.register', data: group.toRegisterData());
+    }
+  }
 
   Stream<TaskEvent> get taskEvents => frames
       .map<TaskEvent?>(parseTaskEvent)

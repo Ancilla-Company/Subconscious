@@ -26,3 +26,6 @@ apps/chromium_extension/screenshots/
 continue.txt
 .agents
 .kiro
+
+# Flutter web build embedded in the extension (scripts/build_extension.ps1)
+apps/chromium_extension/app/

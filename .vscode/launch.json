@@ -2,6 +2,32 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Live: Stack (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/live_stack.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${command:python.interpreterPath}",
+      "args": ["--engines", "1", "--no-webrtc"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Pytest: Live (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "cwd": "${workspaceFolder}",
+      "python": "${command:python.interpreterPath}",
+      "args": ["tests/live", "-m", "live", "-p", "no:cacheprovider", "-x", "-s"],
+      "env": {
+        "SC_LIVE": "1",
+        "PYTHONPATH": "${workspaceFolder}/engine/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "Engine (Dev, LAN)",
       "type": "debugpy",
       "request": "launch",
@@ -22,7 +48,7 @@
         "SUBCONSCIOUS_FERNET_KEY": "IqweDE7oO7LVqmt-4m6JT2tFPyFcMk_qjpSokXmlUnY=",
       },
       "justMyCode": true,
-      "console": "internalConsole"
+      // "console": "internalConsole"
     },
     {
       "name": "GUI",
@@ -78,6 +104,7 @@
     },
     {
       "name": "Chromium Extension (Chrome)",
+      "preLaunchTask": "Extension: Build (Dev)",
       "type": "chrome",
       "request": "launch",
       "url": "http://127.0.0.1:5050/",
@@ -91,6 +118,7 @@
     },
     {
       "name": "Chromium Extension (Edge)",
+      "preLaunchTask": "Extension: Build (Dev)",
       "type": "msedge",
       "request": "launch",
       "url": "http://127.0.0.1:5050/",

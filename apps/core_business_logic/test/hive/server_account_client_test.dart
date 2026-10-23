@@ -233,4 +233,51 @@ void main() {
       await expectLater(client.requestPasswordReset('a@b.c'), throwsA(isA<HiveApiException>()));
     });
   });
+
+  group('pairing assertion', () {
+    test('posts the nonce and origin with the bearer token', () async {
+      final ServerAccountClient client = make((http.Request r) {
+        if (r.url.path == '/auth/email/login') {
+          return http.Response(jsonEncode(authBody()), 200);
+        }
+        return http.Response(jsonEncode(<String, dynamic>{'assertion': 'a-1', 'expires_in': 60}), 200);
+      });
+      await client.loginWithEmail(email: 'a@b.c', password: 'pw');
+      final String assertion = await client.requestPairingAssertion(
+        nodeId: 'n_1',
+        clientNonce: 'nonce-nonce-nonce-1',
+        origin: 'chrome-extension://abcdefghijklmnopabcdefghijklmnop',
+      );
+      expect(assertion, 'a-1');
+      final http.Request sent = requests.last;
+      expect(sent.url.toString(), 'https://api.test/nodes/n_1/pairing-assertion');
+      expect(sent.headers['Authorization'], 'Bearer access-1');
+      expect(jsonDecode(sent.body), <String, dynamic>{
+        'client_nonce': 'nonce-nonce-nonce-1',
+        'origin': 'chrome-extension://abcdefghijklmnopabcdefghijklmnop',
+      });
+    });
+
+    test('reports server errors with their status', () async {
+      final ServerAccountClient client = make((http.Request r) {
+        if (r.url.path == '/auth/email/login') {
+          return http.Response(jsonEncode(authBody()), 200);
+        }
+        return http.Response(jsonEncode(<String, dynamic>{'detail': 'Node not found'}), 404);
+      });
+      await client.loginWithEmail(email: 'a@b.c', password: 'pw');
+      await expectLater(
+        client.requestPairingAssertion(nodeId: 'n_1', clientNonce: 'n' * 20, origin: 'o'),
+        throwsA(isA<HiveApiException>().having((HiveApiException e) => e.statusCode, 'status', 404)),
+      );
+    });
+
+    test('requires a signed-in session', () async {
+      final ServerAccountClient client = make((http.Request r) => http.Response('{}', 200));
+      await expectLater(
+        client.requestPairingAssertion(nodeId: 'n_1', clientNonce: 'n' * 20, origin: 'o'),
+        throwsA(isA<HiveApiException>().having((HiveApiException e) => e.statusCode, 'status', 401)),
+      );
+    });
+  });
 }

@@ -13,11 +13,17 @@ import 'features/connection/engine_launcher.dart';
 import 'features/dashboard/controller/dashboard_controller.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'features/dashboard/presentation/window_composition_bar.dart';
+import 'features/extension/extension_connection_resolver.dart';
+import 'features/extension/extension_host.dart';
+import 'features/extension/extension_runtime.dart';
 import 'features/hive/hive_runtime.dart';
 import 'features/settings/controller/settings_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Before anything reads the hive node identity: the popup and the side
+  // panel(s) share one storage, so each open page claims its own slot.
+  await ExtensionHost.instance.acquireInstanceSlot();
   httpLogSink = (String line) => debugPrint(line);
   await initializeDesktopWindow();
   const String configuredToken = String.fromEnvironment(
@@ -71,6 +77,13 @@ Future<void> main() async {
     session: HiveRuntime.shared,
     clientProvider: () => controller.repository?.rest,
     thinClient: !_hasLocalEngine,
+    // Inside the browser extension the account page can pair this browser
+    // with a local engine.
+    extensionPairing: ExtensionHost.instance.isExtension
+        ? buildExtensionPairingController(
+            onConnectionChanged: controller.reconnectNow,
+          )
+        : null,
     onEngineProfile: (String profileId) =>
         setActiveEngineProfile(preferDev: preferDev, profileId: profileId),
     onSessionChanged: () async {
@@ -88,9 +101,17 @@ Future<void> main() async {
       );
     },
   );
-  HiveRuntime.shared.expectsLocalEngine = _hasLocalEngine;
-  HiveRuntime.shared.probeLocalEngine = () async =>
-      await discoverLocalEnginePort(preferDev: preferDev) != null;
+  // A browser extension that was paired with an engine on this machine is a
+  // client of that engine, like the desktop app: it registers no device of
+  // its own until the engine had its chance.
+  final bool pairedWithLocalEngine = await hasLoopbackPairing(
+    ExtensionHost.instance,
+  );
+  HiveRuntime.shared.expectsLocalEngine =
+      _hasLocalEngine || pairedWithLocalEngine;
+  HiveRuntime.shared.probeLocalEngine = pairedWithLocalEngine
+      ? () => pairedLocalEngineReachable(ExtensionHost.instance)
+      : () async => await discoverLocalEnginePort(preferDev: preferDev) != null;
   HiveRuntime.shared.localEngineClient = () async =>
       controller.repository?.rest;
   HiveRuntime.shared.onEngineAvailable = controller.reconnectNow;

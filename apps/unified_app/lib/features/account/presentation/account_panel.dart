@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 
+import '../../extension/presentation/extension_engine_section.dart';
 import '../../hive/presentation/nodes_page.dart';
 import '../account_controller.dart';
 
@@ -194,6 +195,10 @@ final class _SignedInAccount extends StatelessWidget {
           ],
         ),
         DevicesSection(account: controller),
+        if (controller.extensionPairing != null) ...<Widget>[
+          const SizedBox(height: 24),
+          ExtensionEngineSection(controller: controller.extensionPairing!),
+        ],
       ],
     );
   }

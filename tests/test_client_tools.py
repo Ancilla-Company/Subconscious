@@ -166,6 +166,21 @@ def test_invalid_registrations_send_error_frames_and_never_raise():
     run(scenario())
 
 
+def test_thin_client_links_may_register_schema_tools_but_engine_peers_may_not():
+    async def scenario():
+        thin = PeerSocket(link=SimpleNamespace(tier="member", role="thin_client"))
+        thin_session = WebSocketSession(thin)
+        await thin_session._handle({"type": "tool.register", "data": payload(tool("a"))})
+        assert [t.id for t in thin_session.client_tool_groups["browser"].tools] == ["a"]
+        assert errors(thin) == []
+        engine = PeerSocket(link=SimpleNamespace(tier="member", role="hive_peer"))
+        engine_session = WebSocketSession(engine)
+        await engine_session._handle({"type": "tool.register", "data": payload(tool("a"))})
+        assert engine_session.client_tool_groups == {}
+        assert errors(engine) == ["Hive peers cannot register client tools with schemas."]
+    run(scenario())
+
+
 def test_hive_peers_cannot_register_schema_tools_but_keep_legacy_ui_tools():
     async def scenario():
         socket = PeerSocket(link=SimpleNamespace(tier="member"))

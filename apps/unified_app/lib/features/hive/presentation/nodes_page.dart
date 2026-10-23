@@ -248,7 +248,9 @@ final class _NodeList extends StatelessWidget {
             child: Text(note),
           ),
         if (nodes.isEmpty && error == null) const Text('No devices yet.'),
-        for (final DeviceGroup group in buildDeviceTree(nodes))
+        for (final DeviceGroup group in buildDeviceTree(
+          nodes.where(runtime.isShownDevice).toList(),
+        ))
           _DeviceGroupCard(runtime: runtime, group: group),
         if (runtime.executorCandidates.isNotEmpty)
           _ExecutorSection(runtime: runtime),
@@ -469,7 +471,13 @@ final class _NodeTile extends StatelessWidget {
       online ? 'Online' : 'Offline',
       ...details,
     ].join(', ');
-    final bool canRemove = node.status == 'pending' && !view.isLocal;
+    // Any device that is not this one and is not running right now can be
+    // removed: a pending request, or an old install that went offline. An
+    // online device can only be removed from the device itself.
+    final bool canRemove =
+        !view.isLocal &&
+        !runtime.isOwnClientRow(view) &&
+        (node.status == 'pending' || !online);
     final bool isTrustedEngine = node.isEngine && view.trusted && !view.isLocal;
     final Widget? badge = canApprove || !isTrustedEngine
         ? null
@@ -555,8 +563,12 @@ final class _NodeTile extends StatelessWidget {
       context: context,
       builder: (BuildContext context) => AppDialog(
         title: 'Remove ${node.name}?',
-        content: const Text(
-          'This device is removed from your account. It can sign in again.',
+        content: Text(
+          node.isEngine
+              ? 'This engine is removed from your account. It can sign in '
+                    'again.'
+              : 'This device is removed from your account. It can sign in '
+                    'again.',
         ),
         actions: <Widget>[
           TextButton(

@@ -1,0 +1,9 @@
+# Live (end-to-end) tests talk to a REAL server and engine started by
+# `scripts/live_stack.py` (task "Live: Start stack"). They are always collected
+# (so the IDE Test panel shows them) but skip when no stack is reachable.
+#
+#   unit run only:   flutter test --exclude-tags live
+#   live run only:   flutter test --tags live      (needs SC_LIVE_STACK or the default stack.json)
+tags:
+  live:
+    timeout: 4x

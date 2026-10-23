@@ -30,6 +30,7 @@ from subconscious_engine.client_tools import (
     ClientToolGroup, is_schema_registration, parse_group, tool_enabled,
 )
 from subconscious_engine.configuration.models import ModelConfig
+from subconscious_engine.hive.authz import THIN_CLIENT
 from subconscious_engine.locality import is_local_peer
 from subconscious_engine.services.configured_tools import NAME_SEPARATOR, unique_name
 from subconscious_engine.services.skills import (
@@ -475,6 +476,14 @@ class WebSocketSession:
 
     async def _hello(self, data: dict[str, Any]) -> None:
         requested = data.get("clientId") if isinstance(data.get("clientId"), str) else None
+        if requested is not None and requested == self.client_id:
+            # The same session greeted again (a client reconnecting over a link that is
+            # still up). The identity is already ours, so acknowledge instead of
+            # rejecting it as "already in use" by ourselves.
+            await self._send(
+                "client.hello.ack", {"clientId": requested, "local": is_local_peer(self.socket)}
+            )
+            return
         client_name = data.get("clientName") if isinstance(data.get("clientName"), str) else None
         peer = getattr(self.socket, "client", None)
         peer_host = getattr(peer, "host", None)
@@ -863,7 +872,10 @@ class WebSocketSession:
                         and tool["id"] in _UI_TOOL_NAMES):
                     self.client_tools[tool["id"]] = {"id": tool["id"]}
             return
-        if getattr(self.socket, "link", None) is not None:
+        link = getattr(self.socket, "link", None)
+        # Engine nodes (HIVE_PEER) never register tools. A thin client link is the user's own
+        # device (browser extension): its tools still need approval and only it answers them.
+        if link is not None and getattr(link, "role", None) != THIN_CLIENT:
             await self._error("Hive peers cannot register client tools with schemas.")
             return
         registry = getattr(self.app.state, "tool_registry", None)

@@ -15,18 +15,29 @@ import '../../hive/hive_runtime.dart';
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
 
-/// Minimum height and width of anything tappable on the mobile layout.
-const double _mobileTouchTarget = 48;
+/// Minimum height and width of anything tappable on a touch screen.
+const double _touchTarget = 48;
+
+/// The kit's compact control size, used when a pointer drives the mobile
+/// layout (the browser extension) so buttons match the desktop's 32 dp.
+const double _compactTarget = 32;
 
 final class MobileDashboardView extends StatelessWidget {
   const MobileDashboardView({
     required this.controller,
     required this.accountController,
+    this.compactControls = false,
     super.key,
   });
 
   final DashboardController controller;
   final AccountController accountController;
+
+  /// Uses the kit's 32 dp controls instead of 48 dp touch targets (a pointer
+  /// drives the layout, as in the browser extension popup and side panel).
+  final bool compactControls;
+
+  double get _target => compactControls ? _compactTarget : _touchTarget;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -47,20 +58,23 @@ final class MobileDashboardView extends StatelessWidget {
           child: _MobileFlyout(
             controller: controller,
             accountController: accountController,
+            target: _target,
           ),
         ),
       ),
       appBar: AppBar(
-        leadingWidth: _mobileTouchTarget + 8,
+        leadingWidth: _target + 8,
         leading: Builder(
           builder: (BuildContext context) => Align(
             child: AppIconButton(
               tooltip: 'Open navigation menu',
               onPressed: Scaffold.of(context).openDrawer,
               icon: FluentIcons.navigation_24_regular,
-              size: AppIconButtonSize.regular,
-              minTouchTarget: _mobileTouchTarget,
-              iconSize: 24,
+              size: compactControls
+                  ? AppIconButtonSize.compact
+                  : AppIconButtonSize.regular,
+              minTouchTarget: _target,
+              iconSize: compactControls ? 20 : 24,
             ),
           ),
         ),
@@ -125,7 +139,7 @@ final class MobileDashboardView extends StatelessWidget {
                       : controller.error ??
                             'Select a workspace to start chatting.'),
         borderlessComposer: true,
-        minTouchTarget: _mobileTouchTarget,
+        minTouchTarget: _target,
         onOpenDevices: controller.openAccountShortcut,
         workspace: controller.threadsWorkspace,
         activeFile: controller.activeFileReference == null
@@ -176,10 +190,14 @@ final class _MobileFlyout extends StatelessWidget {
   const _MobileFlyout({
     required this.controller,
     required this.accountController,
+    required this.target,
   });
 
   final DashboardController controller;
   final AccountController accountController;
+
+  /// Height and width of the flyout's buttons and rows.
+  final double target;
 
   void _selectSection(DashboardSection section) {
     unawaited(controller.activateSection(section));
@@ -200,7 +218,7 @@ final class _MobileFlyout extends StatelessWidget {
       icon: icon,
       selectedIcon: selectedIcon,
       label: label,
-      height: _mobileTouchTarget,
+      height: target,
       selected: controller.selectedSection == section,
       onPressed: () => _selectSection(section),
     ),
@@ -256,7 +274,7 @@ final class _MobileFlyout extends StatelessWidget {
             child: ContextPanel(
               screen: controller.selectedSection,
               controller: controller,
-              minTouchTarget: _mobileTouchTarget,
+              minTouchTarget: target,
               onSelection: () => Navigator.of(context).pop(),
             ),
           ),
@@ -273,7 +291,7 @@ final class _MobileFlyout extends StatelessWidget {
                       controller.selectedSection == DashboardSection.settings &&
                       !controller.accountShortcutSelected,
                   onPressed: () => _selectSection(DashboardSection.settings),
-                  dimension: _mobileTouchTarget,
+                  dimension: target,
                   borderRadius: 6,
                 ),
                 const SizedBox(width: 8),
@@ -285,7 +303,7 @@ final class _MobileFlyout extends StatelessWidget {
                           icon: FluentIcons.person_24_regular,
                           selectedIcon: FluentIcons.person_24_filled,
                           label: accountController.sidebarTooltip,
-                          height: _mobileTouchTarget,
+                          height: target,
                           selected:
                               controller.selectedSection ==
                                   DashboardSection.settings &&

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
 
+import '../extension/extension_pairing_controller.dart';
 import '../hive/hive_runtime.dart';
 
 enum AccountStatus { initializing, anonymous, authenticated }
@@ -24,6 +25,7 @@ final class AccountController extends ChangeNotifier {
     this.thinClient = false,
     this.onSessionChanged,
     this.onEngineProfile,
+    this.extensionPairing,
   }) {
     session.addListener(_syncFromSession);
   }
@@ -43,6 +45,9 @@ final class AccountController extends ChangeNotifier {
   /// Called with the engine profile that now holds the account's session. Each
   /// account has its own engine instance, so the app must follow it.
   final FutureOr<void> Function(String profileId)? onEngineProfile;
+
+  /// Pairing with a local engine; only set inside the browser extension.
+  final ExtensionPairingController? extensionPairing;
 
   /// The server session when this device uses a remote engine, else null.
   HiveRuntime? get serverRuntime => thinClient ? session : null;

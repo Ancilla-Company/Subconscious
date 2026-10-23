@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../api/client_identity.dart';
 import '../api/engine_socket.dart';
 import '../api/task_socket_mixin.dart';
 import '../models/engine_models.dart';
@@ -13,7 +14,11 @@ final class PeerEngineSocket with TaskSocketMixin implements EngineSocket {
   PeerEngineSocket({
     required this.linkProvider,
     this.helloTimeout = const Duration(seconds: 10),
+    this.identity,
   });
+
+  /// Sent in `client.hello` (peers have no query string).
+  final ClientIdentity? identity;
 
   /// Returns an open link (connecting if necessary).
   final Future<PeerLink> Function() linkProvider;
@@ -40,7 +45,10 @@ final class PeerEngineSocket with TaskSocketMixin implements EngineSocket {
     _hello = Completer<void>();
     _subscription = link.envelopes.listen(_onEnvelope, onDone: _onDone);
     try {
-      send(type: 'client.hello', data: <String, dynamic>{});
+      send(
+        type: 'client.hello',
+        data: identity?.helloData() ?? <String, dynamic>{},
+      );
       await _hello!.future.timeout(helloTimeout);
     } on Object {
       await _detach();

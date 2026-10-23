@@ -206,7 +206,10 @@ final class SignalingClient implements SignalSender, RelaySender {
     List<String> clients = const <String>[],
     Map<String, dynamic> capabilities = const <String, dynamic>{},
   }) async {
-    _presence = <String, dynamic>{'clients': clients, 'capabilities': capabilities};
+    _presence = <String, dynamic>{
+      'clients': clients,
+      'capabilities': capabilities,
+    };
     if (_connected) _send('presence.set', _presence);
   }
 
@@ -275,19 +278,24 @@ final class SignalingClient implements SignalSender, RelaySender {
     final Map<String, dynamic> ticket = await api.signalTicket(identity.nodeId);
     final SignalSocket socket = await _connect(signalUrl(api.baseUri));
     _socket = socket;
-    final StreamIterator<String> iterator = StreamIterator<String>(socket.messages);
+    final StreamIterator<String> iterator = StreamIterator<String>(
+      socket.messages,
+    );
     try {
       await _sendAuth(socket, ticket, 'auth');
-      final Map<String, dynamic> reply = await _next(iterator).timeout(authTimeout);
+      final Map<String, dynamic> reply = await _awaitAuthReply(iterator);
       if (reply['type'] != 'auth.ok') {
         throw StateError('Signalling authentication was rejected.');
       }
       final Object? data = reply['data'];
-      if (data is Map && data['hive_id'] is String) hiveId = data['hive_id'] as String;
+      if (data is Map && data['hive_id'] is String)
+        hiveId = data['hive_id'] as String;
       lastError = null;
       if (_lastReported != null) {
         _lastReported = null;
-        (onLog ?? _defaultLog)('Signalling recovered after $failures failed attempts.');
+        (onLog ?? _defaultLog)(
+          'Signalling recovered after $failures failed attempts.',
+        );
       }
       _setConnected(true);
       _send('presence.set', _presence);
@@ -316,6 +324,24 @@ final class SignalingClient implements SignalSender, RelaySender {
     }
   }
 
+  /// The answer to `auth`. The server may deliver an account-wide
+  /// `presence.update` (another node going on or offline) just before
+  /// `auth.ok`; that is not a rejection. Such frames are skipped: the
+  /// `presence.snapshot` that follows `auth.ok` carries the full state.
+  Future<Map<String, dynamic>> _awaitAuthReply(
+    StreamIterator<String> iterator,
+  ) async {
+    final Stopwatch watch = Stopwatch()..start();
+    while (true) {
+      final Duration left = authTimeout - watch.elapsed;
+      if (left <= Duration.zero)
+        throw TimeoutException('Signalling auth timed out.');
+      final Map<String, dynamic> reply = await _next(iterator).timeout(left);
+      if (reply['type'] == 'presence.update') continue;
+      return reply;
+    }
+  }
+
   Future<void> refreshAuth() async {
     final SignalSocket? socket = _socket;
     if (socket == null) return;
@@ -331,7 +357,9 @@ final class SignalingClient implements SignalSender, RelaySender {
     final Object? value = ticket['ticket'];
     final Object? challenge = ticket['challenge'];
     if (value is! String || challenge is! String) {
-      throw const HiveApiException('The hive server returned an invalid ticket.');
+      throw const HiveApiException(
+        'The hive server returned an invalid ticket.',
+      );
     }
     final String sig = await identity.sign(
       await signalAuthMessage(challenge, value, identity.nodeId),
@@ -370,7 +398,9 @@ final class SignalingClient implements SignalSender, RelaySender {
       _frames.add(
         SignalFrame(
           frame['type'] as String,
-          data is Map ? data.cast<String, dynamic>() : const <String, dynamic>{},
+          data is Map
+              ? data.cast<String, dynamic>()
+              : const <String, dynamic>{},
         ),
       );
     }

@@ -23,14 +23,24 @@ final class FakeSignalSocket implements SignalSocket {
     if (!controller.isClosed) await controller.close();
   }
 
-  void server(String type, [Map<String, dynamic> data = const <String, dynamic>{}]) =>
-      controller.add(jsonEncode(<String, dynamic>{'v': 1, 'type': type, 'data': data}));
+  void server(
+    String type, [
+    Map<String, dynamic> data = const <String, dynamic>{},
+  ]) => controller.add(
+    jsonEncode(<String, dynamic>{'v': 1, 'type': type, 'data': data}),
+  );
 }
 
 void main() {
   test('signalUrl maps http(s) to ws(s) and appends /signal', () {
-    expect(signalUrl(Uri.parse('https://api.example.com')).toString(), 'wss://api.example.com/signal');
-    expect(signalUrl(Uri.parse('http://localhost:8000/base/')).toString(), 'ws://localhost:8000/base/signal');
+    expect(
+      signalUrl(Uri.parse('https://api.example.com')).toString(),
+      'wss://api.example.com/signal',
+    );
+    expect(
+      signalUrl(Uri.parse('http://localhost:8000/base/')).toString(),
+      'ws://localhost:8000/base/signal',
+    );
   });
 
   test('backoff stays within bounds and grows', () {
@@ -73,94 +83,129 @@ void main() {
       );
     });
 
-    test('fetches a ticket, authenticates with a signed challenge, sets presence', () async {
-      final FakeSignalSocket socket = FakeSignalSocket();
-      final List<Uri> urls = <Uri>[];
-      final SignalingClient client = SignalingClient(
-        api: api,
-        identity: me,
-        connect: (Uri url) async {
-          urls.add(url);
-          return socket;
-        },
-        sleep: (Duration _) async {},
-      );
-      client.start();
-      await until(() => socket.sent.isNotEmpty);
+    test(
+      'fetches a ticket, authenticates with a signed challenge, sets presence',
+      () async {
+        final FakeSignalSocket socket = FakeSignalSocket();
+        final List<Uri> urls = <Uri>[];
+        final SignalingClient client = SignalingClient(
+          api: api,
+          identity: me,
+          connect: (Uri url) async {
+            urls.add(url);
+            return socket;
+          },
+          sleep: (Duration _) async {},
+        );
+        client.start();
+        await until(() => socket.sent.isNotEmpty);
 
-      expect(requests.single.url.path, '/nodes/${me.nodeId}/signal-ticket');
-      expect(requests.single.headers['Authorization'], 'Bearer access');
-      expect(urls.single.toString(), 'wss://api.test/signal');
-      final Map<String, dynamic> auth = socket.sent.single;
-      expect(auth['type'], 'auth');
-      final Map<String, dynamic> data = auth['data'] as Map<String, dynamic>;
-      expect(data['ticket'], 'ticket-1');
-      expect(data['node_id'], me.nodeId);
-      expect(
-        await verifySignature(
-          publicKey: me.publicKey,
-          signature: data['sig'] as String,
-          message: await signalAuthMessage('challenge-1', 'ticket-1', me.nodeId),
-        ),
-        isTrue,
-      );
+        expect(requests.single.url.path, '/nodes/${me.nodeId}/signal-ticket');
+        expect(requests.single.headers['Authorization'], 'Bearer access');
+        expect(urls.single.toString(), 'wss://api.test/signal');
+        final Map<String, dynamic> auth = socket.sent.single;
+        expect(auth['type'], 'auth');
+        final Map<String, dynamic> data = auth['data'] as Map<String, dynamic>;
+        expect(data['ticket'], 'ticket-1');
+        expect(data['node_id'], me.nodeId);
+        expect(
+          await verifySignature(
+            publicKey: me.publicKey,
+            signature: data['sig'] as String,
+            message: await signalAuthMessage(
+              'challenge-1',
+              'ticket-1',
+              me.nodeId,
+            ),
+          ),
+          isTrue,
+        );
 
-      final Future<SignalFrame> presence = client.frames.firstWhere(
-        (SignalFrame f) => f.type == 'presence.snapshot',
-      );
-      socket.server('auth.ok', <String, dynamic>{'node_id': me.nodeId, 'hive_id': 'hive-1'});
-      await client.waitConnected(const Duration(seconds: 2));
-      expect(client.hiveId, 'hive-1');
-      await until(() => socket.sent.length >= 2);
-      expect(socket.sent[1]['type'], 'presence.set');
+        final Future<SignalFrame> presence = client.frames.firstWhere(
+          (SignalFrame f) => f.type == 'presence.snapshot',
+        );
+        socket.server('auth.ok', <String, dynamic>{
+          'node_id': me.nodeId,
+          'hive_id': 'hive-1',
+        });
+        await client.waitConnected(const Duration(seconds: 2));
+        expect(client.hiveId, 'hive-1');
+        await until(() => socket.sent.length >= 2);
+        expect(socket.sent[1]['type'], 'presence.set');
 
-      socket.server('presence.snapshot', <String, dynamic>{
-        'nodes': <Map<String, dynamic>>[
-          <String, dynamic>{'node_id': 'n_x', 'online': true},
-        ],
-      });
-      expect((await presence).data['nodes'], isNotEmpty);
+        socket.server('presence.snapshot', <String, dynamic>{
+          'nodes': <Map<String, dynamic>>[
+            <String, dynamic>{'node_id': 'n_x', 'online': true},
+          ],
+        });
+        expect((await presence).data['nodes'], isNotEmpty);
 
-      await client.sendSignal(sid: 's', to: 'n_x', kind: 'offer', body: <String, dynamic>{'sdp': 'v=0'}, sig: 'sig');
-      await client.sendRelay(sid: 's', to: 'n_x', payload: 'cipher');
-      await client.setPresence(clients: <String>['ui'], capabilities: <String, dynamic>{'a': 1});
-      await client.ping();
-      final List<String> types = socket.sent.map((Map<String, dynamic> f) => f['type'] as String).toList();
-      expect(types.sublist(2), <String>['signal', 'relay', 'presence.set', 'ping']);
-      final Map<String, dynamic> signal = (socket.sent[2]['data'] as Map).cast<String, dynamic>();
-      expect(signal['to'], 'n_x');
-      expect(signal['sig'], 'sig');
-      expect((socket.sent[3]['data'] as Map)['payload'], 'cipher');
-      await client.dispose();
-    });
+        await client.sendSignal(
+          sid: 's',
+          to: 'n_x',
+          kind: 'offer',
+          body: <String, dynamic>{'sdp': 'v=0'},
+          sig: 'sig',
+        );
+        await client.sendRelay(sid: 's', to: 'n_x', payload: 'cipher');
+        await client.setPresence(
+          clients: <String>['ui'],
+          capabilities: <String, dynamic>{'a': 1},
+        );
+        await client.ping();
+        final List<String> types = socket.sent
+            .map((Map<String, dynamic> f) => f['type'] as String)
+            .toList();
+        expect(types.sublist(2), <String>[
+          'signal',
+          'relay',
+          'presence.set',
+          'ping',
+        ]);
+        final Map<String, dynamic> signal = (socket.sent[2]['data'] as Map)
+            .cast<String, dynamic>();
+        expect(signal['to'], 'n_x');
+        expect(signal['sig'], 'sig');
+        expect((socket.sent[3]['data'] as Map)['payload'], 'cipher');
+        await client.dispose();
+      },
+    );
 
-    test('refreshes the ticket over the open socket with auth.refresh', () async {
-      final FakeSignalSocket socket = FakeSignalSocket();
-      final SignalingClient client = SignalingClient(
-        api: api,
-        identity: me,
-        connect: (Uri _) async => socket,
-        sleep: (Duration _) async {},
-      );
-      client.start();
-      await until(() => socket.sent.isNotEmpty);
-      socket.server('auth.ok', <String, dynamic>{'hive_id': 'h'});
-      await client.waitConnected(const Duration(seconds: 2));
-      await client.refreshAuth();
-      final Map<String, dynamic> refresh = socket.sent.last;
-      expect(refresh['type'], 'auth.refresh');
-      final Map<String, dynamic> data = (refresh['data'] as Map).cast<String, dynamic>();
-      expect(data.containsKey('node_id'), isFalse);
-      expect(
-        await verifySignature(
-          publicKey: me.publicKey,
-          signature: data['sig'] as String,
-          message: await signalAuthMessage('challenge-2', 'ticket-2', me.nodeId),
-        ),
-        isTrue,
-      );
-      await client.dispose();
-    });
+    test(
+      'refreshes the ticket over the open socket with auth.refresh',
+      () async {
+        final FakeSignalSocket socket = FakeSignalSocket();
+        final SignalingClient client = SignalingClient(
+          api: api,
+          identity: me,
+          connect: (Uri _) async => socket,
+          sleep: (Duration _) async {},
+        );
+        client.start();
+        await until(() => socket.sent.isNotEmpty);
+        socket.server('auth.ok', <String, dynamic>{'hive_id': 'h'});
+        await client.waitConnected(const Duration(seconds: 2));
+        await client.refreshAuth();
+        final Map<String, dynamic> refresh = socket.sent.last;
+        expect(refresh['type'], 'auth.refresh');
+        final Map<String, dynamic> data = (refresh['data'] as Map)
+            .cast<String, dynamic>();
+        expect(data.containsKey('node_id'), isFalse);
+        expect(
+          await verifySignature(
+            publicKey: me.publicKey,
+            signature: data['sig'] as String,
+            message: await signalAuthMessage(
+              'challenge-2',
+              'ticket-2',
+              me.nodeId,
+            ),
+          ),
+          isTrue,
+        );
+        await client.dispose();
+      },
+    );
 
     test('reconnects with a fresh ticket after a drop and backs off', () async {
       final List<FakeSignalSocket> sockets = <FakeSignalSocket>[];
@@ -209,6 +254,38 @@ void main() {
       await client.dispose();
     });
 
+    test(
+      'a presence.update before auth.ok is not an authentication failure',
+      () async {
+        // Found by the live tests: the real server can deliver another node's
+        // presence.update ahead of auth.ok; treating it as a rejection made the
+        // client drop a good connection and reconnect.
+        final List<FakeSignalSocket> sockets = <FakeSignalSocket>[];
+        final SignalingClient client = SignalingClient(
+          api: api,
+          identity: me,
+          connect: (Uri _) async {
+            final FakeSignalSocket s = FakeSignalSocket();
+            sockets.add(s);
+            return s;
+          },
+          sleep: (Duration _) async {},
+          random: () => 0,
+        );
+        client.start();
+        await until(() => sockets.isNotEmpty && sockets[0].sent.isNotEmpty);
+        sockets[0].server('presence.update', <String, dynamic>{
+          'node_id': 'n_other',
+          'online': false,
+        });
+        sockets[0].server('auth.ok', <String, dynamic>{'hive_id': 'h'});
+        await client.waitConnected(const Duration(seconds: 2));
+        expect(sockets, hasLength(1), reason: 'no reconnect');
+        expect(client.lastError, isNull);
+        await client.dispose();
+      },
+    );
+
     test('sends a ping every interval while connected', () async {
       final FakeSignalSocket socket = FakeSignalSocket();
       final SignalingClient client = SignalingClient(
@@ -222,7 +299,9 @@ void main() {
       await until(() => socket.sent.isNotEmpty);
       socket.server('auth.ok', <String, dynamic>{'hive_id': 'h'});
       await client.waitConnected(const Duration(seconds: 2));
-      int pings() => socket.sent.where((Map<String, dynamic> f) => f['type'] == 'ping').length;
+      int pings() => socket.sent
+          .where((Map<String, dynamic> f) => f['type'] == 'ping')
+          .length;
       await until(() => pings() >= 2);
       expect(pings(), greaterThanOrEqualTo(2));
       await client.dispose();
@@ -234,14 +313,17 @@ void main() {
         api: api,
         identity: me,
         connect: (Uri _) async => socket,
-        sleep: (Duration _) => Completer<void>().future, // park the reconnect loop
+        sleep: (Duration _) =>
+            Completer<void>().future, // park the reconnect loop
         heartbeatInterval: const Duration(milliseconds: 20),
       );
       client.start();
       await until(() => socket.sent.isNotEmpty);
       socket.server('auth.ok', <String, dynamic>{'hive_id': 'h'});
       await client.waitConnected(const Duration(seconds: 2));
-      await until(() => socket.sent.any((Map<String, dynamic> f) => f['type'] == 'ping'));
+      await until(
+        () => socket.sent.any((Map<String, dynamic> f) => f['type'] == 'ping'),
+      );
       await socket.controller.close();
       await until(() => !client.connected);
       final int before = socket.sent.length;
@@ -253,42 +335,50 @@ void main() {
     test('sending while disconnected throws', () async {
       final SignalingClient client = SignalingClient(api: api, identity: me);
       expect(
-        () => client.sendSignal(sid: 's', to: 'n', kind: 'bye', body: <String, dynamic>{}),
+        () => client.sendSignal(
+          sid: 's',
+          to: 'n',
+          kind: 'bye',
+          body: <String, dynamic>{},
+        ),
         throwsStateError,
       );
     });
 
-    test('a failed session keeps and logs its cause, cleared once connected', () async {
-      final List<String> lines = <String>[];
-      final List<FakeSignalSocket> sockets = <FakeSignalSocket>[];
-      int attempts = 0;
-      final SignalingClient client = SignalingClient(
-        api: api,
-        identity: me,
-        connect: (Uri _) async {
-          attempts++;
-          if (attempts == 1) {
-            throw const HandshakeLikeError('certificate has expired');
-          }
-          final FakeSignalSocket s = FakeSignalSocket();
-          sockets.add(s);
-          return s;
-        },
-        sleep: (Duration _) async {},
-        random: () => 0,
-      )..onLog = lines.add;
-      client.start();
-      await until(() => sockets.isNotEmpty && sockets[0].sent.isNotEmpty);
-      expect(lines, hasLength(1));
-      expect(lines.single, contains('certificate has expired'));
-      expect(lines.single, contains('shows offline'));
-      expect(client.lastError, contains('certificate has expired'));
-      sockets[0].server('auth.ok', <String, dynamic>{'hive_id': 'h'});
-      await client.waitConnected(const Duration(seconds: 2));
-      expect(client.lastError, isNull);
-      expect(lines.last, contains('recovered'));
-      await client.dispose();
-    });
+    test(
+      'a failed session keeps and logs its cause, cleared once connected',
+      () async {
+        final List<String> lines = <String>[];
+        final List<FakeSignalSocket> sockets = <FakeSignalSocket>[];
+        int attempts = 0;
+        final SignalingClient client = SignalingClient(
+          api: api,
+          identity: me,
+          connect: (Uri _) async {
+            attempts++;
+            if (attempts == 1) {
+              throw const HandshakeLikeError('certificate has expired');
+            }
+            final FakeSignalSocket s = FakeSignalSocket();
+            sockets.add(s);
+            return s;
+          },
+          sleep: (Duration _) async {},
+          random: () => 0,
+        )..onLog = lines.add;
+        client.start();
+        await until(() => sockets.isNotEmpty && sockets[0].sent.isNotEmpty);
+        expect(lines, hasLength(1));
+        expect(lines.single, contains('certificate has expired'));
+        expect(lines.single, contains('shows offline'));
+        expect(client.lastError, contains('certificate has expired'));
+        sockets[0].server('auth.ok', <String, dynamic>{'hive_id': 'h'});
+        await client.waitConnected(const Duration(seconds: 2));
+        expect(client.lastError, isNull);
+        expect(lines.last, contains('recovered'));
+        await client.dispose();
+      },
+    );
 
     test('wake() skips the reconnect backoff', () async {
       int attempts = 0;
@@ -299,7 +389,8 @@ void main() {
           attempts++;
           throw StateError('down');
         },
-        sleep: (Duration _) => Completer<void>().future, // backoff never ends alone
+        sleep: (Duration _) =>
+            Completer<void>().future, // backoff never ends alone
       )..onLog = (String _) {};
       client.start();
       await until(() => attempts == 1);

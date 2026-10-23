@@ -28,18 +28,23 @@ final class SecureRefreshTokenStore implements RefreshTokenStore {
 }
 
 /// Ed25519 seed (base64url) in the platform keystore. Never exported.
+///
+/// [slot] separates the identities of pages that run at the same time from one
+/// shared storage (the browser extension's popup and side panels). Slot 0 uses
+/// the original key, so existing installs keep their identity.
 final class SecureIdentitySeedStore implements IdentitySeedStore {
-  SecureIdentitySeedStore([FlutterSecureStorage? storage])
-    : _storage = storage ?? defaultSecureStorage();
+  SecureIdentitySeedStore([FlutterSecureStorage? storage, int slot = 0])
+    : _storage = storage ?? defaultSecureStorage(),
+      _key = slot <= 0 ? _identityKey : '$_identityKey.slot$slot';
   final FlutterSecureStorage _storage;
+  final String _key;
 
   @override
-  Future<String?> read() => _storage.read(key: _identityKey);
+  Future<String?> read() => _storage.read(key: _key);
   @override
-  Future<void> write(String seed) =>
-      _storage.write(key: _identityKey, value: seed);
+  Future<void> write(String seed) => _storage.write(key: _key, value: seed);
   @override
-  Future<void> delete() => _storage.delete(key: _identityKey);
+  Future<void> delete() => _storage.delete(key: _key);
 }
 
 const String _clientIdKey = 'subconscious.hive.clientId.v1';

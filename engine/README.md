@@ -132,7 +132,7 @@ Register (or replace) a group; the call replaces every tool of that group for th
 - `group`: `^[a-z][a-z0-9_]{0,31}$`, not the slug of a built-in group. `title` is shown to the model and user.
 - tool `id`: `^[A-Za-z][A-Za-z0-9_.\-]{0,63}$`; `description` up to 2000 chars; `input_schema` a JSON object with `"type":"object"`, up to 32 KiB. At most 64 tools per group and 8 groups per connection.
 - `operation`: `read`, `create`, `update`, `delete` or `execute` (default `update`). `execute` is treated as `update` for approval. `read_only: true` forces `read`. `timeout_seconds` (optional, up to 300) overrides the 60 s default.
-- Invalid payloads get an `error` frame (`tool.register rejected: <reason>`); nothing is registered. Hive peers cannot register schema-bearing tools (`error` frame); they keep the legacy UI tool ids only. A payload without `group`/`input_schema` is the legacy desktop UI registration and is unchanged.
+- Invalid payloads get an `error` frame (`tool.register rejected: <reason>`); nothing is registered. Engine nodes (hive peers with the engine role) cannot register schema-bearing tools (`error` frame); they keep the legacy UI tool ids only. A thin client's own hive link (for example the browser extension reaching its remote engine through the account) may register them. A payload without `group`/`input_schema` is the legacy desktop UI registration and is unchanged.
 
 The model sees each tool as `<group>__<id>` (non `[A-Za-z0-9_]` characters become `_`, max 64 chars, de-duplicated with a numeric suffix) with the description prefixed `[<title> via <client name>]`. When the model calls it, the engine sends, with the chat turn id as the envelope `id`:
 

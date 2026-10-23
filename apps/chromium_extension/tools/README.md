@@ -3,15 +3,9 @@
 Browser tools the extension offers to the engine's model, over the `/api/v1/events` WebSocket
 (protocol: `engine/README.md`, "Client-defined tools").
 
-```js
-import { createToolBridge, requestSiteAccess } from './tools/bridge.js';
-const bridge = createToolBridge({ sendFrame: (f) => ws.send(JSON.stringify(f)), getConfig });
-bridge.register();                       // after the socket opens (sends tool.register for `browser`, starts WebMCP watcher)
-ws.onmessage = (m) => bridge.handleFrame(JSON.parse(m.data)); // true when it was a client.tool.request
-bridge.dispose();                        // empties both groups, stops watchers
-```
+Used through the host (`host_tools.js` -> `globalThis.subconsciousExtension`; see ../README.md). The Dart app registers the tool groups with the engine and answers `client.tool.request` by calling `callTool(group, id, argsJson)`.
 
-`requestSiteAccess(origin)` must be called from a user gesture (a button) to prompt for host access.
+`requestSiteAccess(origin)` (host API) must be called from a user gesture (a button) to prompt for host access.
 
 ## Tools (group `browser`)
 
@@ -37,7 +31,7 @@ All take an optional `tab_id` (default: active tab) where it makes sense. Refs (
 assigned by `read_page` (and `find_in_page`) and kept in an isolated-world registry in the page; a
 new `read_page` resets them. Scope is the **top frame only**; iframes are skipped. Open shadow roots are read.
 Results are bounded: strings are cut at 60k chars and lists at 200 items, with `truncated:true`.
-Each request times out after 50 s (engine: 60 s).
+Each call times out after 50 s (engine: 60 s).
 
 ## Privacy rules (tools/redact.js, the single source)
 
@@ -61,7 +55,7 @@ Each request times out after 50 s (engine: 60 s).
 
 * `tabs`: read tab url/title for listing and for the special-page check.
 * `scripting`: `chrome.scripting.executeScript` for reading/acting (ISOLATED world) and WebMCP (MAIN world).
-* `optional_host_permissions` `http://*/*`, `https://*/*`: granted per origin. Before acting the bridge checks
+* `optional_host_permissions` `http://*/*`, `https://*/*`: granted per origin. Before acting the host checks
   `chrome.permissions.contains`; if missing it tries `request` (only works in a user gesture) and otherwise returns
   "Grant access to <origin> in the extension (Site access)". Pages like chrome://, chrome-extension://, the Web Store, about:blank and
   the PDF viewer return "cannot access this page".

@@ -286,6 +286,49 @@ final class ServerAccountClient {
     await tokenStore.delete();
   }
 
+  /// `POST /nodes/{nodeId}/pairing-assertion`: a one-time assertion (60 s) that
+  /// lets a browser extension at [origin] pair with the engine [nodeId] owned
+  /// by this account. Retries once after refreshing an expired access token.
+  Future<String> requestPairingAssertion({
+    required String nodeId,
+    required String clientNonce,
+    required String origin,
+  }) async {
+    for (int attempt = 0; attempt < 2; attempt++) {
+      final String? token = await ensureAccessToken();
+      if (token == null) {
+        throw const HiveApiException('Sign in to the server first.', 401);
+      }
+      final Uri uri = baseUri.resolve(
+        'nodes/${Uri.encodeComponent(nodeId)}/pairing-assertion',
+      );
+      final http.Request request = http.Request('POST', uri)
+        ..headers['Content-Type'] = 'application/json'
+        ..headers['Authorization'] = 'Bearer $token'
+        ..body = jsonEncode(<String, dynamic>{
+          'client_nonce': clientNonce,
+          'origin': origin,
+        });
+      try {
+        final Map<String, dynamic> body = await _send(request);
+        final Object? assertion = body['assertion'];
+        if (assertion is! String || assertion.isEmpty) {
+          throw const HiveApiException(
+            'The server returned an invalid response.',
+          );
+        }
+        return assertion;
+      } on HiveApiException catch (error) {
+        if (error.statusCode == 401 && attempt == 0) {
+          await forceRefresh();
+          if (_accessToken != null) continue;
+        }
+        rethrow;
+      }
+    }
+    throw const HiveApiException('Sign in to the server first.', 401);
+  }
+
   /// Rotation invalidates the old token, so concurrent callers share one call.
   Future<String?> _refresh() {
     return _refreshing ??= _doRefresh().whenComplete(() => _refreshing = null);

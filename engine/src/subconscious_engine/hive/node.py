@@ -122,14 +122,25 @@ class HiveNode(HiveContext):
         node = self.directory.get(link.node_id)
         runtime = PeerRuntime(self.app, link, node.name if node else "")
         previous = self.runtimes.pop(link.node_id, None)
-        if previous is not None:
-            self._spawn(previous.stop())
         self.runtimes[link.node_id] = runtime
         link.handler = self.route
-        runtime.session.start()
+        if previous is None:
+            runtime.session.start()
+        else:
+            # The old session holds this node's client id until it has ended; start the
+            # new one only afterwards or its first hello is rejected as a duplicate.
+            self._spawn(self._replace_runtime(previous, runtime))
         if link.role == HIVE_PEER:
             self.coordinator.on_link(link)
         self._spawn(self.tasks.on_link(link))
+
+    async def _replace_runtime(self, previous: "PeerRuntime", runtime: "PeerRuntime") -> None:
+        try:
+            await previous.stop()
+        finally:
+            # Frames that arrived meanwhile wait in the new session's inbox.
+            if self.runtimes.get(runtime.link.node_id) is runtime:
+                runtime.session.start()
 
     def on_link_closed(self, node_id: str) -> None:
         runtime = self.runtimes.pop(node_id, None)
