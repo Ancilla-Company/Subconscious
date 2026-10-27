@@ -52,6 +52,7 @@ from subconscious_engine.services.oauth import (
     OAuthNotReady,
     build_provider,
 )
+from subconscious_engine.services.acp_client import AcpError, probe_acp_agent, run_acp_agent
 from subconscious_engine.services.tool_registry import parse_tool_config
 from subconscious_engine.storage.models import ToolRegistryRecord
 
@@ -64,6 +65,8 @@ CLI_OUTPUT_LIMIT = 20000
 MCP_START_TIMEOUT_SECONDS = 60.0
 MCP_CALL_TIMEOUT_SECONDS = 300.0
 MCP_PING_TIMEOUT_SECONDS = 5.0
+CONFIGURED_TYPES = ("mcp", "cli", "acp")
+ACP_TIMEOUT_SECONDS = 600.0
 NOT_EXECUTED_ERROR = "This tool type is not executed by the engine."
 SIGN_IN_REQUIRED = "Sign-in required."
 AUTHORIZE_WAIT_SECONDS = 15.0
@@ -384,7 +387,9 @@ class ConfiguredToolRuntime:
     def __init__(self, database: Any, credentials: Any, *, cli_timeout: float = CLI_TIMEOUT_SECONDS,
                  mcp_start_timeout: float = MCP_START_TIMEOUT_SECONDS,
                  mcp_call_timeout: float = MCP_CALL_TIMEOUT_SECONDS,
-                 oauth_broker: OAuthBroker | None = None) -> None:
+                 oauth_broker: OAuthBroker | None = None,
+                 acp_timeout: float = ACP_TIMEOUT_SECONDS) -> None:
+        self.acp_timeout = acp_timeout
         self.database = database
         self.credentials = credentials
         self.oauth_broker = oauth_broker
@@ -424,8 +429,10 @@ class ConfiguredToolRuntime:
             if record is None:
                 return None
             row = ConfiguredRow.from_record(record)
-        if row.tool_type not in {"mcp", "cli"}:
+        if row.tool_type not in CONFIGURED_TYPES:
             return {"ok": False, "tools": [], "error": NOT_EXECUTED_ERROR, "needsAuth": False}
+        if row.tool_type == "acp":
+            return await self._test_acp(row)
         try:
             if interactive and row.is_oauth:
                 outcome = await self.connect_interactive(uuid)
@@ -547,7 +554,7 @@ class ConfiguredToolRuntime:
 
     # --- loading -----------------------------------------------------------------------------
     async def _rows(self, *, active_only: bool) -> list[ConfiguredRow]:
-        query = select(ToolRegistryRecord).where(ToolRegistryRecord.tool_type.in_(("mcp", "cli"))) \
+        query = select(ToolRegistryRecord).where(ToolRegistryRecord.tool_type.in_(CONFIGURED_TYPES)) \
             .order_by(ToolRegistryRecord.alias, ToolRegistryRecord.id)
         async with self.database.session() as session:
             records = (await session.scalars(query)).all()
@@ -568,7 +575,7 @@ class ConfiguredToolRuntime:
                              transport=row.transport, reason="needs sign-in")
             return None
         except Exception as error:
-            log_tool_problem("mcp.server.skipped" if row.tool_type == "mcp" else "cli.tool.skipped",
+            log_tool_problem(f"{'mcp.server' if row.tool_type == 'mcp' else row.tool_type + '.tool'}.skipped",
                              uuid=row.uuid, tool=row.label, alias=row.label, transport=row.transport,
                              error=describe_error(error))
             return None
@@ -576,7 +583,68 @@ class ConfiguredToolRuntime:
     async def _entries(self, row: ConfiguredRow) -> list[_Entry]:
         if row.tool_type == "cli":
             return [self._cli_entry(row)]
+        if row.tool_type == "acp":
+            return [self._acp_entry(row)]
         return await self._mcp_entries(row)
+
+    # --- ACP agents ----------------------------------------------------------------------------
+    def _acp_command(self, row: ConfiguredRow) -> list[str]:
+        command = str(row.config.get("command") or "")
+        cwd = row.config.get("cwd") or None
+        if not command:
+            raise ValueError("The ACP agent has no command.")
+        executable = resolve_command(command, cwd)
+        if executable is None:
+            raise ValueError(f"The command '{command}' was not found.")
+        return [executable, *[str(item) for item in (row.config.get("args") or [])]]
+
+    def _acp_entry(self, row: ConfiguredRow) -> _Entry:
+        self._acp_command(row)  # fail early (and skip the tool) when the agent cannot be started
+        permissions = str(row.config.get("permissions") or "read_only")
+        description = (row.description or "").strip() or f"Delegate a task to the external agent '{row.label}'."
+        description += (" Each call starts a fresh, independent agent session (it remembers nothing from earlier "
+                        "calls), so put everything it needs in `prompt`. Returns the agent's reply and the tool "
+                        "calls it made. Optional `cwd` is the folder it works in.")
+        if permissions == "read_only":
+            description += " The agent may only read; anything that changes files or runs commands is refused."
+
+        def build(name: str, approval: ApprovalConfig) -> Tool[Any]:
+            async def ask(prompt: str, cwd: str = "") -> dict[str, Any]:
+                return await self._run_acp(row, prompt, cwd)
+
+            return Tool(ask, name=name, description=description,
+                        requires_approval=approval.requires_operation(UPDATE))
+
+        return _Entry(f"ask_{row.slug}", description, UPDATE, build)
+
+    async def _run_acp(self, row: ConfiguredRow, prompt: str, cwd: str) -> dict[str, Any]:
+        if not prompt.strip():
+            raise ValueError("prompt is required.")
+        folder = cwd.strip() or row.config.get("cwd") or None
+        if folder is not None and not Path(folder).expanduser().is_dir():
+            raise ValueError(f"The folder '{folder}' does not exist.")
+        env = row.config.get("env")
+        try:
+            result = await run_acp_agent(
+                self._acp_command(row), prompt, cwd=folder, env=env if isinstance(env, dict) else None,
+                permissions=str(row.config.get("permissions") or "read_only"), timeout=self.acp_timeout)
+        except AcpError as error:
+            log_tool_problem("acp.tool.failed", uuid=row.uuid, alias=row.label, error=describe_error(error))
+            raise RuntimeError(f"The agent '{row.label}' failed: {describe_error(error)}") from error
+        return result.as_dict()
+
+    async def _test_acp(self, row: ConfiguredRow) -> dict[str, Any]:
+        try:
+            info = await probe_acp_agent(self._acp_command(row), cwd=row.config.get("cwd") or None,
+                                         env=row.config.get("env"))
+        except (AcpError, ValueError) as error:
+            log_tool_problem("acp.tool.test_failed", uuid=row.uuid, alias=row.label, error=describe_error(error))
+            return {"ok": False, "tools": [], "error": describe_error(error), "needsAuth": False}
+        name = info.get("title") or info.get("name") or row.label
+        version = info.get("version")
+        description = f"{name} {version}".strip() if version else str(name)
+        return {"ok": True, "tools": [{"name": f"ask_{row.slug}", "description": description,
+                                       "operation": UPDATE}], "error": None, "needsAuth": False}
 
     # --- CLI ---------------------------------------------------------------------------------
     def _cli_entry(self, row: ConfiguredRow) -> _Entry:

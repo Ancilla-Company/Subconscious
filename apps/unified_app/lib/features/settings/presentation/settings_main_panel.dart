@@ -962,7 +962,7 @@ final class _ToolsSettingsPageState extends State<_ToolsSettingsPage> {
           add: _startCreating,
         ),
         const Text(
-          'Register MCP servers and command line tools the assistant can use. Credentials are stored encrypted and are never returned to this app.',
+          'Register MCP servers, command line tools and external ACP agents the assistant can use. Credentials are stored encrypted and are never returned to this app.',
         ),
         if (widget.controller.isLoadingTools) const LinearProgressIndicator(),
         if (!hasOpenEditor && widget.controller.toolsError != null)
@@ -976,7 +976,7 @@ final class _ToolsSettingsPageState extends State<_ToolsSettingsPage> {
         if (_isCreating)
           _SettingsExpansionCard(
             title: 'New tool',
-            subtitle: 'Register an MCP server or command line tool',
+            subtitle: 'Register an MCP server, command line tool or ACP agent',
             trailing: 'unsaved',
             expanded: true,
             onToggle: _closeEditor,
@@ -1063,12 +1063,16 @@ final class _SettingsExpansionCard extends StatelessWidget {
 
 const String _mcpToolLabel = 'MCP server';
 const String _cliToolLabel = 'Command line tool';
+const String _acpToolLabel = 'ACP agent';
+const String _acpReadOnlyLabel = 'Read only';
+const String _acpAllowAllLabel = 'Allow all actions';
 const String _stdioConnectionLabel = 'Command (stdio)';
 const String _httpConnectionLabel = 'HTTP URL';
 
 String _toolTypeLabel(String toolType) => switch (toolType) {
   'mcp' => _mcpToolLabel,
   'cli' => _cliToolLabel,
+  'acp' => _acpToolLabel,
   'script' => 'Script (legacy)',
   'api' => 'API (legacy)',
   _ => toolType,
@@ -1077,7 +1081,7 @@ String _toolTypeLabel(String toolType) => switch (toolType) {
 String? _toolLocation(ToolRegistryEntry tool) {
   final String? value = switch (tool.toolType) {
     'script' => tool.scriptPath,
-    'cli' => tool.command,
+    'cli' || 'acp' => tool.command,
     'mcp' =>
       (tool.command?.trim().isNotEmpty ?? false)
           ? tool.command
@@ -1141,6 +1145,7 @@ final class _ToolEditorState extends State<_ToolEditor> {
   late bool _isHttp;
   late String _scriptLanguage;
   late String _authType;
+  late String _acpPermissions;
   String? _error;
   bool _isSubmitting = false;
 
@@ -1152,6 +1157,7 @@ final class _ToolEditorState extends State<_ToolEditor> {
   List<String> get _toolTypes => <String>[
     'mcp',
     'cli',
+    'acp',
     if (widget.existing?.toolType == 'script' ||
         widget.existing?.toolType == 'api')
       widget.existing!.toolType,
@@ -1182,9 +1188,18 @@ final class _ToolEditorState extends State<_ToolEditor> {
           .join('\n'),
     );
     _toolType =
-        <String>['mcp', 'cli', 'script', 'api'].contains(existing?.toolType)
+        <String>[
+          'mcp',
+          'cli',
+          'acp',
+          'script',
+          'api',
+        ].contains(existing?.toolType)
         ? existing!.toolType
         : 'mcp';
+    _acpPermissions = existing?.permissions == 'allow_all'
+        ? 'allow_all'
+        : 'read_only';
     _isHttp =
         existing != null &&
         (existing.transport == 'http' ||
@@ -1224,9 +1239,13 @@ final class _ToolEditorState extends State<_ToolEditor> {
 
   bool get _isScript => _toolType == 'script';
   bool get _isCli => _toolType == 'cli';
+  bool get _isAcp => _toolType == 'acp';
   bool get _isStdio => _toolType == 'mcp' && !_isHttp;
   bool get _isEndpoint => _toolType == 'api' || (_toolType == 'mcp' && _isHttp);
-  bool get _hasCommand => _isCli || _isStdio;
+  bool get _hasCommand => _isCli || _isStdio || _isAcp;
+
+  /// Environment variables apply to stdio MCP servers and ACP agents.
+  bool get _hasEnv => _isStdio || _isAcp;
 
   /// OAuth only exists for MCP servers reached over HTTP.
   bool get _isOAuth => _toolType == 'mcp' && _isHttp && _authType == 'oauth';
@@ -1288,7 +1307,7 @@ final class _ToolEditorState extends State<_ToolEditor> {
     if (_isCli && _description.text.trim().isEmpty) {
       return 'Description is required for command line tools.';
     }
-    if (_isStdio && _parseEnv() == null) {
+    if (_hasEnv && _parseEnv() == null) {
       return 'Environment lines must look like KEY=value.';
     }
     return null;
@@ -1349,9 +1368,10 @@ final class _ToolEditorState extends State<_ToolEditor> {
             : null,
         command: _hasCommand ? _command.text.trim() : null,
         args: _hasCommand ? _parseArgs() : null,
-        env: _isStdio ? _parseEnv() : null,
+        env: _hasEnv ? _parseEnv() : null,
         cwd: _hasCommand ? _nullIfEmpty(_cwd.text) : null,
         clearCommand: !_hasCommand && hadCommand,
+        permissions: _isAcp ? _acpPermissions : null,
         status: existing?.status,
       ),
     );
@@ -1730,7 +1750,21 @@ final class _ToolEditorState extends State<_ToolEditor> {
             onChanged: (String value) =>
                 setState(() => _isHttp = value == _httpConnectionLabel),
           ),
-        if (_hasCommand) ..._commandFields(withEnvironment: _isStdio),
+        if (_hasCommand) ..._commandFields(withEnvironment: _hasEnv),
+        if (_isAcp)
+          AppDropdown(
+            label: 'Agent permissions',
+            value: _acpPermissions == 'allow_all'
+                ? _acpAllowAllLabel
+                : _acpReadOnlyLabel,
+            options: const <String>[_acpReadOnlyLabel, _acpAllowAllLabel],
+            enabled: !_isSubmitting,
+            onChanged: (String value) => setState(
+              () => _acpPermissions = value == _acpAllowAllLabel
+                  ? 'allow_all'
+                  : 'read_only',
+            ),
+          ),
         if (_isScript) ...<Widget>[
           AppDropdown(
             label: 'Language',
@@ -1794,6 +1828,8 @@ final class _ToolEditorState extends State<_ToolEditor> {
           maxLines: 4,
           hintText: _isCli
               ? 'Tell the model what this tool does and how to call it'
+              : _isAcp
+              ? 'Tell the model what this agent is good at'
               : 'Optional description',
         ),
         if (_error != null) AppFormError(error: _error!),

@@ -704,6 +704,7 @@ final class ToolRegistryEntry {
     this.env = const <String, String>{},
     this.cwd,
     this.transport,
+    this.permissions,
     this.createdAt,
     this.updatedAt,
   });
@@ -729,6 +730,9 @@ final class ToolRegistryEntry {
   final Map<String, String> env;
   final String? cwd;
   final String? transport;
+
+  /// ACP agents only: `read_only` or `allow_all`.
+  final String? permissions;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -765,6 +769,7 @@ final class ToolRegistryEntry {
     env: _stringMapValue(json['env']),
     cwd: _stringValue(json, 'cwd', 'cwd'),
     transport: _stringValue(json, 'transport', 'transport'),
+    permissions: _stringValue(json, 'permissions', 'permissions'),
     createdAt: _dateTimeFromJson(_jsonValue(json, 'createdAt', 'created_at')),
     updatedAt: _dateTimeFromJson(_jsonValue(json, 'updatedAt', 'updated_at')),
   );
@@ -792,6 +797,7 @@ final class ToolRegistryRequest {
     this.cwd,
     this.clearEndpointUrl = false,
     this.clearCommand = false,
+    this.permissions,
     this.status,
   });
   final String? name;
@@ -823,6 +829,9 @@ final class ToolRegistryRequest {
 
   /// Sends explicit nulls for command/args/env/cwd (switching away from stdio).
   final bool clearCommand;
+
+  /// ACP agents only: `read_only` or `allow_all`.
+  final String? permissions;
   final String? status;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -852,6 +861,7 @@ final class ToolRegistryRequest {
       if (env != null) 'env': env,
       if (cwd != null) 'cwd': cwd,
     },
+    if (permissions != null) 'permissions': permissions,
     if (status != null) 'status': status,
   };
 }

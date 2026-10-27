@@ -53,7 +53,7 @@ TRANSITIONS: dict[str, frozenset[str]] = {
 }
 # Plain chat frames a hive peer may send us about a task or thread it executes.
 PEER_EVENT_FRAMES = frozenset({
-    "chat.delta", "chat.done", "chat.error", "chat.cancelled", "agui.event",
+    "chat.delta", "chat.done", "chat.error", "chat.cancelled", "agui.event", "chat.tool_call",
     "tool.approval.request", "tool.approval.resolved", "task.status",
     "task.accepted", "task.error", "thread.subscribed",
 })

@@ -32,6 +32,7 @@ from subconscious_engine.client_tools import (
 from subconscious_engine.configuration.models import ModelConfig
 from subconscious_engine.hive.authz import THIN_CLIENT
 from subconscious_engine.locality import is_local_peer
+from subconscious_engine.tool_events import EVENT_TYPE as TOOL_CALL_EVENT
 from subconscious_engine.services.configured_tools import NAME_SEPARATOR, unique_name
 from subconscious_engine.services.skills import (
     NONE_INDEX as NO_SKILLS_INDEX, SkillService, build_skills_index, read_skill_tool, select_skills,
@@ -1298,6 +1299,8 @@ class WebSocketSession:
                     async def agent_event(event: dict[str, Any]) -> None:
                         if event.get("type") == "model.delta":
                             await stream_delta(event.get("delta"))
+                        else:
+                            await self._send_tool_call(turn_id, thread_uuid, event)
 
                     extra: dict[str, Any] = {}
                     if skills_index != NO_SKILLS_INDEX:
@@ -1323,6 +1326,8 @@ class WebSocketSession:
                         )
                         if event.get("type") == "model.delta":
                             await stream_delta(event.get("delta"))
+                        else:
+                            await self._send_tool_call(turn_id, thread_uuid, event)
 
                     result = await graph_engine.run_conscious(
                         config,
@@ -1388,6 +1393,13 @@ class WebSocketSession:
                     self.pending_client_tools.pop(request_id, None)
                     if not future.done():
                         future.cancel()
+
+    async def _send_tool_call(self, turn_id: str, thread_uuid: str, event: dict[str, Any]) -> None:
+        """Forward an agent ``tool.call`` event as a ``chat.tool_call`` frame; other events are ignored."""
+        if event.get("type") != TOOL_CALL_EVENT:
+            return
+        payload = {key: value for key, value in event.items() if key != "type"}
+        await self._send("chat.tool_call", {"thread_uuid": thread_uuid, **payload}, turn_id)
 
     async def _request_approval(self, turn_id: str, thread_uuid: str, call: ToolCallPart) -> bool:
         approval_id = uuid4().hex

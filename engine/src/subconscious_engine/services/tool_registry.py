@@ -22,7 +22,9 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 _HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_TOOL_TYPES = frozenset({"script", "api", "mcp", "cli"})
+_TOOL_TYPES = frozenset({"script", "api", "mcp", "cli", "acp"})
+ACP_PERMISSIONS = frozenset({"read_only", "allow_all"})
+DEFAULT_ACP_PERMISSIONS = "read_only"
 MAX_ARGS = 64
 MAX_ENV = 64
 MAX_STRING = 4096
@@ -190,6 +192,7 @@ class ToolRegistryService:
             auth_type=row.auth_type or ("api_key" if has_auth else None), has_auth_config=has_auth,
             command=config.get("command"), args=config.get("args"), env=config.get("env"),
             cwd=config.get("cwd"), transport=transport,
+            permissions=config.get("permissions") if row.tool_type == "acp" else None,
             oauth_client_id=config.get("oauthClientId") if is_oauth else None,
             oauth_scopes=config.get("oauthScopes") if is_oauth else None,
             oauth_connected=bool(oauth_connected) if is_oauth else None,
@@ -267,8 +270,20 @@ class ToolRegistryService:
                 raise ValueError("A CLI tool requires a command.")
             if env:
                 raise ValueError("Environment variables are not supported for CLI tools.")
+        elif tool_type == "acp":
+            if command is None:
+                raise ValueError("An ACP agent requires a command.")
+            if endpoint is not None or auth_type is not None:
+                raise ValueError("ACP agents run as a local command; endpoints and authentication do not apply.")
         elif has_any:
-            raise ValueError("Command settings are supported only for MCP and CLI tools.")
+            raise ValueError("Command settings are supported only for MCP, CLI and ACP tools.")
+        permissions = cls._normalize(request.permissions)
+        if permissions is not None and tool_type != "acp":
+            raise ValueError("Permissions apply to ACP agents only.")
+        if tool_type == "acp":
+            permissions = (permissions or DEFAULT_ACP_PERMISSIONS).casefold()
+            if permissions not in ACP_PERMISSIONS:
+                raise ValueError("ACP permissions must be read_only or allow_all.")
         if not has_any:
             return json.dumps(oauth, separators=(",", ":")) if oauth else None
         if command is not None and len(command) > MAX_STRING:
@@ -286,8 +301,10 @@ class ToolRegistryService:
                 raise ValueError(f"Invalid environment variable name '{key}'.")
             if len(value) > MAX_STRING:
                 raise ValueError(f"Environment variable '{key}' is too long.")
-        return json.dumps({"command": command, "args": args or None, "env": env or None, "cwd": cwd},
-                          separators=(",", ":"))
+        stored: dict[str, Any] = {"command": command, "args": args or None, "env": env or None, "cwd": cwd}
+        if permissions is not None:
+            stored["permissions"] = permissions
+        return json.dumps(stored, separators=(",", ":"))
 
     @classmethod
     def _endpoint(cls, tool_type: str, value: str | None) -> str | None:
@@ -305,7 +322,7 @@ class ToolRegistryService:
     def _tool_type(cls, value: str | None, fallback: str) -> str:
         result = cls._required(value, fallback, "Tool type").casefold()
         if result not in _TOOL_TYPES:
-            raise ValueError("Tool type must be script, api, mcp, or cli.")
+            raise ValueError("Tool type must be script, api, mcp, cli, or acp.")
         return result
 
     @classmethod

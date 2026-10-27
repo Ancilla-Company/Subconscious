@@ -66,6 +66,8 @@ class ToolRegistryDto(WireModel):
     cwd: str | None = None
     # mcp only: "http" when endpointUrl is set, "stdio" when command is set.
     transport: str | None = None
+    # acp only: "read_only" or "allow_all" (how the agent's own permission requests are answered).
+    permissions: str | None = None
     # authType == "oauth" only: non-secret client settings and whether tokens are stored.
     oauth_client_id: str | None = None
     oauth_scopes: str | None = None
@@ -129,6 +131,7 @@ class UpsertToolRegistryRequest(WireModel):
     env: dict[str, str] | None = None
     cwd: str | None = None
     status: str | None = None
+    permissions: str | None = None
     # authType == "oauth": a pre-registered client (skips dynamic client registration).
     oauth_client_id: str | None = None
     # Write-only; stored encrypted and never returned.

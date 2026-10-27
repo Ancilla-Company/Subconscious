@@ -4,7 +4,7 @@ import os
 from contextvars import ContextVar
 from typing import Any
 from dataclasses import dataclass, replace
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIModel
@@ -16,6 +16,8 @@ from pydantic_ai import (
     Tool, UsageLimits,
 )
 from pydantic_ai.messages import (
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
     PartDeltaEvent,
     TextPart,
     TextPartDelta,
@@ -29,6 +31,9 @@ from pydantic_ai.messages import (
 )
 
 from subconscious_engine.configuration.models import ModelConfig
+from subconscious_engine.tool_events import (
+    COMPLETED, FAILED, IN_PROGRESS, PENDING, TERMINAL_STATUSES, tool_call_event,
+)
 
 
 # Variable setup
@@ -66,6 +71,62 @@ class AgentExecutionResult:
     completion_tokens: int = 0
 
 
+class _ToolCallReporter:
+    """Turns the model stream's tool activity into ``tool.call`` events.
+
+    One reporter lives for a whole ``execute`` call because an approved tool is reported
+    across two model runs: ``pending`` before the question, then ``in_progress`` and a
+    terminal status after the agent resumes. A call reports each status at most once, and
+    nothing after a terminal one.
+    """
+
+    def __init__(self, sink: AgentEventCallback | None, gated: Collection[str] = ()) -> None:
+        self._sink = sink
+        # Tools that need approval: the model stream announces their call before it is
+        # deferred, which must not read as "running".
+        self._gated = frozenset(gated)
+        self._approved: set[str] = set()
+        self._last: dict[str, str] = {}
+        self._titles: dict[str, str] = {}
+
+    async def _emit(self, call_id: str, name: str, status: str, **fields: Any) -> None:
+        if self._sink is None or self._last.get(call_id) == status \
+                or self._last.get(call_id) in TERMINAL_STATUSES:
+            return
+        self._last[call_id] = status
+        event = tool_call_event(tool_call_id=call_id, tool_name=name, status=status,
+                                title=self._titles.get(call_id), **fields)
+        self._titles.setdefault(call_id, event["title"])
+        await self._sink(event)
+
+    async def awaiting_approval(self, call: Any) -> None:
+        await self._emit(call.tool_call_id, call.tool_name, PENDING, arguments=call.args_as_dict())
+
+    def approve(self, call: Any) -> None:
+        self._approved.add(call.tool_call_id)
+
+    async def denied(self, call: Any) -> None:
+        await self._emit(call.tool_call_id, call.tool_name, FAILED, error="The tool call was denied.")
+
+    async def stream_event(self, event: Any) -> None:
+        if isinstance(event, FunctionToolCallEvent):
+            part = event.part
+            if part.tool_name in self._gated and part.tool_call_id not in self._approved:
+                return
+            await self._emit(part.tool_call_id, part.tool_name, IN_PROGRESS,
+                             arguments=part.args_as_dict())
+        elif isinstance(event, FunctionToolResultEvent):
+            result = event.result
+            call_id, name = result.tool_call_id, result.tool_name or "tool"
+            if isinstance(result, RetryPromptPart):
+                await self._emit(call_id, name, FAILED, error=str(result.content))
+            elif getattr(result, "outcome", "success") == "success":
+                await self._emit(call_id, name, COMPLETED, output=result.content)
+            else:
+                await self._emit(call_id, name, FAILED, output=result.content,
+                                 error=f"The tool call {getattr(result, 'outcome', 'failed')}.")
+
+
 class AgentManager:
     async def execute(self, config: ModelConfig, prompt: str | Sequence[Any],
                       history: Sequence[tuple[str, str]], tools: Sequence[Tool[Any]],
@@ -94,6 +155,8 @@ class AgentManager:
         prompt_tokens = 0
         completion_tokens = 0
         usage_limits = UsageLimits(request_limit=None, tool_calls_limit=None)
+        reporter = _ToolCallReporter(
+            event_sink, [tool.name for tool in tools if getattr(tool, "requires_approval", False)])
         while True:
             run_arguments = {
                 "message_history": messages,
@@ -112,6 +175,8 @@ class AgentManager:
                         })
                     elif isinstance(event, AgentRunResultEvent):
                         result = event.result
+                    else:
+                        await reporter.stream_event(event)
                 if result is None:
                     raise RuntimeError("The model stream ended without a final result.")
             usage = result.usage()
@@ -128,7 +193,12 @@ class AgentManager:
             requests = result.output
             deferred = DeferredToolResults()
             for call in requests.approvals:
+                await reporter.awaiting_approval(call)
                 approved = await approve(call)
+                if approved:
+                    reporter.approve(call)
+                else:
+                    await reporter.denied(call)
                 deferred.approvals[call.tool_call_id] = approved
                 records.append({"toolName": call.tool_name, "input": call.args_as_dict(),
                                 "approval": "approved" if approved else "denied"})
