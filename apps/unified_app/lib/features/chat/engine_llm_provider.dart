@@ -181,6 +181,9 @@ final class EngineLlmProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True while [message] is still being written by a running turn.
+  bool isStreaming(EngineChatMessage message) => _live.contains(message);
+
   Iterable<EngineChatMessage> get history =>
       List<EngineChatMessage>.unmodifiable(_history);
 

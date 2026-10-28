@@ -38,14 +38,14 @@ final class FileTabButton extends StatelessWidget {
           color: selected
               ? colors.secondaryContainer
               : colors.surfaceContainerLow,
-          borderRadius: AppRadii.md,
+          borderRadius: AppRadii.xs,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,
             child: SizedBox(
               height: 34,
               child: Padding(
-                padding: const EdgeInsets.only(left: 10, right: 4),
+                padding: const EdgeInsets.only(left: 10, right: 5),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
@@ -88,6 +88,7 @@ final class FileTabButton extends StatelessWidget {
                       onPressed: onClose,
                       icon: FluentIcons.dismiss_20_regular,
                       iconSize: 14,
+                      size: AppIconButtonSize.small,
                     ),
                   ],
                 ),

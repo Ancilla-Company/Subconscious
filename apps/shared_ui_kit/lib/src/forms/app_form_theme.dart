@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../themes/app_button_theme.dart';
+
 /// The app's one template for form fields, buttons and popups: flat, compact
 /// controls with 3px corners. It is identical on every platform (Android, iOS,
 /// web, Windows, macOS, Linux), so a screen looks the same wherever it runs.
@@ -12,9 +14,6 @@ ThemeData appFormTheme(BuildContext context) {
   final ThemeData base = Theme.of(context);
   final ColorScheme colors = base.colorScheme;
   const BorderRadius radius = BorderRadius.all(Radius.circular(3));
-  const RoundedRectangleBorder buttonShape = RoundedRectangleBorder(
-    borderRadius: radius,
-  );
   return base.copyWith(
     visualDensity: VisualDensity.compact,
     inputDecorationTheme: InputDecorationTheme(
@@ -52,30 +51,12 @@ ThemeData appFormTheme(BuildContext context) {
         color: colors.onSurfaceVariant.withValues(alpha: 0.33),
       ),
     ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(shape: buttonShape),
-    ),
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        shape: buttonShape,
-        side: BorderSide(color: colors.outlineVariant),
-      ),
-    ),
-    textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(shape: buttonShape),
-    ),
-    iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(shape: buttonShape),
-    ),
-    segmentedButtonTheme: SegmentedButtonThemeData(
-      style: ButtonStyle(
-        shape: const WidgetStatePropertyAll<OutlinedBorder>(buttonShape),
-        side: WidgetStatePropertyAll<BorderSide>(
-          BorderSide(color: colors.outlineVariant),
-        ),
-        visualDensity: VisualDensity.compact,
-      ),
-    ),
+    // Buttons come from the one definition in the kit (see AppButtonStyles).
+    filledButtonTheme: AppButtonStyles.filled(),
+    outlinedButtonTheme: AppButtonStyles.outlined(colors),
+    textButtonTheme: AppButtonStyles.text(),
+    iconButtonTheme: AppButtonStyles.icon(),
+    segmentedButtonTheme: AppButtonStyles.segmented(colors),
     dialogTheme: DialogThemeData(
       backgroundColor: colors.surface,
       surfaceTintColor: Colors.transparent,

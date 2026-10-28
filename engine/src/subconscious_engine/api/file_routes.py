@@ -164,6 +164,7 @@ async def move_path(request: Request) -> Response:
                 body.source_path,
                 body.destination_root_index,
                 body.destination_path,
+                body.new_name,
             )
         return json_response(result)
     except (WorkspaceFileError, OSError) as error:

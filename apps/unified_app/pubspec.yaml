@@ -28,6 +28,7 @@ dependencies:
     path: ../shared_ui_kit
   url_launcher: 6.3.2
   window_manager: 0.5.2
+  screen_retriever: 0.2.2
   file_selector: 1.1.0
   record: 7.1.2
   audioplayers: 6.4.0

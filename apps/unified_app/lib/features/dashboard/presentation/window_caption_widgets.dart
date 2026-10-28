@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:async';
+
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -127,9 +129,28 @@ final class PanelVisibilityControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<DashboardPanel> panels = controller.settings.panelOrder;
+    final Widget? chatOnlyButton = controller.supportsChatOnly
+        ? _PanelVisibilityButton(
+            brightness: brightness,
+            visible: controller.chatOnly,
+            visibleIcon: FluentIcons.chat_24_filled,
+            hiddenIcon: FluentIcons.chat_24_regular,
+            panelName: 'chat only',
+            tooltip: controller.chatOnly
+                ? 'Back to the full window'
+                : 'Chat only, always on top',
+            onPressed: () =>
+                unawaited(controller.setChatOnly(!controller.chatOnly)),
+          )
+        : null;
+    // In chat-only mode the other panels are hidden on purpose.
+    if (controller.chatOnly) {
+      return chatOnlyButton ?? const SizedBox.shrink();
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
+        ?chatOnlyButton,
         _PanelVisibilityButton(
           brightness: brightness,
           visible: _isVisible(panels[0]),
@@ -167,8 +188,10 @@ final class _PanelVisibilityButton extends StatelessWidget {
     required this.hiddenIcon,
     required this.panelName,
     required this.onPressed,
+    this.tooltip,
   });
 
+  final String? tooltip;
   final Brightness brightness;
   final bool visible;
   final IconData visibleIcon;
@@ -185,7 +208,7 @@ final class _PanelVisibilityButton extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.08)
         : Colors.black.withValues(alpha: 0.06);
     return Tooltip(
-      message: '${visible ? 'Hide' : 'Show'} $panelName panel',
+      message: tooltip ?? '${visible ? 'Hide' : 'Show'} $panelName panel',
       child: Semantics(
         button: true,
         toggled: visible,

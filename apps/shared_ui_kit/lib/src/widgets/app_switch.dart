@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// The app's rectangular on/off switch: a 40x24 track with a square thumb,
-/// 3px corners, in a 48dp touch target. Operable with Space and Enter.
+/// 3px corners, in a 48dp touch target (32dp when [compact]). Operable with Space and Enter.
 ///
 /// [semanticLabel] names the control for screen readers; a null [onChanged]
 /// disables it.
@@ -11,8 +11,13 @@ final class AppSwitch extends StatelessWidget {
     required this.value,
     required this.onChanged,
     required this.semanticLabel,
+    this.compact = false,
     super.key,
   });
+
+  /// A 32dp tall touch target instead of 48dp, for a switch inside a row of
+  /// 32dp buttons, so it does not make the row taller than its buttons.
+  final bool compact;
 
   final bool value;
   final ValueChanged<bool>? onChanged;
@@ -58,8 +63,9 @@ final class AppSwitch extends StatelessWidget {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: enabled ? toggle : null,
-          child: SizedBox.square(
-            dimension: 48,
+          child: SizedBox(
+            width: 48,
+            height: compact ? 32 : 48,
             child: Center(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),

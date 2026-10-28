@@ -3,9 +3,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 
+import '../../diagnostics/gui_log.dart';
 import '../controller/dashboard_controller.dart';
 import '../controller/shutdown_coordinator.dart';
 import 'window_caption_widgets.dart';
@@ -56,6 +58,8 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
     if (!Platform.isWindows) return;
     windowManager.addListener(this);
     widget.controller.addListener(_onControllerChanged);
+    widget.controller.onEngineQuit = () => unawaited(_closeWindow());
+    widget.controller.chatOnlyWindowHandler = _applyChatOnly;
     _onControllerChanged();
   }
 
@@ -80,44 +84,135 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
     unawaited(_restoreWindowState());
   }
 
+  /// A window position worth restoring: big enough to use, and with its title
+  /// bar on a screen that is still connected. A minimized window reports
+  /// (-32000, -32000); saving that, or a monitor that was unplugged, starts the
+  /// next launch invisible, with the app running and no window to see.
+  Future<bool> _isUsableBounds(Rect bounds) async {
+    final bool sane =
+        bounds.left.isFinite &&
+        bounds.top.isFinite &&
+        bounds.width >= 400 &&
+        bounds.height >= 300 &&
+        bounds.width < 20000 &&
+        bounds.height < 20000;
+    if (!sane) return false;
+    try {
+      final Rect titleBar = Rect.fromLTWH(
+        bounds.left,
+        bounds.top,
+        bounds.width,
+        48,
+      );
+      for (final Display display in await screenRetriever.getAllDisplays()) {
+        final Rect area =
+            (display.visiblePosition ?? Offset.zero) &
+            (display.visibleSize ?? display.size);
+        final Rect overlap = area.intersect(titleBar);
+        if (overlap.width >= 100 && overlap.height >= 24) return true;
+      }
+      return false;
+    } on Object catch (error) {
+      guiLog('Could not read the displays: $error', level: 'WARNING');
+      return bounds.left > -10000 && bounds.top > -10000;
+    }
+  }
+
   Future<void> _restoreWindowState() async {
     _isRestoringWindowState = true;
-    final bool captureInitialBounds = !widget.controller.hasWindowBounds;
+    bool captureInitialBounds = !widget.controller.hasWindowBounds;
     try {
       if (widget.controller.hasWindowBounds) {
-        await windowManager.setBounds(
-          Rect.fromLTWH(
-            widget.controller.windowX!,
-            widget.controller.windowY!,
-            widget.controller.windowWidth!,
-            widget.controller.windowHeight!,
-          ),
+        final Rect saved = Rect.fromLTWH(
+          widget.controller.windowX!,
+          widget.controller.windowY!,
+          widget.controller.windowWidth!,
+          widget.controller.windowHeight!,
         );
+        if (await _isUsableBounds(saved)) {
+          guiLog('Restoring window bounds $saved');
+          await windowManager.setBounds(saved);
+        } else {
+          guiLog(
+            'Saved window bounds $saved are off screen or unusable; '
+            'centring the window instead',
+            level: 'WARNING',
+          );
+          await windowManager.setSize(const Size(1280, 720));
+          await windowManager.center();
+          captureInitialBounds = true;
+        }
       }
       if (widget.controller.windowMaximized) {
         await windowManager.maximize();
       } else if (await windowManager.isMaximized()) {
         await windowManager.unmaximize();
       }
+      if (await windowManager.isMinimized()) await windowManager.restore();
+      if (!await windowManager.isVisible()) {
+        guiLog(
+          'The window was hidden after start-up; showing it',
+          level: 'WARNING',
+        );
+        await windowManager.show();
+      }
       _isMaximized = await windowManager.isMaximized();
       _hasRestoredWindowState = true;
+      guiLog('Window state restored (maximized=$_isMaximized)');
       if (mounted) setState(() {});
+    } on Object catch (error, stack) {
+      guiLogError('Restoring the window state failed', error, stack);
+      try {
+        await windowManager.show();
+      } on Object {
+        // Nothing more can be done.
+      }
     } finally {
       _isRestoringWindowState = false;
     }
     if (captureInitialBounds) await _captureWindowState();
   }
 
+  Rect? _boundsBeforeChatOnly;
+  bool _maximizedBeforeChatOnly = false;
+
+  /// The small, always-on-top chat window and the way back from it.
+  Future<void> _applyChatOnly(bool enabled) async {
+    if (enabled) {
+      _maximizedBeforeChatOnly = await windowManager.isMaximized();
+      if (_maximizedBeforeChatOnly) await windowManager.unmaximize();
+      _boundsBeforeChatOnly = await windowManager.getBounds();
+      await windowManager.setMinimumSize(const Size(320, 360));
+      await windowManager.setSize(const Size(420, 720));
+      await windowManager.setAlwaysOnTop(true);
+      return;
+    }
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setMinimumSize(const Size(800, 560));
+    final Rect? bounds = _boundsBeforeChatOnly;
+    _boundsBeforeChatOnly = null;
+    if (bounds != null) await windowManager.setBounds(bounds);
+    if (_maximizedBeforeChatOnly) await windowManager.maximize();
+  }
+
   Future<void> _captureWindowState() async {
+    // The small chat window is temporary; keep the real size for next time.
+    if (widget.controller.chatOnly) return;
     if (!_hasRestoredWindowState || _isRestoringWindowState || _isClosing) {
       return;
     }
+    // A minimized window reports a position far off screen; keep the last good one.
+    if (await windowManager.isMinimized()) return;
     final bool maximized = await windowManager.isMaximized();
     if (maximized) {
       widget.controller.updateWindowState(windowMaximized: true);
       return;
     }
     final Rect bounds = await windowManager.getBounds();
+    if (!await _isUsableBounds(bounds)) {
+      guiLog('Not saving unusable window bounds $bounds', level: 'WARNING');
+      return;
+    }
     widget.controller.updateWindowState(
       windowX: bounds.left,
       windowY: bounds.top,
@@ -223,6 +318,8 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
     if (Platform.isWindows) {
       windowManager.removeListener(this);
       widget.controller.removeListener(_onControllerChanged);
+      widget.controller.onEngineQuit = null;
+      widget.controller.chatOnlyWindowHandler = null;
     }
     super.dispose();
   }
@@ -240,7 +337,9 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
   @override
   void onWindowMaximize() {
     if (mounted) setState(() => _isMaximized = true);
-    if (_hasRestoredWindowState && !_isRestoringWindowState) {
+    if (_hasRestoredWindowState &&
+        !_isRestoringWindowState &&
+        !widget.controller.chatOnly) {
       widget.controller.updateWindowState(windowMaximized: true);
     }
   }
@@ -253,8 +352,18 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
 
   @override
   void onWindowClose() {
+    guiLog('Window close requested');
     unawaited(_closeWindow());
   }
+
+  @override
+  void onWindowMinimize() => guiLog('Window minimized');
+
+  @override
+  void onWindowRestore() => guiLog('Window restored');
+
+  @override
+  void onWindowFocus() => guiLog('Window focused');
 
   @override
   Widget build(BuildContext context) {

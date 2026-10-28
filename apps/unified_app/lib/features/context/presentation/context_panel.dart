@@ -1,11 +1,12 @@
 import 'dart:async';
 
 import 'package:core_business_logic/core_business_logic.dart';
-import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../dashboard/controller/dashboard_controller.dart';
 import '../../editor/controller/file_gateway.dart' show PreviewKind;
@@ -299,11 +300,6 @@ final class _ThreadsSection extends StatelessWidget {
         'Threads are available when the engine is connected.',
       );
     }
-    if (controller.threadsWorkspace == null) {
-      return const _PanelMessage(
-        'Choose a workspace in the title bar to see its threads.',
-      );
-    }
     if (controller.isLoadingThreads) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
@@ -338,6 +334,10 @@ final class _ThreadsSection extends StatelessWidget {
           label: thread.title?.trim().isNotEmpty ?? false
               ? thread.title!
               : 'Untitled thread',
+          // In the all-workspaces list each thread says where it belongs.
+          subtitle: controller.threadsWorkspace == null
+              ? controller.workspaceName(thread.workspaceUuid)
+              : null,
           onTap: () => controller.selectThread(thread),
           onSelection: onSelection,
         );
@@ -503,10 +503,10 @@ final class _FilesSection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
           child: Text(
             controller.activeWorkspace == null
-                ? 'Select a workspace in Threads to browse its allowed folders.'
+                ? 'Select a workspace in Threads to browse its added folders.'
                 : roots.isEmpty
-                ? 'This workspace has no allowed folders.'
-                : '${roots.length} allowed folder${roots.length == 1 ? '' : 's'}',
+                ? 'This workspace has no added folders.'
+                : '${roots.length} added folder${roots.length == 1 ? '' : 's'}',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -516,9 +516,7 @@ final class _FilesSection extends StatelessWidget {
           child: controller.activeWorkspace == null
               ? const _PanelMessage('No workspace selected.')
               : roots.isEmpty
-              ? const _PanelMessage(
-                  'Add an allowed folder in Workspace settings.',
-                )
+              ? const _PanelMessage('Add a folder in Workspace settings.')
               : ListView(
                   padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
                   children: <Widget>[
@@ -531,6 +529,7 @@ final class _FilesSection extends StatelessWidget {
                         rootIndex: root.index,
                         path: '',
                         label: root.name,
+                        subtitle: root.path,
                         isRoot: true,
                         onSelection: onSelection,
                       ),
@@ -562,6 +561,7 @@ final class _DirectoryNode extends StatefulWidget {
     required this.rootIndex,
     required this.path,
     required this.label,
+    this.subtitle,
     this.isRoot = false,
     this.depth = 0,
     this.onSelection,
@@ -572,6 +572,9 @@ final class _DirectoryNode extends StatefulWidget {
   final int rootIndex;
   final String path;
   final String label;
+
+  /// The folder's full path, shown under the name of a top level folder.
+  final String? subtitle;
   final bool isRoot;
   final int depth;
   final VoidCallback? onSelection;
@@ -664,6 +667,20 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
             size: 16,
           ),
           label: widget.label,
+          subtitle: widget.subtitle,
+          tooltip: widget.subtitle,
+          onSecondaryTapDown: (TapDownDetails details) => unawaited(
+            _showFileTreeMenu(
+              context,
+              widget.controller,
+              details.globalPosition,
+              rootIndex: widget.rootIndex,
+              path: widget.path,
+              isDirectory: true,
+              isRoot: widget.isRoot,
+              name: widget.label,
+            ),
+          ),
           dragData: widget.isRoot || widget.controller.isMovingWorkspaceNode
               ? null
               : _WorkspaceFileTreeDragData(
@@ -747,6 +764,19 @@ final class _DirectoryNodeState extends State<_DirectoryNode> {
                               size: 16,
                             ),
                             label: entry.name,
+                            onSecondaryTapDown: (TapDownDetails details) =>
+                                unawaited(
+                                  _showFileTreeMenu(
+                                    context,
+                                    widget.controller,
+                                    details.globalPosition,
+                                    rootIndex: widget.rootIndex,
+                                    path: entry.relativePath,
+                                    isDirectory: false,
+                                    isRoot: false,
+                                    name: entry.name,
+                                  ),
+                                ),
                             dragData: widget.controller.isMovingWorkspaceNode
                                 ? null
                                 : _WorkspaceFileTreeDragData(
@@ -772,6 +802,9 @@ final class _FileTreeRow extends StatelessWidget {
     required this.leading,
     required this.label,
     this.trailing,
+    this.subtitle,
+    this.tooltip,
+    this.onSecondaryTapDown,
     this.dragData,
     this.canAcceptDrop,
     this.onAcceptDrop,
@@ -784,6 +817,9 @@ final class _FileTreeRow extends StatelessWidget {
   final Widget leading;
   final String label;
   final Widget? trailing;
+  final String? subtitle;
+  final String? tooltip;
+  final GestureTapDownCallback? onSecondaryTapDown;
   final _WorkspaceFileTreeDragData? dragData;
   final bool Function(_WorkspaceFileTreeDragData source)? canAcceptDrop;
   final ValueChanged<_WorkspaceFileTreeDragData>? onAcceptDrop;
@@ -798,6 +834,9 @@ final class _FileTreeRow extends StatelessWidget {
       onTap: onTap,
       leading: leading,
       label: label,
+      subtitle: subtitle,
+      tooltip: tooltip,
+      onSecondaryTapDown: onSecondaryTapDown,
       trailing: trailing,
     );
 
@@ -819,26 +858,39 @@ final class _FileTreeRow extends StatelessWidget {
           );
     final _WorkspaceFileTreeDragData? source = dragData;
     if (source != null) {
-      result = LongPressDraggable<_WorkspaceFileTreeDragData>(
-        data: source,
-        feedback: Material(
-          elevation: 6,
-          borderRadius: const BorderRadius.all(Radius.circular(4)),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 180),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Text(
-                source.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+      final Widget feedback = Material(
+        elevation: 6,
+        borderRadius: AppRadii.sm,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 180),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Text(
+              source.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),
-        childWhenDragging: Opacity(opacity: 0.45, child: result),
-        child: result,
       );
+      // A mouse or pen drags at once; a finger needs a long press so that it
+      // can still scroll the list.
+      final bool touch =
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+      result = touch
+          ? LongPressDraggable<_WorkspaceFileTreeDragData>(
+              data: source,
+              feedback: feedback,
+              childWhenDragging: Opacity(opacity: 0.45, child: result),
+              child: result,
+            )
+          : Draggable<_WorkspaceFileTreeDragData>(
+              data: source,
+              feedback: feedback,
+              childWhenDragging: Opacity(opacity: 0.45, child: result),
+              child: result,
+            );
     }
     return result;
   }
@@ -850,38 +902,17 @@ Future<void> _createWorkspaceFile(
 ) async {
   final List<WorkspaceDirectoryRoot> roots = controller.fileRoots;
   if (roots.isEmpty) return;
-  final ({int rootIndex, String path})? selectedLocation =
-      controller.selectedCreationDirectory;
-  final WorkspaceDirectoryRoot root = roots.firstWhere(
-    (WorkspaceDirectoryRoot candidate) =>
-        candidate.index == selectedLocation?.rootIndex,
-    orElse: () => roots.first,
+  final ({int rootIndex, String path})? request = await _showCreatePathDialog(
+    context,
+    roots,
+    initialLocation: controller.selectedCreationDirectory,
+    isFile: true,
   );
-  final String parentPath = root.index == selectedLocation?.rootIndex
-      ? selectedLocation!.path
-      : '';
+  if (request == null || !context.mounted) return;
   try {
-    final file_selector.FileSaveLocation? location = await file_selector
-        .getSaveLocation(
-          suggestedName: 'new-file.md',
-          initialDirectory: _workspaceAbsolutePath(root.path, parentPath),
-        );
-    if (location == null || !context.mounted) return;
-    final ({int rootIndex, String relativePath})? mapped = _mapWorkspacePath(
-      location.path,
-      roots,
-      requireRelativePath: true,
-    );
-    if (mapped == null) {
-      _showFileActionMessage(
-        context,
-        'Choose a file inside one of this workspace’s allowed folders.',
-      );
-      return;
-    }
     await controller.createFile(
-      rootIndex: mapped.rootIndex,
-      path: mapped.relativePath,
+      rootIndex: request.rootIndex,
+      path: request.path,
     );
   } on Object catch (error) {
     if (context.mounted) {
@@ -898,7 +929,7 @@ Future<void> _createWorkspaceFolder(
   if (roots.isEmpty) return;
   final ({int rootIndex, String path})? selectedLocation =
       controller.selectedCreationDirectory;
-  final ({int rootIndex, String path})? request = await _showCreateFolderDialog(
+  final ({int rootIndex, String path})? request = await _showCreatePathDialog(
     context,
     roots,
     initialLocation: selectedLocation,
@@ -916,10 +947,14 @@ Future<void> _createWorkspaceFolder(
   }
 }
 
-Future<({int rootIndex, String path})?> _showCreateFolderDialog(
+/// Asks where to create a file or folder inside a workspace root. The same
+/// in-app dialog serves both so it matches every other kit dialog, unlike a
+/// native save dialog.
+Future<({int rootIndex, String path})?> _showCreatePathDialog(
   BuildContext context,
   List<WorkspaceDirectoryRoot> roots, {
   ({int rootIndex, String path})? initialLocation,
+  bool isFile = false,
 }) async {
   final TextEditingController pathController = TextEditingController(
     text: initialLocation?.path.isNotEmpty == true
@@ -939,7 +974,7 @@ Future<({int rootIndex, String path})?> _showCreateFolderDialog(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setState) => AppDialog(
-          title: 'New folder',
+          title: isFile ? 'New file' : 'New folder',
           width: 360,
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -963,11 +998,13 @@ Future<({int rootIndex, String path})?> _showCreateFolderDialog(
               ),
               const SizedBox(height: 16),
               AppTextField(
-                label: 'Folder name',
+                label: isFile ? 'File name' : 'Folder name',
                 controller: pathController,
                 autofocus: true,
                 textInputAction: TextInputAction.done,
-                hintText: 'e.g. notes or src/components',
+                hintText: isFile
+                    ? 'e.g. notes.md or docs/readme.md'
+                    : 'e.g. notes or src/components',
                 errorText: validationError,
                 onChanged: (_) {
                   if (validationError != null) {
@@ -980,7 +1017,9 @@ Future<({int rootIndex, String path})?> _showCreateFolderDialog(
                   );
                   if (path == null) {
                     setState(
-                      () => validationError = 'Enter a relative folder name without . or .. segments.',
+                      () => validationError = isFile
+                          ? 'Enter a relative file name without . or .. segments.'
+                          : 'Enter a relative folder name without . or .. segments.',
                     );
                     return;
                   }
@@ -1002,14 +1041,16 @@ Future<({int rootIndex, String path})?> _showCreateFolderDialog(
                 );
                 if (path == null) {
                   setState(
-                    () => validationError = 'Enter a relative folder name without . or .. segments.',
+                    () => validationError = isFile
+                        ? 'Enter a relative file name without . or .. segments.'
+                        : 'Enter a relative folder name without . or .. segments.',
                   );
                   return;
                 }
                 Navigator.of(context)
                     .pop((rootIndex: selectedRoot.index, path: path));
               },
-              child: const Text('Create'),
+              child: Text(isFile ? 'Create file' : 'Create'),
             ),
           ],
         ),
@@ -1034,107 +1075,209 @@ String? _workspaceRelativeFolderPath(String value) {
   return normalized;
 }
 
-/// Returns the absolute directory path to hand to a native file dialog.
-///
-/// Relative paths from the engine always use `/`, while a root path is kept
-/// exactly as the user entered it. Windows' shell rejects any path containing
-/// `/`, and the file dialog plugin then silently ignores the initial directory,
-/// so on Windows the whole path is rewritten with `\`. Other platforms keep the
-/// root untouched because `\` is a valid file name character there.
-String _workspaceAbsolutePath(String rootPath, String relativePath) {
-  final bool windows = defaultTargetPlatform == TargetPlatform.windows;
-  final String separator = windows ? r'\' : '/';
-  final String root = windows ? rootPath.replaceAll('/', r'\') : rootPath;
-  if (relativePath.isEmpty) return root;
-  final String relative = windows
-      ? relativePath.replaceAll('/', r'\')
-      : relativePath;
-  return root.endsWith(separator)
-      ? '$root$relative'
-      : '$root$separator$relative';
+enum _FileTreeAction { openInExplorer, rename, copyPath }
+
+/// Whether a file manager can show the engine's folders: only on a desktop
+/// app, where the engine runs on the same machine.
+bool get _canOpenInFileExplorer =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.linux);
+
+/// The right click menu of a file or folder in the file tree.
+Future<void> _showFileTreeMenu(
+  BuildContext context,
+  DashboardController controller,
+  Offset position, {
+  required int rootIndex,
+  required String path,
+  required bool isDirectory,
+  required bool isRoot,
+  required String name,
+}) async {
+  final _FileTreeAction? action = await showAppContextMenu<_FileTreeAction>(
+    context: context,
+    position: position,
+    items: <AppMenuItem<_FileTreeAction>>[
+      if (_canOpenInFileExplorer)
+        AppMenuItem<_FileTreeAction>(
+          value: _FileTreeAction.openInExplorer,
+          label: isDirectory
+              ? 'Open in file explorer'
+              : 'Show in file explorer',
+          icon: FluentIcons.folder_open_20_regular,
+        ),
+      if (!isRoot)
+        const AppMenuItem<_FileTreeAction>(
+          value: _FileTreeAction.rename,
+          label: 'Rename…',
+          icon: FluentIcons.rename_20_regular,
+        ),
+      const AppMenuItem<_FileTreeAction>(
+        value: _FileTreeAction.copyPath,
+        label: 'Copy path',
+        icon: FluentIcons.copy_20_regular,
+      ),
+    ],
+  );
+  if (action == null || !context.mounted) return;
+  switch (action) {
+    case _FileTreeAction.openInExplorer:
+      await _openInFileExplorer(
+        context,
+        controller,
+        rootIndex: rootIndex,
+        path: path,
+        isDirectory: isDirectory,
+      );
+    case _FileTreeAction.rename:
+      await _renameWorkspaceNode(
+        context,
+        controller,
+        rootIndex: rootIndex,
+        path: path,
+        isDirectory: isDirectory,
+        name: name,
+      );
+    case _FileTreeAction.copyPath:
+      final String? absolute = controller.absoluteWorkspacePath(
+        rootIndex,
+        path,
+      );
+      if (absolute == null) return;
+      await Clipboard.setData(ClipboardData(text: absolute));
+      if (context.mounted) _showFileActionMessage(context, 'Path copied');
+  }
 }
 
-({int rootIndex, String relativePath})? _mapWorkspacePath(
-  String selectedPath,
-  List<WorkspaceDirectoryRoot> roots, {
-  required bool requireRelativePath,
-}) {
-  final String? selected = _normalizeAbsolutePath(selectedPath);
-  if (selected == null) return null;
-  final bool ignoreCase = defaultTargetPlatform == TargetPlatform.windows;
-  final String comparableSelected = ignoreCase
-      ? selected.toLowerCase()
-      : selected;
-  ({int rootIndex, String relativePath, int rootLength})? bestMatch;
-  for (final WorkspaceDirectoryRoot root in roots) {
-    final String? normalizedRoot = _normalizeAbsolutePath(root.path);
-    if (normalizedRoot == null) continue;
-    final String comparableRoot = ignoreCase
-        ? normalizedRoot.toLowerCase()
-        : normalizedRoot;
-    final String prefix = comparableRoot.endsWith('/')
-        ? comparableRoot
-        : '$comparableRoot/';
-    final String? relativePath;
-    if (comparableSelected == comparableRoot) {
-      relativePath = '';
-    } else if (comparableSelected.startsWith(prefix)) {
-      relativePath = selected.substring(prefix.length);
-    } else {
-      relativePath = null;
+Future<void> _openInFileExplorer(
+  BuildContext context,
+  DashboardController controller, {
+  required int rootIndex,
+  required String path,
+  required bool isDirectory,
+}) async {
+  final String? absolute = controller.absoluteWorkspacePath(rootIndex, path);
+  if (absolute == null) return;
+  // A file is shown by opening the folder that holds it.
+  final String folder = isDirectory
+      ? absolute
+      : _parentOfAbsolutePath(absolute);
+  try {
+    if (!await launchUrl(Uri.directory(folder))) {
+      throw StateError('The file explorer could not be opened.');
     }
-    if (relativePath == null ||
-        (requireRelativePath && relativePath.isEmpty) ||
-        (bestMatch != null && bestMatch.rootLength >= normalizedRoot.length)) {
-      continue;
+  } on Object catch (error) {
+    if (context.mounted) {
+      _showFileActionMessage(
+        context,
+        "Couldn't open the file explorer: $error",
+      );
     }
-    bestMatch = (
-      rootIndex: root.index,
-      relativePath: relativePath,
-      rootLength: normalizedRoot.length,
+  }
+}
+
+String _parentOfAbsolutePath(String path) {
+  final int cut = path.lastIndexOf(RegExp(r'[\\/]'));
+  return cut <= 0 ? path : path.substring(0, cut);
+}
+
+Future<void> _renameWorkspaceNode(
+  BuildContext context,
+  DashboardController controller, {
+  required int rootIndex,
+  required String path,
+  required bool isDirectory,
+  required String name,
+}) async {
+  final String? newName = await _showRenameDialog(
+    context,
+    name: name,
+    isDirectory: isDirectory,
+  );
+  if (newName == null || newName == name || !context.mounted) return;
+  final Object? failure = await controller.renameWorkspaceNode(
+    rootIndex: rootIndex,
+    path: path,
+    isDirectory: isDirectory,
+    newName: newName,
+  );
+  if (failure != null && context.mounted) {
+    _showFileActionMessage(context, "Couldn't rename: $failure");
+  }
+}
+
+Future<String?> _showRenameDialog(
+  BuildContext context, {
+  required String name,
+  required bool isDirectory,
+}) async {
+  final TextEditingController nameController = TextEditingController(
+    text: name,
+  );
+  // Select the name without its extension, as file managers do.
+  final int dot = name.lastIndexOf('.');
+  nameController.selection = TextSelection(
+    baseOffset: 0,
+    extentOffset: !isDirectory && dot > 0 ? dot : name.length,
+  );
+  String? validationError;
+  String? validate(String value) {
+    final String trimmed = value.trim();
+    if (trimmed.isEmpty ||
+        trimmed == '.' ||
+        trimmed == '..' ||
+        RegExp(r'[\\/:*?"<>|]').hasMatch(trimmed)) {
+      return 'Enter a name without slashes or any of : * ? " < > |';
+    }
+    return null;
+  }
+
+  try {
+    return await showAppDialog<String>(
+      context: context,
+      builder: (BuildContext context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setState) {
+          void submit() {
+            final String? problem = validate(nameController.text);
+            if (problem != null) {
+              setState(() => validationError = problem);
+              return;
+            }
+            Navigator.of(context).pop(nameController.text.trim());
+          }
+
+          return AppDialog(
+            title: isDirectory ? 'Rename folder' : 'Rename file',
+            width: 360,
+            content: AppTextField(
+              label: 'Name',
+              controller: nameController,
+              autofocus: true,
+              textInputAction: TextInputAction.done,
+              errorText: validationError,
+              onChanged: (_) {
+                if (validationError != null) {
+                  setState(() => validationError = null);
+                }
+              },
+              onSubmitted: (_) => submit(),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(onPressed: submit, child: const Text('Rename')),
+            ],
+          );
+        },
+      ),
     );
+  } finally {
+    nameController.dispose();
   }
-  if (bestMatch == null) return null;
-  return (rootIndex: bestMatch.rootIndex, relativePath: bestMatch.relativePath);
-}
-
-String? _normalizeAbsolutePath(String rawPath) {
-  final String value = rawPath.trim().replaceAll('\\', '/');
-  final RegExp drivePattern = RegExp(r'^[A-Za-z]:/');
-  final bool isDrive = drivePattern.hasMatch(value);
-  final bool isUnc = value.startsWith('//');
-  final bool isPosix = value.startsWith('/');
-  if (value.isEmpty || (!isDrive && !isUnc && !isPosix)) return null;
-
-  final String prefix;
-  final String remainder;
-  final int protectedSegments;
-  if (isDrive) {
-    prefix = '${value.substring(0, 2)}/';
-    remainder = value.substring(3);
-    protectedSegments = 0;
-  } else if (isUnc) {
-    prefix = '//';
-    remainder = value.substring(2);
-    protectedSegments = 2;
-  } else {
-    prefix = '/';
-    remainder = value.substring(1);
-    protectedSegments = 0;
-  }
-
-  final List<String> segments = <String>[];
-  for (final String segment in remainder.split('/')) {
-    if (segment.isEmpty || segment == '.') continue;
-    if (segment == '..') {
-      if (segments.length <= protectedSegments) return null;
-      segments.removeLast();
-    } else {
-      segments.add(segment);
-    }
-  }
-  if (isUnc && segments.length < protectedSegments) return null;
-  return segments.isEmpty ? prefix : '$prefix${segments.join('/')}';
 }
 
 EdgeInsets _panelToastMargin(BuildContext context) {

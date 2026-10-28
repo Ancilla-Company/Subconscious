@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../tokens/app_radii.dart';
+
 /// Visual size of an [AppIconButton].
 enum AppIconButtonSize {
+  /// 24 dp, for a control inside another control, such as the close button of
+  /// a tab. Leaves room above and below it in a 34 dp tab.
+  small(24),
+
   /// 32 dp, for dense desktop toolbars and panel headers.
   compact(32),
 
@@ -40,9 +46,7 @@ ButtonStyle appIconButtonStyle(
     fixedSize: Size.square(dimension),
     padding: EdgeInsets.zero,
     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.all(Radius.circular(3)),
-    ),
+    shape: const RoundedRectangleBorder(borderRadius: AppRadii.xs),
   );
 }
 
@@ -60,7 +64,7 @@ final class AppIconButton extends StatelessWidget {
     this.selected = false,
     this.size = AppIconButtonSize.compact,
     this.minTouchTarget,
-    this.iconSize = 20,
+    this.iconSize,
     this.busy = false,
     this.destructive = false,
     this.outlined = false,
@@ -85,7 +89,10 @@ final class AppIconButton extends StatelessWidget {
 
   /// Minimum width and height of the tappable area; null uses the [size].
   final double? minTouchTarget;
-  final double iconSize;
+
+  /// Glyph size. Null picks the kit default: 17 for an [outlined] button (it
+  /// sits beside a field) and 20 for a flat toolbar button.
+  final double? iconSize;
 
   /// Replaces the icon with a small spinner while work is in progress.
   final bool busy;
@@ -100,6 +107,7 @@ final class AppIconButton extends StatelessWidget {
       size.dimension,
       minTouchTarget ?? 0,
     ].reduce((double a, double b) => a > b ? a : b);
+    final double glyph = iconSize ?? (outlined ? 17 : 20);
     return SizedBox.square(
       dimension: dimension,
       child: IconButton(
@@ -111,10 +119,10 @@ final class AppIconButton extends StatelessWidget {
         isSelected: selected,
         tooltip: tooltip,
         onPressed: onPressed,
-        icon: busy ? _spinner() : Icon(icon, size: iconSize),
+        icon: busy ? _spinner(glyph) : Icon(icon, size: glyph),
         selectedIcon: busy
-            ? _spinner()
-            : Icon(selectedIcon ?? icon, size: iconSize),
+            ? _spinner(glyph)
+            : Icon(selectedIcon ?? icon, size: glyph),
         style: IconButton.styleFrom(
           backgroundColor: selected
               ? colors.secondaryContainer
@@ -129,16 +137,14 @@ final class AppIconButton extends StatelessWidget {
           side: outlined ? BorderSide(color: colors.outlineVariant) : null,
           minimumSize: Size.square(dimension),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(3)),
-          ),
+          shape: const RoundedRectangleBorder(borderRadius: AppRadii.xs),
         ),
       ),
     );
   }
 
-  Widget _spinner() => SizedBox.square(
-    dimension: iconSize - 6,
+  Widget _spinner(double glyph) => SizedBox.square(
+    dimension: glyph - 6,
     child: const CircularProgressIndicator(strokeWidth: 2),
   );
 }

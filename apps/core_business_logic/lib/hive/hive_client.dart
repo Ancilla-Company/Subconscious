@@ -247,7 +247,9 @@ final class HiveClient {
       relay: RelayManager(identity: self, directory: dir, sender: signals),
       relayEnabled: () async => _wsRelayEnabled,
       iceProvider: () async {
-        final Map<String, dynamic> config = await hiveApi.iceConfig(self.nodeId);
+        final Map<String, dynamic> config = await hiveApi.iceConfig(
+          self.nodeId,
+        );
         _wsRelayEnabled = config['ws_relay_enabled'] == true;
         final Object? servers = config['ice_servers'];
         return <Map<String, dynamic>>[
@@ -308,7 +310,11 @@ final class HiveClient {
     }
   }
 
-  Future<void> _register(HiveApi hiveApi, NodeIdentity self, String userId) async {
+  Future<void> _register(
+    HiveApi hiveApi,
+    NodeIdentity self,
+    String userId,
+  ) async {
     await hiveApi.register(<String, dynamic>{
       'public_key': self.publicKeyB64u,
       'kind': 'thin',
@@ -382,8 +388,11 @@ final class HiveClient {
               'offline.'
         : null;
     if (problem != null) {
-      developer.log('Refresh: this device is not online: $problem',
-          name: 'hive', level: 900);
+      developer.log(
+        'Refresh: this device is not online: $problem',
+        name: 'hive',
+        level: 900,
+      );
       // ignore: avoid_print
       print('hive: Refresh: this device is not online: $problem');
     }
@@ -449,6 +458,14 @@ final class HiveClient {
     await api?.revoke(node.id);
     await connector?.closePeer(node.id);
     await refreshDirectory();
+  }
+
+  /// Closes the link to [nodeId] so the next [connectTo] builds a new one.
+  ///
+  /// A link whose transport died silently (a phone that slept, a network that
+  /// changed) still reports itself open, and [connectTo] would hand it back.
+  Future<void> dropLink(String nodeId) async {
+    await connector?.closePeer(nodeId);
   }
 
   /// Opens (or reuses) a verified link to [nodeId].

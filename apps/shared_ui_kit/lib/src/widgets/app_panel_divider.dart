@@ -4,12 +4,19 @@ import 'package:flutter/material.dart';
 /// `outlineVariant` rule in the middle. Reports horizontal drags through
 /// [onDragUpdate]; with a null callback it is a plain, non-interactive rule.
 final class AppPanelDivider extends StatelessWidget {
-  const AppPanelDivider({this.onDragUpdate, super.key});
+  const AppPanelDivider({
+    this.onDragStart,
+    this.onDragUpdate,
+    this.onDragEnd,
+    super.key,
+  });
 
   /// Width of the handle in logical pixels.
   static const double width = 5;
 
+  final GestureDragStartCallback? onDragStart;
   final GestureDragUpdateCallback? onDragUpdate;
+  final GestureDragEndCallback? onDragEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +44,10 @@ final class AppPanelDivider extends StatelessWidget {
       cursor: SystemMouseCursors.resizeColumn,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart: onDragStart,
         onHorizontalDragUpdate: onDragUpdate,
+        onHorizontalDragEnd: onDragEnd,
+        onHorizontalDragCancel: () => onDragEnd?.call(DragEndDetails()),
         child: handle,
       ),
     );

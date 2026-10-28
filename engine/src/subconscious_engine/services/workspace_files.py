@@ -202,12 +202,13 @@ class WorkspaceFileService:
         source_path: str,
         destination_root_index: int,
         destination_path: str,
+        new_name: str | None = None,
     ) -> WorkspaceFileEntryDto:
         if source_root_index != destination_root_index:
             raise WorkspaceFileError(400, "Moving between workspace roots is not supported.")
         root = await self.root(workspace_uuid, source_root_index)
         return await asyncio.to_thread(
-            self._move_sync, root, source_path, destination_path
+            self._move_sync, root, source_path, destination_path, new_name
         )
 
     def _list_sync(self, root: Path, relative_path: str | None) -> builtins.list[WorkspaceFileEntryDto]:
@@ -467,15 +468,25 @@ class WorkspaceFileService:
         return WorkspaceFileEntryDto(name=directory.name, relative_path=directory.relative_to(root).as_posix(), is_directory=True)
 
     def _move_sync(
-        self, root: Path, source_path: str, destination_path: str
+        self, root: Path, source_path: str, destination_path: str, new_name: str | None = None
     ) -> WorkspaceFileEntryDto:
         source = self._existing(root, source_path, allow_root=False)
         destination = self._existing(root, destination_path or None, allow_root=True)
         self._ensure_existing_directory(destination)
-        target = destination / source.name
+        name = source.name
+        if new_name is not None:
+            name = new_name.strip()
+            if (not name or name in (".", "..") or any(c in name for c in '/\\:*?"<>|')
+                    or name.endswith((" ", ".")) or name.endswith(TEMP_SUFFIX)):
+                raise WorkspaceFileError(400, "That is not a valid file or folder name.")
+        target = destination / name
         self._ensure_within(root, target)
-        if target == source:
-            raise WorkspaceFileError(400, "The source is already in the destination directory.")
+        if target == source and name == source.name:
+            raise WorkspaceFileError(
+                400,
+                "The source is already in the destination directory." if new_name is None
+                else "The new name is the same as the current name.",
+            )
         if source.is_dir():
             try:
                 target.relative_to(source)
@@ -486,7 +497,9 @@ class WorkspaceFileService:
                 raise WorkspaceFileError(
                     400, "A directory cannot be moved into itself or one of its children."
                 )
-        if target.exists() or target.is_symlink():
+        # A change of letter case alone names the same entry on Windows; that is a rename.
+        same_entry = os.path.normcase(str(target)) == os.path.normcase(str(source))
+        if not same_entry and (target.exists() or target.is_symlink()):
             raise WorkspaceFileError(409, "A file or directory already exists at the destination.")
         os.replace(source, target)
         return WorkspaceFileEntryDto(

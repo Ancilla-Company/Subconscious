@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../editor/presentation/markdown/markdown_preview.dart';
+import '../../editor/presentation/markdown/streaming_markdown.dart';
 import '../../hive/executor_selection.dart';
 import '../../tools/presentation/tool_policy_list.dart';
 import '../../voice/voice_controller.dart';
@@ -65,8 +66,12 @@ final class EngineChatPanel extends StatefulWidget {
     this.title,
     this.draftToolsConfig,
     this.executors,
+    this.greetingName,
     super.key,
   });
+
+  /// Who the empty thread greets by name; null shows a plain prompt.
+  final String? greetingName;
 
   /// Where tasks can run. When null (no hive) the picker is not shown.
   final ExecutorDirectory? executors;
@@ -714,7 +719,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                         ),
                       )
                     : messages.isEmpty
-                    ? const _EmptyChat()
+                    ? _EmptyChat(name: widget.greetingName)
                     : Scrollbar(
                         controller: _scrollController,
                         child: SelectionArea(
@@ -747,6 +752,9 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                                       : null,
                                   isSpeaking:
                                       _voice.speakingKey == messages[index],
+                                  streaming: widget.provider.isStreaming(
+                                    messages[index],
+                                  ),
                                 ),
                           ),
                         ),
@@ -915,19 +923,52 @@ final class _ChatHeader extends StatelessWidget {
 }
 
 final class _EmptyChat extends StatelessWidget {
-  const _EmptyChat();
+  const _EmptyChat({this.name});
+
+  /// The user's first name, when known.
+  final String? name;
+
+  /// A greeting for the time of day.
+  static String greeting(DateTime now, String? name) {
+    final String period = now.hour < 5
+        ? 'Hello'
+        : now.hour < 12
+        ? 'Good morning'
+        : now.hour < 18
+        ? 'Good afternoon'
+        : 'Good evening';
+    final String who = name?.trim() ?? '';
+    return who.isEmpty ? period : '$period, $who';
+  }
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(20),
-      child: Text(
-        'Ask anything…',
-        style: Theme.of(context).textTheme.bodySmall
-            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = theme.colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              greeting(DateTime.now(), name),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'What would you like to work on?',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 final class _MessageBubble extends StatelessWidget {
@@ -936,8 +977,13 @@ final class _MessageBubble extends StatelessWidget {
     this.timestamp,
     this.onSpeak,
     this.isSpeaking = false,
+    this.streaming = false,
     this.minTouchTarget,
   });
+
+  /// True while the reply is still arriving; its open markdown is closed for
+  /// display so it is formatted as it streams.
+  final bool streaming;
 
   /// Reads the message aloud; null when no text-to-speech model is set up.
   final VoidCallback? onSpeak;
@@ -962,7 +1008,11 @@ final class _MessageBubble extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         if (isAssistant)
-          MarkdownPreview(text: text, embedded: true, debounce: Duration.zero)
+          MarkdownPreview(
+            text: streaming ? completeStreamingMarkdown(text) : text,
+            embedded: true,
+            debounce: Duration.zero,
+          )
         else
           Text.rich(
             _withReferencePills(
@@ -1058,11 +1108,21 @@ final class _MessageBubble extends StatelessWidget {
   }
 }
 
-final class _ToolApprovalCard extends StatelessWidget {
+final class _ToolApprovalCard extends StatefulWidget {
   const _ToolApprovalCard({required this.request, required this.onDecision});
 
   final ToolApprovalRequest request;
   final ValueChanged<bool>? onDecision;
+
+  @override
+  State<_ToolApprovalCard> createState() => _ToolApprovalCardState();
+}
+
+final class _ToolApprovalCardState extends State<_ToolApprovalCard> {
+  /// Longest value shown on one row before it is cut with an ellipsis.
+  static const int _valueLimit = 160;
+
+  bool _showAll = false;
 
   /// The operation as shown to the user ('execute' reads as "Run").
   static String _operationLabel(String operation) => switch (operation) {
@@ -1073,8 +1133,106 @@ final class _ToolApprovalCard extends StatelessWidget {
     _ => operation,
   };
 
+  static String _describe(Object? value) {
+    final String text = value is String ? value : jsonEncode(value);
+    return text.length <= _valueLimit
+        ? text
+        : '${text.substring(0, _valueLimit)}…';
+  }
+
+  @override
+  void didUpdateWidget(_ToolApprovalCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A different request starts collapsed again.
+    if (oldWidget.request.approvalId != widget.request.approvalId) {
+      _showAll = false;
+    }
+  }
+
+  /// One line that says what is being asked, shown while collapsed.
+  static String _summary(Map<String, dynamic> arguments) {
+    if (arguments.isEmpty) return 'no arguments';
+    return arguments.entries
+        .map(
+          (MapEntry<String, dynamic> entry) =>
+              '${entry.key}: ${_describe(entry.value)}',
+        )
+        .join(', ');
+  }
+
+  /// Every argument on its own line, plus what approving covers.
+  Widget _details(BuildContext context, ColorScheme colors) {
+    final TextTheme textTheme = Theme.of(context).textTheme;
+    final List<MapEntry<String, dynamic>> entries = widget
+        .request
+        .arguments
+        .entries
+        .toList(growable: false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (entries.isEmpty)
+          Text(
+            'No arguments.',
+            style: textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+          )
+        else
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 160),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.surface.withValues(alpha: 0.55),
+                borderRadius: AppRadii.xs,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(8),
+                child: SelectionArea(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      for (final MapEntry<String, dynamic> entry in entries)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text.rich(
+                            TextSpan(
+                              children: <InlineSpan>[
+                                TextSpan(
+                                  text: '${entry.key}: ',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: entry.value is String
+                                      ? entry.value as String
+                                      : jsonEncode(entry.value),
+                                ),
+                              ],
+                            ),
+                            style: textTheme.bodySmall,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        const SizedBox(height: 6),
+        Text(
+          'Approve once runs this call only; you are asked again next time. '
+          'Deny stops it and tells the assistant it was refused.',
+          style: textTheme.labelSmall,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final ToolApprovalRequest request = widget.request;
+    final ValueChanged<bool>? onDecision = widget.onDecision;
+    final ColorScheme colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
       child: AppBanner(
@@ -1093,15 +1251,20 @@ final class _ToolApprovalCard extends StatelessWidget {
         title: 'Approval required: ${request.toolName}',
         message:
             '${_operationLabel(request.operation)}: '
-            '${jsonEncode(request.arguments)}',
-        messageMaxLines: 3,
+            '${_summary(request.arguments)}',
+        messageMaxLines: _showAll ? 1 : 2,
+        content: _showAll ? _details(context, colors) : null,
         actions: <Widget>[
           TextButton(
-            onPressed: onDecision == null ? null : () => onDecision!(false),
+            onPressed: () => setState(() => _showAll = !_showAll),
+            child: Text(_showAll ? 'Hide details' : 'Details'),
+          ),
+          TextButton(
+            onPressed: onDecision == null ? null : () => onDecision(false),
             child: const Text('Deny'),
           ),
           FilledButton(
-            onPressed: onDecision == null ? null : () => onDecision!(true),
+            onPressed: onDecision == null ? null : () => onDecision(true),
             child: const Text('Approve once'),
           ),
         ],
@@ -1435,7 +1598,7 @@ final class _Composer extends StatelessWidget {
                       : null,
                 ),
                 if (voice.canDictate) ...<Widget>[
-                  const SizedBox(width: 2),
+                  AppSpacing.controlGap,
                   _DictationButton(
                     state: voice.dictation,
                     enabled: enabled && voice.realtime == RealtimeState.off,
@@ -1444,7 +1607,7 @@ final class _Composer extends StatelessWidget {
                   ),
                 ],
                 if (voice.canRealtime) ...<Widget>[
-                  const SizedBox(width: 2),
+                  AppSpacing.controlGap,
                   AppIconButton(
                     tooltip: voice.realtime == RealtimeState.off
                         ? 'Talk (realtime voice)'
@@ -1456,7 +1619,7 @@ final class _Composer extends StatelessWidget {
                     onPressed: enabled ? onToggleRealtime : null,
                   ),
                 ],
-                const SizedBox(width: 6),
+                AppSpacing.controlGap,
                 Expanded(
                   child: SizedBox(
                     height: minTouchTarget == null || minTouchTarget! < 32
@@ -1522,10 +1685,10 @@ final class _Composer extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                AppSpacing.controlGap,
                 if (executorPicker case final Widget picker) ...<Widget>[
                   picker,
-                  const SizedBox(width: 4),
+                  AppSpacing.controlGap,
                 ],
                 AppIconButton(
                   tooltip: !enabled
@@ -1538,7 +1701,7 @@ final class _Composer extends StatelessWidget {
                   onPressed: enabled ? onSend : null,
                 ),
                 if (isSending) ...<Widget>[
-                  const SizedBox(width: 4),
+                  AppSpacing.controlGap,
                   AppIconButton(
                     tooltip: 'Stop',
                     icon: FluentIcons.stop_20_regular,
@@ -2110,22 +2273,18 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
         ),
         if (widget.threadUuid case final String threadUuid) ...<Widget>[
           const AppFieldLabel('Thread UUID'),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: AppFormTheme(
-                  child: AppTextField(
-                    key: ValueKey<String>(threadUuid),
-                    initialValue: threadUuid,
-                    readOnly: true,
-                    height: 32,
-                  ),
-                ),
+          AppFieldRow(
+            field: AppFormTheme(
+              child: AppTextField(
+                key: ValueKey<String>(threadUuid),
+                initialValue: threadUuid,
+                readOnly: true,
+                height: 32,
               ),
-              const SizedBox(width: 8),
+            ),
+            actions: <Widget>[
               AppIconButton(
                 outlined: true,
-                iconSize: 17,
                 tooltip: 'Copy thread UUID',
                 icon: FluentIcons.copy_20_regular,
                 onPressed: () async {

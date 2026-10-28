@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../tokens/app_colors.dart';
+import 'app_button_theme.dart';
 
 /// Shared Material theme assembled from raw design tokens.
 abstract final class AppTheme {
@@ -37,6 +38,12 @@ abstract final class AppTheme {
     return ThemeData(
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
+      // Every button in the app is a kit button, wherever it is placed.
+      filledButtonTheme: AppButtonStyles.filled(),
+      outlinedButtonTheme: AppButtonStyles.outlined(colorScheme),
+      textButtonTheme: AppButtonStyles.text(),
+      iconButtonTheme: AppButtonStyles.icon(),
+      segmentedButtonTheme: AppButtonStyles.segmented(colorScheme),
       useMaterial3: true,
     );
   }

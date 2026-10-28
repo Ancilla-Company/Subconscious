@@ -75,6 +75,17 @@ final class AccountController extends ChangeNotifier {
         : '$displayName (${currentUser.email})';
   }
 
+  /// The name used to greet the signed-in user: the first word of the display
+  /// name, else the part of the email before the `@`. Null when signed out.
+  String? get greetingName {
+    final AccountUser? currentUser = _user;
+    if (currentUser == null) return null;
+    final String displayName = currentUser.displayName?.trim() ?? '';
+    if (displayName.isNotEmpty) return displayName.split(RegExp(r'\s+')).first;
+    final String local = currentUser.email.split('@').first.trim();
+    return local.isEmpty ? null : local;
+  }
+
   Future<void> restoreSession() async {
     if (status != AccountStatus.initializing) return;
     await session.restore();

@@ -258,13 +258,16 @@ final class RestEngineClient {
 
   /// `POST /api/v1/hive/nodes/{id}/approve` with the confirmed code.
   Future<void> approveHiveNode(String id, String sas) async {
-    await _sendMap('POST', 'hive/nodes/${_segment(id)}/approve', <String, dynamic>{
-      'sas': sas,
-    });
+    await _sendMap(
+      'POST',
+      'hive/nodes/${_segment(id)}/approve',
+      <String, dynamic>{'sas': sas},
+    );
   }
 
   /// `DELETE /api/v1/hive/nodes/{id}`.
-  Future<void> revokeHiveNode(String id) => _delete('hive/nodes/${_segment(id)}');
+  Future<void> revokeHiveNode(String id) =>
+      _delete('hive/nodes/${_segment(id)}');
 
   /// `POST /api/v1/hive/reset-local` with `confirm: true`. The engine backs up
   /// its database and forgets local hive bookkeeping (threads and files are
@@ -343,10 +346,7 @@ final class RestEngineClient {
         utf8.decode(bytes, allowMalformed: true),
       );
     }
-    return SpeechAudio(
-      bytes,
-      response.headers['content-type'] ?? 'audio/mpeg',
-    );
+    return SpeechAudio(bytes, response.headers['content-type'] ?? 'audio/mpeg');
   }
 
   Future<List<WorkspaceFileMatch>> searchFiles({
@@ -441,7 +441,10 @@ final class RestEngineClient {
     await _sendMapWithQuery(
       'PUT',
       'workspaces/${_segment(workspaceUuid)}/files/content',
-      <String, dynamic>{'content': content, 'expectedVersion': ?expectedVersion},
+      <String, dynamic>{
+        'content': content,
+        'expectedVersion': ?expectedVersion,
+      },
       <String, String>{'rootIndex': '$rootIndex', 'path': path},
     ),
   );
@@ -477,6 +480,9 @@ final class RestEngineClient {
     required String sourcePath,
     required int destinationRootIndex,
     required String destinationPath,
+
+    /// Renames the entry to this name within [destinationPath].
+    String? newName,
   }) async => WorkspaceFileEntry.fromJson(
     await _sendMap(
       'POST',
@@ -486,6 +492,7 @@ final class RestEngineClient {
         'sourcePath': sourcePath,
         'destinationRootIndex': destinationRootIndex,
         'destinationPath': destinationPath,
+        'newName': ?newName,
       },
     ),
   );
