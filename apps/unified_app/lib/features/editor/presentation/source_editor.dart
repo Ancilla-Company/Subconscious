@@ -366,38 +366,43 @@ final class _SourceEditorState extends State<SourceEditor> {
       canRequestFocus: false,
       skipTraversal: true,
       onKeyEvent: _onKey,
-      // The panel around the editor already has a scrollbar, so the field's
-      // own, including the one desktop platforms add by default, is hidden.
+      // One explicit scrollbar wraps the field (the platform's automatic one is
+      // switched off so there are not two). Because it wraps the field's own
+      // scrollable rather than sitting beside it, the wheel, touchpad and
+      // thumb drag all scroll the text, including with the cursor over the bar.
       child: ScrollConfiguration(
         behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-        child: TextField(
-          key: _fieldKey,
-          controller: _controller,
-          focusNode: _focus,
-          scrollController: _scroll,
-          autofocus: widget.autofocus,
-          maxLines: null,
-          expands: true,
-          textAlignVertical: TextAlignVertical.top,
-          keyboardType: TextInputType.multiline,
-          style: _textStyle(theme),
-          cursorColor: theme.colorScheme.primary,
-          inputFormatters: _formatters,
-          autocorrect: false,
-          enableSuggestions: false,
-          smartDashesType: SmartDashesType.disabled,
-          smartQuotesType: SmartQuotesType.disabled,
-          decoration: const InputDecoration(
-            isCollapsed: true,
-            filled: false,
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            disabledBorder: InputBorder.none,
-            errorBorder: InputBorder.none,
-            focusedErrorBorder: InputBorder.none,
-            // No padding on the right, so the field runs to the panel edge.
-            contentPadding: EdgeInsets.fromLTRB(20, 16, 0, 16),
+        child: Scrollbar(
+          controller: _scroll,
+          child: TextField(
+            key: _fieldKey,
+            controller: _controller,
+            focusNode: _focus,
+            scrollController: _scroll,
+            autofocus: widget.autofocus,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            keyboardType: TextInputType.multiline,
+            style: _textStyle(theme),
+            cursorColor: theme.colorScheme.primary,
+            inputFormatters: _formatters,
+            autocorrect: false,
+            enableSuggestions: false,
+            smartDashesType: SmartDashesType.disabled,
+            smartQuotesType: SmartQuotesType.disabled,
+            decoration: const InputDecoration(
+              isCollapsed: true,
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+              // No padding on the right, so the field runs to the panel edge.
+              contentPadding: EdgeInsets.fromLTRB(20, 16, 0, 16),
+            ),
           ),
         ),
       ),

@@ -185,3 +185,48 @@ final class AppPopupMenu<T> extends StatelessWidget {
     );
   }
 }
+
+/// Opens [items] as a context menu at [position] (a right click: pass
+/// `details.globalPosition`), in the same kit style as [AppPopupMenu]. Returns
+/// the chosen value, or null when the menu is dismissed.
+Future<T?> showAppContextMenu<T>({
+  required BuildContext context,
+  required Offset position,
+  required List<AppMenuItem<T>> items,
+}) {
+  final PopupMenuThemeData menu = appFormTheme(context).popupMenuTheme;
+  final Size screen = MediaQuery.sizeOf(context);
+  return showMenu<T>(
+    context: context,
+    position: RelativeRect.fromLTRB(
+      position.dx,
+      position.dy,
+      screen.width - position.dx,
+      screen.height - position.dy,
+    ),
+    color: menu.color,
+    surfaceTintColor: menu.surfaceTintColor,
+    elevation: menu.elevation,
+    shape: menu.shape,
+    items: <PopupMenuEntry<T>>[
+      for (final AppMenuItem<T> item in items)
+        PopupMenuItem<T>(
+          key: item.key,
+          value: item.value,
+          enabled: item.enabled,
+          height: 36,
+          child: Row(
+            children: <Widget>[
+              if (item.icon != null) ...<Widget>[
+                Icon(item.icon, size: 18),
+                const SizedBox(width: 10),
+              ],
+              Flexible(
+                child: Text(item.label, overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+        ),
+    ],
+  );
+}

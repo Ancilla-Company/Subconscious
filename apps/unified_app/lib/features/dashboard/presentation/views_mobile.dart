@@ -139,6 +139,7 @@ final class MobileDashboardView extends StatelessWidget {
                       : controller.error ??
                             'Select a workspace to start chatting.'),
         borderlessComposer: true,
+        greetingName: accountController.greetingName,
         minTouchTarget: _target,
         onOpenDevices: controller.openAccountShortcut,
         workspace: controller.threadsWorkspace,

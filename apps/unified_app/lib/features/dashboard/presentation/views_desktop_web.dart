@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
@@ -159,27 +160,21 @@ final class _DesktopWebDashboardViewState
       for (int index = 0; index < panelOrder.length; index++) ...<Widget>[
         if (index > 0)
           AppPanelDivider(
-            onDragUpdate: (DragUpdateDetails details) => _resizePanel(
-              panel: _panelForDivider(
-                leftIndex: index - 1,
-                rightIndex: index,
-                flexiblePanelIndex: flexiblePanelIndex,
-                panelOrder: panelOrder,
-              ),
-              isLeftPanel:
-                  _panelForDivider(
-                    leftIndex: index - 1,
-                    rightIndex: index,
-                    flexiblePanelIndex: flexiblePanelIndex,
-                    panelOrder: panelOrder,
-                  ) ==
-                  panelOrder[index - 1],
-              delta: details.delta.dx,
+            onDragStart: (DragStartDetails details) => _beginResize(
+              leftIndex: index - 1,
+              rightIndex: index,
+              flexiblePanelIndex: flexiblePanelIndex,
+              panelOrder: panelOrder,
+              pointerX: details.globalPosition.dx,
               chatPanelWidth: chatPanelWidth,
-              maximumChatPanelWidth: maximumChatPanelWidth,
               contextPanelWidth: contextPanelWidth,
+            ),
+            onDragUpdate: (DragUpdateDetails details) => _updateResize(
+              pointerX: details.globalPosition.dx,
+              maximumChatPanelWidth: maximumChatPanelWidth,
               maximumContextPanelWidth: maximumContextPanelWidth,
             ),
+            onDragEnd: (_) => _resize = null,
           ),
         _buildPanel(
           panelOrder[index],
@@ -201,7 +196,11 @@ final class _DesktopWebDashboardViewState
             child: DecoratedBox(
               position: DecorationPosition.foreground,
               decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: colors.outlineVariant)),
+                // The browser tab strip already separates the page from the
+                // browser chrome, so the web header has no bottom rule.
+                border: kIsWeb
+                    ? null
+                    : Border(top: BorderSide(color: colors.outlineVariant)),
               ),
               child: Row(
                 children: <Widget>[
@@ -249,7 +248,10 @@ final class _DesktopWebDashboardViewState
       DashboardPanel.chat => ColoredBox(
         color: Theme.of(context).colorScheme.surface,
         child: AnimatedBuilder(
-          animation: widget.controller,
+          animation: Listenable.merge(<Listenable>[
+            widget.controller,
+            widget.accountController,
+          ]),
           builder: (BuildContext context, Widget? child) {
             final EngineLlmProvider? provider = widget.controller.chatProvider;
             // The composer is never hidden: with nothing loaded (or a failed
@@ -261,6 +263,7 @@ final class _DesktopWebDashboardViewState
               return EngineChatPanel(
                 key: ValueKey<int>(widget.controller.chatSessionVersion),
                 provider: provider ?? widget.controller.fallbackChatProvider,
+                greetingName: widget.accountController.greetingName,
                 isComposerEnabled:
                     provider != null && widget.controller.isConnected,
                 errorMessage: loading && provider == null
@@ -351,26 +354,63 @@ final class _DesktopWebDashboardViewState
     return flexiblePanelIndex < leftIndex ? right : left;
   }
 
-  void _resizePanel({
-    required DashboardPanel panel,
-    required bool isLeftPanel,
-    required double delta,
+  /// The panel being resized by the current divider drag, with the pointer
+  /// position and panel width when the drag began.
+  _PanelResize? _resize;
+
+  void _beginResize({
+    required int leftIndex,
+    required int rightIndex,
+    required int flexiblePanelIndex,
+    required List<DashboardPanel> panelOrder,
+    required double pointerX,
     required double chatPanelWidth,
-    required double maximumChatPanelWidth,
     required double contextPanelWidth,
+  }) {
+    final DashboardPanel panel = _panelForDivider(
+      leftIndex: leftIndex,
+      rightIndex: rightIndex,
+      flexiblePanelIndex: flexiblePanelIndex,
+      panelOrder: panelOrder,
+    );
+    if (panel == DashboardPanel.main) {
+      _resize = null;
+      return;
+    }
+    _resize = _PanelResize(
+      panel: panel,
+      isLeftPanel: panel == panelOrder[leftIndex],
+      startPointerX: pointerX,
+      startWidth: panel == DashboardPanel.chat
+          ? chatPanelWidth
+          : contextPanelWidth,
+    );
+  }
+
+  /// Sets the width from the pointer's distance since the drag began, not
+  /// from per-event deltas. Deltas are lost when several arrive before a
+  /// rebuild and drift once a panel hits its limit; the pointer position keeps
+  /// the divider under the cursor.
+  void _updateResize({
+    required double pointerX,
+    required double maximumChatPanelWidth,
     required double maximumContextPanelWidth,
   }) {
-    final double signedDelta = isLeftPanel ? delta : -delta;
-    switch (panel) {
+    final _PanelResize? resize = _resize;
+    if (resize == null) return;
+    final double moved = pointerX - resize.startPointerX;
+    final double width =
+        resize.startWidth + (resize.isLeftPanel ? moved : -moved);
+    switch (resize.panel) {
       case DashboardPanel.chat:
         widget.controller.updateLayoutState(
-          chatPanelWidth: (chatPanelWidth + signedDelta)
+          chatPanelWidth: width
               .clamp(_minimumChatPanelWidth, maximumChatPanelWidth)
               .toDouble(),
         );
       case DashboardPanel.context:
         widget.controller.updateLayoutState(
-          contextPanelWidth: (contextPanelWidth + signedDelta)
+          contextPanelWidth: width
               .clamp(_minimumContextPanelWidth, maximumContextPanelWidth)
               .toDouble(),
         );
@@ -378,6 +418,20 @@ final class _DesktopWebDashboardViewState
         break;
     }
   }
+}
+
+final class _PanelResize {
+  const _PanelResize({
+    required this.panel,
+    required this.isLeftPanel,
+    required this.startPointerX,
+    required this.startWidth,
+  });
+
+  final DashboardPanel panel;
+  final bool isLeftPanel;
+  final double startPointerX;
+  final double startWidth;
 }
 
 final class _Sidebar extends StatelessWidget {

@@ -236,6 +236,32 @@ class EngineHost:
         if indicator is not None:
             indicator.set_clients(clients)
 
+    def request_quit(self) -> None:
+        """The tray's Quit: tell this machine's clients to close, then stop.
+
+        Clients on this machine (the desktop app) are tied to the engine the
+        user just quit, so they are asked to close with it. Safe to call from a
+        tray callback thread.
+        """
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            self.request_stop()
+            return
+        asyncio.run_coroutine_threadsafe(self._announce_quit_then_stop(), loop)
+
+    async def _announce_quit_then_stop(self) -> None:
+        try:
+            registry = self.app.state.client_registry
+            with logged_suppress(Exception):
+                await asyncio.wait_for(
+                    registry.broadcast_local("engine.shutdown", {"reason": "quit"}),
+                    timeout=1.0,
+                )
+            # Give clients a moment to store unsaved text through this engine.
+            await asyncio.sleep(1.0)
+        finally:
+            self.request_stop()
+
     def request_stop(self) -> None:
         """Request graceful shutdown; safe to call from a tray callback thread."""
         self._stop_requested = True
@@ -342,7 +368,7 @@ class EngineHost:
                     unsubscribe_clients = self.app.state.client_registry.subscribe(
                         self._status_indicator.set_clients
                     )
-                self._status_indicator.start(self.request_stop, self.token.value)
+                self._status_indicator.start(self.request_quit, self.token.value)
                 if self.profiles is not None:
                     self.profiles.push_clients()
             self._ready.set()

@@ -45,6 +45,8 @@ class MoveWorkspaceFileRequest(WireModel):
     source_path: str
     destination_root_index: int
     destination_path: str
+    # Rename: the entry keeps its place but takes this name.
+    new_name: str | None = None
 
 
 class ToolRegistryDto(WireModel):

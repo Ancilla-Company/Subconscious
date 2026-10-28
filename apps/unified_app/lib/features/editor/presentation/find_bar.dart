@@ -147,159 +147,172 @@ final class _EditorFindBarState extends State<EditorFindBar> {
       summary =
           '${model.current + 1} of ${model.matches.length}${model.capped ? '+' : ''}';
     }
-    final InputDecoration decoration = InputDecoration(
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      border: OutlineInputBorder(
-        borderRadius: AppRadii.sm,
-        borderSide: BorderSide(color: colors.outlineVariant),
-      ),
+    // Fields come from the kit's form theme (fill, border, 3px corners). A
+    // 32dp field has no vertical padding so its text centres and its edges
+    // line up with the 32dp buttons beside it.
+    const InputDecoration decoration = InputDecoration(
+      contentPadding: EdgeInsets.symmetric(horizontal: 10),
     );
-    return CallbackShortcuts(
-      bindings: <ShortcutActivator, VoidCallback>{
-        const SingleActivator(LogicalKeyboardKey.enter): () =>
-            _step(forward: true),
-        const SingleActivator(LogicalKeyboardKey.enter, shift: true): () =>
-            _step(forward: false),
-        const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
-      },
-      child: Material(
-        elevation: 4,
-        color: colors.surfaceContainerHigh,
-        borderRadius: AppRadii.lg,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    AppIconButton(
-                      icon: model.replaceVisible
-                          ? FluentIcons.chevron_down_20_regular
-                          : FluentIcons.chevron_right_20_regular,
-                      tooltip: model.replaceVisible
-                          ? 'Hide replace'
-                          : 'Show replace',
+    return Theme(
+      data: appFormTheme(context),
+      child: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.enter): () =>
+              _step(forward: true),
+          const SingleActivator(LogicalKeyboardKey.enter, shift: true): () =>
+              _step(forward: false),
+          const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
+        },
+        child: Material(
+          elevation: 4,
+          color: colors.surfaceContainerHigh,
+          borderRadius: AppRadii.lg,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      AppIconButton(
+                        icon: model.replaceVisible
+                            ? FluentIcons.chevron_down_20_regular
+                            : FluentIcons.chevron_right_20_regular,
+                        tooltip: model.replaceVisible
+                            ? 'Hide replace'
+                            : 'Show replace',
 
-                      onPressed: model.toggleReplace,
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: SizedBox(
-                        height: 32,
-                        child: TextField(
-                          controller: _query,
-                          focusNode: widget.queryFocus,
-                          decoration: decoration.copyWith(
-                            hintText: 'Find',
-                            errorText: null,
+                        onPressed: model.toggleReplace,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: SizedBox(
+                          height: 32,
+                          child: TextField(
+                            controller: _query,
+                            focusNode: widget.queryFocus,
+                            decoration: decoration.copyWith(
+                              hintText: 'Find',
+                              errorText: null,
+                            ),
+                            style: Theme.of(context).textTheme.bodyMedium,
+                            textAlignVertical: TextAlignVertical.center,
+                            onChanged: (String value) =>
+                                _configure(query: value),
+                            onEditingComplete: () {},
                           ),
-                          style: Theme.of(context).textTheme.bodyMedium,
-                          onChanged: (String value) => _configure(query: value),
-                          onEditingComplete: () {},
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    AppTextToggle(
-                      label: 'Aa',
-                      tooltip: 'Match case',
-                      selected: model.caseSensitive,
-                      onPressed: () =>
-                          _configure(caseSensitive: !model.caseSensitive),
-                    ),
-                    AppTextToggle(
-                      label: 'ab',
-                      tooltip: 'Whole word',
-                      selected: model.wholeWord,
-                      underline: true,
-                      onPressed: () => _configure(wholeWord: !model.wholeWord),
-                    ),
-                    AppTextToggle(
-                      label: '.*',
-                      tooltip: 'Regular expression',
-                      selected: model.useRegex,
-                      onPressed: () => _configure(useRegex: !model.useRegex),
-                    ),
-                    const SizedBox(width: 6),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(minWidth: 56),
-                      child: Text(
-                        summary,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: model.error != null
-                              ? colors.error
-                              : colors.onSurfaceVariant,
+                      const SizedBox(width: 4),
+                      AppTextToggle(
+                        label: 'Aa',
+                        tooltip: 'Match case',
+                        selected: model.caseSensitive,
+                        onPressed: () =>
+                            _configure(caseSensitive: !model.caseSensitive),
+                      ),
+                      AppTextToggle(
+                        label: 'ab',
+                        tooltip: 'Whole word',
+                        selected: model.wholeWord,
+                        underline: true,
+                        onPressed: () =>
+                            _configure(wholeWord: !model.wholeWord),
+                      ),
+                      AppTextToggle(
+                        label: '.*',
+                        tooltip: 'Regular expression',
+                        selected: model.useRegex,
+                        onPressed: () => _configure(useRegex: !model.useRegex),
+                      ),
+                      const SizedBox(width: 6),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 56),
+                        child: Text(
+                          summary,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: model.error != null
+                                    ? colors.error
+                                    : colors.onSurfaceVariant,
+                              ),
                         ),
                       ),
-                    ),
-                    AppIconButton(
-                      icon: FluentIcons.arrow_up_20_regular,
-                      tooltip: 'Previous match (Shift+Enter)',
+                      AppIconButton(
+                        icon: FluentIcons.arrow_up_20_regular,
+                        tooltip: 'Previous match (Shift+Enter)',
 
-                      onPressed: () => _step(forward: false),
-                    ),
-                    AppIconButton(
-                      icon: FluentIcons.arrow_down_20_regular,
-                      tooltip: 'Next match (Enter)',
+                        onPressed: () => _step(forward: false),
+                      ),
+                      AppIconButton(
+                        icon: FluentIcons.arrow_down_20_regular,
+                        tooltip: 'Next match (Enter)',
 
-                      onPressed: () => _step(forward: true),
-                    ),
-                    AppIconButton(
-                      icon: FluentIcons.dismiss_20_regular,
-                      tooltip: 'Close (Esc)',
+                        onPressed: () => _step(forward: true),
+                      ),
+                      AppIconButton(
+                        icon: FluentIcons.dismiss_20_regular,
+                        tooltip: 'Close (Esc)',
 
-                      onPressed: widget.onClose,
-                    ),
-                  ],
-                ),
-                if (model.replaceVisible)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6, left: 32),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: SizedBox(
-                            height: 32,
-                            child: CallbackShortcuts(
-                              bindings: <ShortcutActivator, VoidCallback>{
-                                const SingleActivator(LogicalKeyboardKey.enter):
-                                    widget.onReplace,
-                              },
-                              child: TextField(
-                                controller: _replacement,
-                                decoration: decoration.copyWith(
-                                  hintText: 'Replace',
+                        onPressed: widget.onClose,
+                      ),
+                    ],
+                  ),
+                  if (model.replaceVisible)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6, left: 32),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: SizedBox(
+                              height: 32,
+                              child: CallbackShortcuts(
+                                bindings: <ShortcutActivator, VoidCallback>{
+                                  const SingleActivator(
+                                    LogicalKeyboardKey.enter,
+                                  ): widget.onReplace,
+                                },
+                                child: TextField(
+                                  controller: _replacement,
+                                  decoration: decoration.copyWith(
+                                    hintText: 'Replace',
+                                  ),
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                  textAlignVertical: TextAlignVertical.center,
+                                  onChanged: widget.model.setReplacement,
+                                  onEditingComplete: () {},
                                 ),
-                                style: Theme.of(context).textTheme.bodyMedium,
-                                onChanged: widget.model.setReplacement,
-                                onEditingComplete: () {},
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        TextButton(
-                          onPressed: model.matches.isEmpty
-                              ? null
-                              : widget.onReplace,
-                          child: const Text('Replace'),
-                        ),
-                        TextButton(
-                          onPressed: model.matches.isEmpty
-                              ? null
-                              : widget.onReplaceAll,
-                          child: const Text('All'),
-                        ),
-                      ],
+                          const SizedBox(width: 4),
+                          SizedBox(
+                            height: 32,
+                            child: TextButton(
+                              onPressed: model.matches.isEmpty
+                                  ? null
+                                  : widget.onReplace,
+                              child: const Text('Replace'),
+                            ),
+                          ),
+                          SizedBox(
+                            height: 32,
+                            child: TextButton(
+                              onPressed: model.matches.isEmpty
+                                  ? null
+                                  : widget.onReplaceAll,
+                              child: const Text('All'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

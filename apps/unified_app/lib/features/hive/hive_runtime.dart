@@ -404,12 +404,26 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
   int _attemptSeq = 0;
   int _abandonedThrough = 0;
 
+  /// The engine whose peer link the dashboard session currently rides on.
+  String? _linkedEngineId;
+
   /// The dashboard's attempt to bring the session up failed. A peer link set
   /// up for it is abandoned, and a link still being set up when this fires
   /// (the attempt timed out) is dropped when it completes.
   void engineAttemptFailed() {
     if (hasLocalFullNode) return;
     _abandonedThrough = _attemptSeq;
+    // The link may look open yet carry nothing (the device slept). Close it,
+    // or every retry would be handed the same dead link.
+    final String? linked = _linkedEngineId;
+    if (linked != null) {
+      _linkedEngineId = null;
+      unawaited(
+        hive.dropLink(linked).catchError((Object error) {
+          debugPrint('Could not drop the stale engine link: $error');
+        }),
+      );
+    }
     if (_pendingHomeId != null) {
       _pendingHomeId = null;
       _engineState = EngineLinkState.failed;
@@ -1195,6 +1209,7 @@ final class HiveRuntime extends ChangeNotifier implements ExecutorDirectory {
     notifyListeners();
     try {
       await hive.connectTo(home.id); // fail fast with a clear error
+      _linkedEngineId = home.id;
     } on Object {
       homeEngineId = null;
       engineState = EngineLinkState.failed;

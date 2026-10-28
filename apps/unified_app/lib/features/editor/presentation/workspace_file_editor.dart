@@ -144,21 +144,23 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
           control: !usesCommandKey,
           meta: usesCommandKey,
         );
-        return CallbackShortcuts(
-          bindings: <ShortcutActivator, VoidCallback>{
-            save: () {
-              final EditorTab? tab = store.active;
-              if (tab is TextTab && tab.isDirty) unawaited(_save(tab));
+        return AppFormTheme(
+          child: CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              save: () {
+                final EditorTab? tab = store.active;
+                if (tab is TextTab && tab.isDirty) unawaited(_save(tab));
+              },
             },
-          },
-          child: ColoredBox(
-            color: colors.surface,
-            child: Column(
-              children: <Widget>[
-                _tabBar(context, store, active),
-                if (active is TextTab) ..._banners(context, active),
-                Expanded(child: _body(context, active, autofocus)),
-              ],
+            child: ColoredBox(
+              color: colors.surface,
+              child: Column(
+                children: <Widget>[
+                  _tabBar(context, store, active),
+                  if (active is TextTab) ..._banners(context, active),
+                  Expanded(child: _body(context, active, autofocus)),
+                ],
+              ),
             ),
           ),
         );

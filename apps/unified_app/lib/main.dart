@@ -13,6 +13,7 @@ import 'features/connection/engine_launcher.dart';
 import 'features/dashboard/controller/dashboard_controller.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'features/dashboard/presentation/window_composition_bar.dart';
+import 'features/diagnostics/gui_log.dart';
 import 'features/extension/extension_connection_resolver.dart';
 import 'features/extension/extension_host.dart';
 import 'features/extension/extension_runtime.dart';
@@ -21,11 +22,20 @@ import 'features/settings/controller/settings_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initGuiLog();
+  _installErrorLogging();
   // Before anything reads the hive node identity: the popup and the side
   // panel(s) share one storage, so each open page claims its own slot.
   await ExtensionHost.instance.acquireInstanceSlot();
   httpLogSink = (String line) => debugPrint(line);
-  await initializeDesktopWindow();
+  guiLog('Preparing the desktop window');
+  try {
+    await initializeDesktopWindow();
+    guiLog('Desktop window ready');
+  } on Object catch (error, stack) {
+    guiLogError('Desktop window setup failed', error, stack);
+    rethrow;
+  }
   const String configuredToken = String.fromEnvironment(
     'SUBCONSCIOUS_ENGINE_TOKEN',
   );
@@ -126,6 +136,16 @@ Future<void> main() async {
     ),
   );
   controller.onConnectionAttemptFailed = HiveRuntime.shared.engineAttemptFailed;
+  EngineConnectionStatus? lastLoggedStatus;
+  controller.addListener(() {
+    if (controller.connectionStatus == lastLoggedStatus) return;
+    lastLoggedStatus = controller.connectionStatus;
+    guiLog('Engine connection: ${lastLoggedStatus!.name}');
+  });
+  AppLifecycleListener(
+    onStateChange: (AppLifecycleState state) =>
+        guiLog('App lifecycle: ${state.name}'),
+  );
   unawaited(_loadEngineAndRestoreAccount(controller, accountController));
   runApp(
     SubconsciousApp(
@@ -133,6 +153,19 @@ Future<void> main() async {
       accountController: accountController,
     ),
   );
+}
+
+/// Sends every uncaught error to gui.log as well as the console.
+void _installErrorLogging() {
+  final FlutterExceptionHandler? previous = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    guiLogError('Flutter error', details.exception, details.stack);
+    (previous ?? FlutterError.presentError)(details);
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    guiLogError('Uncaught error', error, stack);
+    return true;
+  };
 }
 
 /// Where the packaged engine writes its log, or null when unknown.

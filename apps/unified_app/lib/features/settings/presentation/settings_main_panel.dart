@@ -418,19 +418,17 @@ final class _EngineConnectionValueField extends StatelessWidget {
   final IconData icon;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Expanded(
-        child: AppTextField(
-          key: ValueKey<String?>(value),
-          initialValue: value ?? unavailableText,
-          readOnly: true,
-          height: 32,
-          prefixIcon: Icon(icon, size: 17),
-        ),
-      ),
-      const SizedBox(width: 8),
-      _WindowsIconButton(
+  Widget build(BuildContext context) => AppFieldRow(
+    field: AppTextField(
+      key: ValueKey<String?>(value),
+      initialValue: value ?? unavailableText,
+      readOnly: true,
+      height: 32,
+      prefixIcon: Icon(icon, size: 17),
+    ),
+    actions: <Widget>[
+      AppIconButton(
+        outlined: true,
         tooltip: copyMessage,
         icon: FluentIcons.copy_20_regular,
         onPressed: value == null
@@ -2371,19 +2369,17 @@ final class _DataDirectoryField extends StatelessWidget {
   Widget build(BuildContext context) {
     const bool preferDev = bool.fromEnvironment('SUBCONSCIOUS_ENGINE_DEV');
     final String? path = engineDataDirectory(preferDev: preferDev);
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: AppTextField(
-            key: ValueKey<String?>(path),
-            initialValue: path ?? 'Unavailable on this platform',
-            readOnly: true,
-            height: 32,
-            prefixIcon: const Icon(FluentIcons.folder_20_regular, size: 17),
-          ),
-        ),
-        const SizedBox(width: 8),
-        _WindowsIconButton(
+    return AppFieldRow(
+      field: AppTextField(
+        key: ValueKey<String?>(path),
+        initialValue: path ?? 'Unavailable on this platform',
+        readOnly: true,
+        height: 32,
+        prefixIcon: const Icon(FluentIcons.folder_20_regular, size: 17),
+      ),
+      actions: <Widget>[
+        AppIconButton(
+          outlined: true,
           tooltip: 'Copy data folder path',
           icon: FluentIcons.copy_20_regular,
           onPressed: path == null
@@ -2395,8 +2391,8 @@ final class _DataDirectoryField extends StatelessWidget {
                   }
                 },
         ),
-        const SizedBox(width: 6),
-        _WindowsIconButton(
+        AppIconButton(
+          outlined: true,
           tooltip: 'Open data folder',
           icon: FluentIcons.folder_open_20_regular,
           onPressed: path == null
@@ -2422,19 +2418,17 @@ final class _JoiningTokenField extends StatelessWidget {
   final String? token;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Expanded(
-        child: AppTextField(
-          key: ValueKey<String?>(token),
-          initialValue: token ?? 'Unavailable while the engine is disconnected',
-          readOnly: true,
-          height: 32,
-          prefixIcon: const Icon(FluentIcons.key_20_regular, size: 17),
-        ),
-      ),
-      const SizedBox(width: 8),
-      _WindowsIconButton(
+  Widget build(BuildContext context) => AppFieldRow(
+    field: AppTextField(
+      key: ValueKey<String?>(token),
+      initialValue: token ?? 'Unavailable while the engine is disconnected',
+      readOnly: true,
+      height: 32,
+      prefixIcon: const Icon(FluentIcons.key_20_regular, size: 17),
+    ),
+    actions: <Widget>[
+      AppIconButton(
+        outlined: true,
         tooltip: 'Copy joining token',
         icon: FluentIcons.copy_20_regular,
         onPressed: token == null
@@ -2447,26 +2441,5 @@ final class _JoiningTokenField extends StatelessWidget {
               },
       ),
     ],
-  );
-}
-
-final class _WindowsIconButton extends StatelessWidget {
-  const _WindowsIconButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) => AppIconButton(
-    outlined: true,
-    tooltip: tooltip,
-    icon: icon,
-    iconSize: 17,
-    onPressed: onPressed,
   );
 }

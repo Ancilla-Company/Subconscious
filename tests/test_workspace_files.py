@@ -169,3 +169,36 @@ def test_root_reports_missing_workspace_bad_index_and_invalid_configuration(tmp_
             await session.close()
             await database.close()
     run(scenario())
+
+
+def test_move_can_rename_in_place_and_still_moves_between_folders(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "a.txt").write_text("x")
+
+    moved = service._move_sync(root, "a.txt", "sub")
+    assert moved.relative_path == "sub/a.txt"
+
+    renamed = service._move_sync(root, "sub/a.txt", "sub", "b.txt")
+    assert renamed.relative_path == "sub/b.txt"
+    assert (root / "sub" / "b.txt").read_text() == "x"
+    assert not (root / "sub" / "a.txt").exists()
+
+    # A change of letter case alone is a rename, not a clash with itself.
+    assert service._move_sync(root, "sub/b.txt", "sub", "B.txt").name == "B.txt"
+
+
+def test_rename_rejects_bad_names_and_clashes(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "a.txt").write_text("a")
+    (root / "b.txt").write_text("b")
+
+    for bad in ("", "..", "x/y", "x\\y", "a:b", "trailing."):
+        assert_error(400, lambda bad=bad: service._move_sync(root, "a.txt", "", bad))
+    assert_error(400, lambda: service._move_sync(root, "a.txt", "", "a.txt"), "same")
+    assert_error(409, lambda: service._move_sync(root, "a.txt", "", "b.txt"))
+    # A plain move into the folder it is already in is still refused.
+    assert_error(400, lambda: service._move_sync(root, "a.txt", ""), "already")

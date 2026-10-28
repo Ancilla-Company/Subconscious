@@ -3,7 +3,8 @@ import 'dart:convert';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart' show AppLifecycleListener, AppLifecycleState;
+import 'package:flutter/widgets.dart'
+    show AppLifecycleListener, AppLifecycleState;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../chat/engine_llm_provider.dart';
@@ -116,6 +117,10 @@ final class DashboardController extends ChangeNotifier {
   /// limit abandons a link that is about to come up, leaving the device list
   /// saying "Connected" while the session is down.
   static const Duration resolveTimeout = Duration(seconds: 30);
+
+  /// Called when the local engine is quit from its tray and asks this client
+  /// to close with it.
+  VoidCallback? onEngineQuit;
 
   /// Called when a connection attempt fails, even if the visible status did
   /// not change, so a link that was set up for it can be abandoned.
@@ -297,6 +302,51 @@ final class DashboardController extends ChangeNotifier {
   bool chatPanelVisible = true;
   bool mainPanelVisible = true;
   bool contextPanelVisible = true;
+
+  /// True while the window shows only the chat, small and above other windows
+  /// (for asking the assistant to drive something else). Not saved: the layout
+  /// before it is what a restart restores.
+  bool chatOnly = false;
+  ({bool chat, bool main, bool context})? _layoutBeforeChatOnly;
+
+  /// Resizes the window and pins it on top; set by the desktop window bar. Null
+  /// where the app has no window of its own (mobile, web).
+  Future<void> Function(bool enabled)? chatOnlyWindowHandler;
+
+  bool get supportsChatOnly => chatOnlyWindowHandler != null;
+
+  Future<void> setChatOnly(bool enabled) async {
+    final Future<void> Function(bool)? handler = chatOnlyWindowHandler;
+    if (handler == null || chatOnly == enabled) return;
+    if (enabled) {
+      _layoutBeforeChatOnly = (
+        chat: chatPanelVisible,
+        main: mainPanelVisible,
+        context: contextPanelVisible,
+      );
+      chatOnly = true;
+      chatPanelVisible = true;
+      mainPanelVisible = false;
+      contextPanelVisible = false;
+    } else {
+      final ({bool chat, bool main, bool context})? before =
+          _layoutBeforeChatOnly;
+      _layoutBeforeChatOnly = null;
+      chatOnly = false;
+      if (before != null) {
+        chatPanelVisible = before.chat;
+        mainPanelVisible = before.main;
+        contextPanelVisible = before.context;
+      }
+    }
+    notifyListeners();
+    try {
+      await handler(enabled);
+    } on Object catch (error) {
+      debugPrint('Could not change the chat-only window: $error');
+    }
+  }
+
   double chatPanelWidth = 280;
   double contextPanelWidth = 280;
   double? windowX;
@@ -597,21 +647,26 @@ final class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// When a failed read of the saved state may be tried again, so a broken
+  /// settings route is not hit on every connection check.
+  DateTime? _navigationRetryAt;
+  static const Duration navigationRetryInterval = Duration(seconds: 15);
+
+  bool get _navigationRetryDue {
+    final DateTime? at = _navigationRetryAt;
+    return at == null || !DateTime.now().isBefore(at);
+  }
+
   Future<void> _loadNavigationState() async {
     if (hasLoadedNavigationState) return;
     final RestEngineClient? client = repository?.rest;
     if (client == null) return;
-    final int versionAtStart = _appStateVersion;
     bool migratedLegacyState = false;
+    bool loadedSuccessfully = false;
     try {
       final List<EngineSetting> loaded = await client
           .getSettings(key: appStateKey)
           .timeout(requestTimeout);
-      if (versionAtStart != 0 || versionAtStart != _appStateVersion) {
-        hasLoadedNavigationState = true;
-        return;
-      }
-
       _isRestoringNavigation = true;
       if (loaded.isEmpty) {
         migratedLegacyState = await _loadLegacyNavigationState(client);
@@ -619,11 +674,17 @@ final class DashboardController extends ChangeNotifier {
         _restoreAppState(loaded.last.value);
       }
       navigationError = null;
+      loadedSuccessfully = true;
     } on Object catch (caughtError) {
       navigationError = caughtError;
+      _navigationRetryAt = DateTime.now().add(navigationRetryInterval);
     } finally {
       _isRestoringNavigation = false;
-      hasLoadedNavigationState = true;
+      // A failed read (the engine was still starting, a timeout) must not
+      // count as "loaded": the saved layout, open files and last thread would
+      // then be overwritten by the next change. The next connection check
+      // tries again, and nothing is written until a read has succeeded.
+      if (loadedSuccessfully) hasLoadedNavigationState = true;
       if (migratedLegacyState) _markAppStateChanged();
       notifyListeners();
     }
@@ -816,9 +877,10 @@ final class DashboardController extends ChangeNotifier {
         },
     },
     'layout': <String, dynamic>{
-      'chatPanelVisible': chatPanelVisible,
-      'mainPanelVisible': mainPanelVisible,
-      'contextPanelVisible': contextPanelVisible,
+      'chatPanelVisible': _layoutBeforeChatOnly?.chat ?? chatPanelVisible,
+      'mainPanelVisible': _layoutBeforeChatOnly?.main ?? mainPanelVisible,
+      'contextPanelVisible':
+          _layoutBeforeChatOnly?.context ?? contextPanelVisible,
       'chatPanelWidth': _isPositiveFinite(chatPanelWidth)
           ? chatPanelWidth
           : 280,
@@ -877,7 +939,9 @@ final class DashboardController extends ChangeNotifier {
 
   Future<void> _writePendingAppState() async {
     final RestEngineClient? client = repository?.rest;
-    if (client == null) return;
+    // Never write before the saved state has been read, or a fresh default
+    // layout replaces it.
+    if (client == null || !hasLoadedNavigationState) return;
     try {
       while (_appStateSavedVersion < _appStateVersion && !_disposed) {
         final int version = _appStateVersion;
@@ -902,7 +966,34 @@ final class DashboardController extends ChangeNotifier {
     }
   }
 
+  AppLifecycleListener? _resumeListener;
+
+  /// A phone that slept comes back with a connection that looks alive and is
+  /// not. Check it as soon as the app is shown again, and rebuild it if dead.
+  void _onAppResumed() {
+    if (_disposed) return;
+    final EngineRepository? current = _repository;
+    if (current == null || !isConnected) {
+      unawaited(_checkConnection());
+      return;
+    }
+    unawaited(_verifyConnectionAfterResume(current));
+  }
+
+  Future<void> _verifyConnectionAfterResume(EngineRepository current) async {
+    try {
+      await current.rest.health().timeout(const Duration(seconds: 5));
+      _lastHealthProbe = DateTime.now();
+      if (!current.socket.isConnected) await _checkConnection();
+    } on Object {
+      if (_disposed || !identical(_repository, current)) return;
+      onConnectionAttemptFailed?.call();
+      await reconnectNow();
+    }
+  }
+
   Future<void> load() async {
+    _resumeListener ??= AppLifecycleListener(onResume: _onAppResumed);
     documents.observeAppLifecycle();
     _reconnectTimer ??= Timer.periodic(
       reconnectInterval,
@@ -994,7 +1085,9 @@ final class DashboardController extends ChangeNotifier {
               settings.generalError == null) {
             await settings.loadGeneralSettings(silent: true);
           }
-          if (!hasLoadedNavigationState) await _loadNavigationState();
+          if (!hasLoadedNavigationState && _navigationRetryDue) {
+            await _loadNavigationState();
+          }
           if (workspaces.isEmpty) {
             await loadWorkspaces();
           }
@@ -1002,6 +1095,9 @@ final class DashboardController extends ChangeNotifier {
           return;
         } on Object {
           await _closeRepository(currentRepository);
+          // The session is dead; a peer link under it may be too, and would
+          // otherwise be reused by the reconnect below.
+          onConnectionAttemptFailed?.call();
         }
       } else if (currentRepository != null) {
         await _closeRepository(currentRepository);
@@ -1107,13 +1203,13 @@ final class DashboardController extends ChangeNotifier {
     _extensionTools.clear();
     if (!_extensionHost.isExtension) return;
     _syncExtensionTools(socket, _extensionHost.toolGroups());
-    _unsubscribeExtensionTools = _extensionHost.onToolGroupsChanged(
-      (List<ClientToolGroup> groups) {
-        final EngineSocket? current = _engineEventRepository?.socket;
-        if (_disposed || current == null || !identical(current, socket)) return;
-        _syncExtensionTools(current, groups);
-      },
-    );
+    _unsubscribeExtensionTools = _extensionHost.onToolGroupsChanged((
+      List<ClientToolGroup> groups,
+    ) {
+      final EngineSocket? current = _engineEventRepository?.socket;
+      if (_disposed || current == null || !identical(current, socket)) return;
+      _syncExtensionTools(current, groups);
+    });
   }
 
   /// Sends one `tool.register` per group; a group that disappeared is sent
@@ -1239,6 +1335,9 @@ final class DashboardController extends ChangeNotifier {
             TaskStatus.parse(taskStatus).isTerminal) {
           unawaited(_refreshSelectedThreadHistory(taskThread));
         }
+        return;
+      case 'engine.shutdown':
+        onEngineQuit?.call();
         return;
       case 'client.tool.request':
         unawaited(_handleClientToolRequest(frame, data));
@@ -2036,7 +2135,11 @@ final class DashboardController extends ChangeNotifier {
     }
     if (remember) _markNavigationChanged();
     notifyListeners();
-    if (workspace == null || repository == null || !isConnected) return;
+    if (repository == null || !isConnected) return;
+    if (workspace == null) {
+      await _loadThreadsOfAllWorkspaces();
+      return;
+    }
 
     final int requestVersion = ++_threadRequestVersion;
     isLoadingThreads = true;
@@ -2076,6 +2179,58 @@ final class DashboardController extends ChangeNotifier {
     await selectThread(rememberedThread, remember: false);
   }
 
+  /// "All workspaces": the threads of every workspace in one list, newest
+  /// first. A thread opened from it keeps its own workspace; creating a thread
+  /// still needs a workspace to be chosen.
+  Future<void> _loadThreadsOfAllWorkspaces() async {
+    final EngineRepository? currentRepository = repository;
+    if (currentRepository == null) return;
+    final int requestVersion = ++_threadRequestVersion;
+    isLoadingThreads = true;
+    threadsError = null;
+    notifyListeners();
+    try {
+      Object? firstFailure;
+      int failures = 0;
+      final List<List<ThreadInfo>> lists = await Future.wait(
+        <Future<List<ThreadInfo>>>[
+          for (final Workspace workspace in workspaces)
+            currentRepository
+                .listThreads(workspace.uuid)
+                .timeout(requestTimeout)
+                .catchError((Object error) {
+                  failures++;
+                  firstFailure ??= error;
+                  return const <ThreadInfo>[];
+                }),
+        ],
+      );
+      if (requestVersion != _threadRequestVersion) return;
+      final List<ThreadInfo> merged = <ThreadInfo>[
+        for (final List<ThreadInfo> list in lists) ...list,
+      ];
+      final DateTime epoch = DateTime.fromMillisecondsSinceEpoch(0);
+      merged.sort(
+        (ThreadInfo a, ThreadInfo b) => (b.updatedAt ?? b.createdAt ?? epoch)
+            .compareTo(a.updatedAt ?? a.createdAt ?? epoch),
+      );
+      threads = merged;
+      if (failures > 0 && failures == workspaces.length) {
+        threadsError = firstFailure;
+      }
+    } on Object catch (caughtError) {
+      if (requestVersion == _threadRequestVersion) threadsError = caughtError;
+    } finally {
+      if (requestVersion == _threadRequestVersion) {
+        isLoadingThreads = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// The name of a workspace, or null when it is not in the loaded list.
+  String? workspaceName(String uuid) => _workspaceByUuid(uuid)?.name;
+
   Future<void> selectThread(ThreadInfo thread, {bool remember = true}) async {
     final EngineRepository? currentRepository = repository;
     final int requestVersion = ++_chatRequestVersion;
@@ -2083,10 +2238,14 @@ final class DashboardController extends ChangeNotifier {
     pendingDraftTitle = null;
     pendingDraftToolsConfig = null;
     chatSessionVersion++;
-    final String workspaceUuid = threadsWorkspace?.uuid ?? thread.workspaceUuid;
-    _threadsWorkspaceUuid = workspaceUuid;
-    _setRememberedThread(workspaceUuid, thread.uuid);
-    if (remember) _markNavigationChanged();
+    // Opened from the all-workspaces list the thread keeps its own workspace;
+    // the list stays on "all" rather than switching to that workspace.
+    final String? workspaceUuid = threadsWorkspace?.uuid;
+    if (workspaceUuid != null) {
+      _threadsWorkspaceUuid = workspaceUuid;
+      _setRememberedThread(workspaceUuid, thread.uuid);
+      if (remember) _markNavigationChanged();
+    }
     _retireProvider(chatProvider);
     chatProvider = null;
     chatError = null;
@@ -2593,6 +2752,67 @@ final class DashboardController extends ChangeNotifier {
     }
   }
 
+  /// The absolute path of a file or folder on the machine the engine runs on.
+  String? absoluteWorkspacePath(int rootIndex, String path) {
+    for (final WorkspaceDirectoryRoot root in fileRoots) {
+      if (root.index != rootIndex) continue;
+      final String base = root.path.replaceAll('\\', '/');
+      final String relative = path.replaceAll('\\', '/');
+      if (relative.isEmpty) return root.path;
+      final String joined = base.endsWith('/')
+          ? '$base$relative'
+          : '$base/$relative';
+      // Keep the separators the user entered the root with.
+      return root.path.contains('\\') ? joined.replaceAll('/', '\\') : joined;
+    }
+    return null;
+  }
+
+  /// Renames a file or folder in place. Returns the failure, if any, so the
+  /// caller can tell the user why.
+  Future<Object?> renameWorkspaceNode({
+    required int rootIndex,
+    required String path,
+    required bool isDirectory,
+    required String newName,
+  }) async {
+    if (isMovingWorkspaceNode) return null;
+    final Workspace? workspace = _filesWorkspace;
+    final RestEngineClient? client = repository?.rest;
+    if (workspace == null || client == null) return null;
+    isMovingWorkspaceNode = true;
+    filesError = null;
+    notifyListeners();
+    try {
+      final WorkspaceFileEntry renamed = await client
+          .moveWorkspacePath(
+            workspaceUuid: workspace.uuid,
+            sourceRootIndex: rootIndex,
+            sourcePath: path,
+            destinationRootIndex: rootIndex,
+            destinationPath: _parentDirectory(path.replaceAll('\\', '/')),
+            newName: newName,
+          )
+          .timeout(requestTimeout);
+      final WorkspaceFileMove move = WorkspaceFileMove(
+        sourceRootIndex: rootIndex,
+        sourcePath: path,
+        destinationRootIndex: rootIndex,
+        destinationPath: renamed.relativePath,
+        isDirectory: isDirectory,
+      );
+      _applyWorkspaceFileMove(move);
+      await _reloadMoveParents(move);
+      _markNavigationChanged();
+      return null;
+    } on Object catch (caughtError) {
+      return caughtError;
+    } finally {
+      isMovingWorkspaceNode = false;
+      notifyListeners();
+    }
+  }
+
   void _applyWorkspaceFileMove(WorkspaceFileMove move) {
     final WorkspaceFileTreeNode? selectedNode = selectedFileTreeNode;
     if (selectedNode != null) {
@@ -2890,6 +3110,8 @@ final class DashboardController extends ChangeNotifier {
     _unsubscribeExtensionTools = null;
     _extensionTools.clear();
     _visibilityListener?.dispose();
+    _resumeListener?.dispose();
+    _resumeListener = null;
     _visibilityListener = null;
     if (_extensionHost.isExtension) _extensionHost.setVisible(false);
     final StreamSubscription<WireFrame>? subscription =

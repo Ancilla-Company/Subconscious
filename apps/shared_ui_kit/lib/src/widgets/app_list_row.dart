@@ -20,8 +20,15 @@ final class AppListRow extends StatelessWidget {
     this.onLongPress,
     this.semanticLabel,
     this.titleBold = false,
+    this.flush = false,
     super.key,
   });
+
+  /// Removes the row's padding all round, so its text starts at the left edge,
+  /// its trailing controls end at the right edge, and its height is that of its
+  /// content. Use it where the row sits in a form column whose own edges and
+  /// row gap (AppSpacing.row) are the margin, not in a padded list.
+  final bool flush;
 
   /// Sets the title in bold (a workspace name above its description).
   final bool titleBold;
@@ -52,15 +59,15 @@ final class AppListRow extends StatelessWidget {
         ? colors.onSecondaryContainer
         : colors.onSurface;
     final BorderRadius radius = BorderRadius.circular(6);
-    final double vertical = dense ? 4 : 8;
+    final double vertical = flush ? 0 : (dense ? 4 : 8);
     final Widget content = ConstrainedBox(
       constraints: BoxConstraints(minHeight: minHeight ?? (dense ? 32 : 40)),
       child: Padding(
         padding: EdgeInsets.only(
-          left: 12,
+          left: flush ? 0 : 12,
           top: vertical,
           bottom: vertical,
-          right: 12,
+          right: flush ? 0 : 12,
         ),
         child: Row(
           children: <Widget>[
@@ -134,7 +141,7 @@ final class AppListRow extends StatelessWidget {
           children: <Widget>[
             Expanded(child: semantic(ink)),
             Padding(
-              padding: const EdgeInsets.only(left: 4, right: 8),
+              padding: EdgeInsets.only(left: 4, right: flush ? 0 : 8),
               child: trailing,
             ),
           ],
@@ -162,10 +169,23 @@ final class AppTreeRow extends StatelessWidget {
     this.highlighted = false,
     this.height = 30,
     this.minHeight,
+    this.subtitle,
+    this.tooltip,
+    this.onSecondaryTapDown,
     super.key,
   });
 
   final String label;
+
+  /// A small second line under the [label] (the path of a top level folder).
+  /// The row grows to fit it.
+  final String? subtitle;
+
+  /// Hover text; defaults to the [label].
+  final String? tooltip;
+
+  /// A right click or secondary tap, for a context menu.
+  final GestureTapDownCallback? onSecondaryTapDown;
   final int depth;
   final Widget? leading;
   final Widget? trailing;
@@ -197,10 +217,13 @@ final class AppTreeRow extends StatelessWidget {
           child: InkWell(
             borderRadius: radius,
             onTap: onTap,
+            onSecondaryTapDown: onSecondaryTapDown,
             child: SizedBox(
-              height: minHeight == null || minHeight! < height
-                  ? height
-                  : minHeight!,
+              height: <double>[
+                height,
+                if (subtitle != null) 44,
+                ?minHeight,
+              ].reduce((double a, double b) => a > b ? a : b),
               child: Padding(
                 padding: EdgeInsets.only(left: 6 + depth * 14, right: 6),
                 child: Row(
@@ -209,16 +232,33 @@ final class AppTreeRow extends StatelessWidget {
                     const SizedBox(width: 5),
                     Expanded(
                       child: Tooltip(
-                        message: label,
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: emphasized
-                                ? colors.onSecondaryContainer
-                                : null,
-                          ),
+                        message: tooltip ?? label,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: emphasized
+                                    ? colors.onSecondaryContainer
+                                    : null,
+                              ),
+                            ),
+                            if (subtitle != null)
+                              Text(
+                                subtitle!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: emphasized
+                                      ? colors.onSecondaryContainer
+                                      : colors.onSurfaceVariant,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),

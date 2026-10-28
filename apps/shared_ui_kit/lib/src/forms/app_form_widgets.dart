@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../tokens/app_spacing.dart';
+
 /// The bold label shown above a form field.
 final class AppFieldLabel extends StatelessWidget {
   const AppFieldLabel(this.label, {super.key});
@@ -105,8 +107,12 @@ final class AppTextField extends StatelessWidget {
       textInputAction: textInputAction,
       inputFormatters: inputFormatters,
       autofillHints: autofillHints,
-      minLines: obscureText ? 1 : minLines,
-      maxLines: obscureText ? 1 : maxLines,
+      // A fixed-height field fills its box. Without `expands` the field keeps
+      // its content height and sits at the top of the box, so a 32 dp value
+      // row drew a shorter field than the 32 dp button beside it.
+      expands: fixedHeight && !obscureText,
+      minLines: obscureText ? 1 : (fixedHeight ? null : minLines),
+      maxLines: obscureText ? 1 : (fixedHeight ? null : maxLines),
       maxLength: maxLength,
       textAlignVertical: fixedHeight ? TextAlignVertical.center : null,
       validator: validator,
@@ -331,5 +337,35 @@ final class AppEmptyMessage extends StatelessWidget {
         if (action != null) ...<Widget>[const SizedBox(height: 12), action!],
       ],
     ),
+  );
+}
+
+/// A field with the buttons that act on it (copy a value, add an item, open a
+/// folder) on one line. The field takes the free width; each action follows
+/// after the kit's control gap, which is the same gap as between two buttons.
+///
+/// Use it instead of a hand-built `Row`, so field-to-button spacing is defined
+/// once and matches button-to-button spacing everywhere.
+final class AppFieldRow extends StatelessWidget {
+  const AppFieldRow({
+    required this.field,
+    this.actions = const <Widget>[],
+    super.key,
+  });
+
+  final Widget field;
+
+  /// Buttons after the field, usually `AppIconButton(outlined: true)`.
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      Expanded(child: field),
+      for (final Widget action in actions) ...<Widget>[
+        AppSpacing.controlGap,
+        action,
+      ],
+    ],
   );
 }

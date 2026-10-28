@@ -625,7 +625,6 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
               const Spacer(),
               AppIconButton(
                 outlined: true,
-                iconSize: 17,
                 tooltip: 'Delete workspace',
                 onPressed: _isBusy || !widget.controller.isConnected
                     ? null
@@ -634,10 +633,9 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
                 busy: _isDeleting,
                 icon: FluentIcons.delete_20_regular,
               ),
-              const SizedBox(width: 4),
+              AppSpacing.controlGap,
               AppIconButton(
                 outlined: true,
-                iconSize: 17,
                 tooltip: 'Save workspace',
                 onPressed: _canSave ? _save : null,
                 busy: _isSaving,
@@ -697,22 +695,18 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             ?.copyWith(color: colors.onSurfaceVariant),
       ),
       const SizedBox(height: 8),
-      Row(
-        children: <Widget>[
-          Expanded(
-            child: AppTextField(
-              controller: _pathController,
-              enabled: !_isBusy,
-              hintText: r'C:\Projects\example',
-              onSubmitted: (_) {
-                if (_canAddPath) unawaited(_addPath());
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
+      AppFieldRow(
+        field: AppTextField(
+          controller: _pathController,
+          enabled: !_isBusy,
+          hintText: r'C:\Projects\example',
+          onSubmitted: (_) {
+            if (_canAddPath) unawaited(_addPath());
+          },
+        ),
+        actions: <Widget>[
           AppIconButton(
             outlined: true,
-            iconSize: 17,
             tooltip: 'Add workspace path',
             onPressed: _canAddPath ? _addPath : null,
             icon: FluentIcons.add_20_regular,
@@ -730,7 +724,10 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
         )
       else
         for (int rootIndex = 0; rootIndex < _paths.length; rootIndex++)
-          _buildPathRow(rootIndex, _paths[rootIndex]),
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.row),
+            child: _buildPathRow(rootIndex, _paths[rootIndex]),
+          ),
     ],
   );
 
@@ -739,6 +736,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     final bool isReindexing = _reindexingRootIndexes.contains(rootIndex);
     return AppListRow(
       dense: true,
+      flush: true,
       onTap: null,
       trailingInteractive: true,
       title: path,
@@ -748,16 +746,16 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
           const Text('RAG'),
           const SizedBox(width: 2),
           AppSwitch(
+            compact: true,
             value: ragEnabled,
             onChanged: _canPersistRag
                 ? (bool enabled) => unawaited(_toggleRag(path, enabled))
                 : null,
             semanticLabel: 'Enable RAG for $path',
           ),
-          const SizedBox(width: 4),
+          AppSpacing.controlGap,
           AppIconButton(
             outlined: true,
-            iconSize: 17,
             tooltip: 'Reindex workspace folder: $path',
             onPressed: _isBusy || !widget.controller.isConnected || !ragEnabled
                 ? null
@@ -765,10 +763,9 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
             busy: isReindexing,
             icon: FluentIcons.arrow_sync_20_regular,
           ),
-          const SizedBox(width: 4),
+          AppSpacing.controlGap,
           AppIconButton(
             outlined: true,
-            iconSize: 17,
             tooltip: 'Remove workspace path: $path',
             onPressed: _isBusy ? null : () => _removePath(path),
             icon: FluentIcons.dismiss_20_regular,
@@ -816,20 +813,15 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
       AppFieldLabel('UUID'),
-      Row(
-        children: <Widget>[
-          Expanded(
-            child: AppTextField(
-              key: ValueKey<String>(widget.workspace.uuid),
-              initialValue: widget.workspace.uuid,
-              readOnly: true,
-              height: 32,
-            ),
-          ),
-          const SizedBox(width: 8),
+      AppFieldRow(
+        field: AppTextField(
+          key: ValueKey<String>(widget.workspace.uuid),
+          initialValue: widget.workspace.uuid,
+          readOnly: true,
+        ),
+        actions: <Widget>[
           AppIconButton(
             outlined: true,
-            iconSize: 17,
             tooltip: 'Copy workspace UUID',
             onPressed: () async {
               await Clipboard.setData(
@@ -1050,17 +1042,15 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
                       const Spacer(),
                       AppIconButton(
                         outlined: true,
-                        iconSize: 17,
                         tooltip: 'Cancel workspace creation',
                         onPressed: _isCreating
                             ? null
                             : widget.controller.cancelWorkspaceCreation,
                         icon: FluentIcons.dismiss_20_regular,
                       ),
-                      const SizedBox(width: 4),
+                      AppSpacing.controlGap,
                       AppIconButton(
                         outlined: true,
-                        iconSize: 17,
                         tooltip: 'Create workspace',
                         onPressed: _canCreate ? _create : null,
                         busy: _isCreating,
