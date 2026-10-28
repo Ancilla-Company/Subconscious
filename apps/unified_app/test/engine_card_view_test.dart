@@ -158,7 +158,8 @@ const List<_Row> _rows = <_Row>[
     hysteresis: false,
     title: 'No engine online',
     buttons: <String>['Connect:false'],
-    caption: 'No engine is online. This device connects as soon as one appears.',
+    caption:
+        'No engine is online. This device connects as soon as one appears.',
   ),
   _Row(
     name: '13 disconnected, auto off, candidate',
@@ -198,23 +199,34 @@ void main() {
       );
       expect(view.title, row.title);
       expect(view.showProgress, row.progress);
-      expect(
-        <String>[for (final CardAction a in view.actions) '${a.label}:${a.enabled}'],
-        row.buttons,
-      );
+      expect(<String>[
+        for (final CardAction a in view.actions) '${a.label}:${a.enabled}',
+      ], row.buttons);
       expect(view.caption, row.caption);
 
       // Rules that follow from the table.
-      final List<String> labels = <String>[for (final CardAction a in view.actions) a.label];
+      final List<String> labels = <String>[
+        for (final CardAction a in view.actions) a.label,
+      ];
       expect(
-        view.actions.where((CardAction a) => a.kind == CardActionKind.primary).length,
+        view.actions
+            .where((CardAction a) => a.kind == CardActionKind.primary)
+            .length,
         lessThanOrEqualTo(1),
         reason: 'at most one primary action (Pause is a TextButton)',
       );
-      expect(labels.contains('Connect') && labels.contains('Disconnect'), isFalse);
+      expect(
+        labels.contains('Connect') && labels.contains('Disconnect'),
+        isFalse,
+      );
       expect(labels, isNot(contains('Reconnect')));
       for (final CardAction a in view.actions) {
-        if (!a.enabled) expect(view.caption, isNotNull, reason: 'a disabled action needs a caption');
+        if (!a.enabled)
+          expect(
+            view.caption,
+            isNotNull,
+            reason: 'a disabled action needs a caption',
+          );
         if (a.label == 'Pause') expect(a.kind, CardActionKind.secondary);
       }
     });

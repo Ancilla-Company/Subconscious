@@ -59,33 +59,40 @@ Future<HiveRuntime> _runtime() async {
   return runtime;
 }
 
-Future<EngineRepository?> _noEngine({Uri? explicitEndpoint, String? explicitToken}) async => null;
+Future<EngineRepository?> _noEngine({
+  Uri? explicitEndpoint,
+  String? explicitToken,
+}) async => null;
 
 void _singleSourceOfTruthTests() {
-  test('the card never says connected while the dashboard session is down', () async {
-    final HiveRuntime runtime = await _runtime();
-    runtime.engineState = EngineLinkState.connected;
-    runtime.homeEngineId = 'e1';
-    runtime.engineSessionUp = () => false;
-    expect(runtime.engineState, EngineLinkState.failed);
-    expect(engineCardViewFor(runtime).title, isNot(startsWith('Connected')));
-    runtime.engineSessionUp = () => true;
-    expect(runtime.engineState, EngineLinkState.connected);
-  });
+  test(
+    'the card never says connected while the dashboard session is down',
+    () async {
+      final HiveRuntime runtime = await _runtime();
+      runtime.engineState = EngineLinkState.connected;
+      runtime.homeEngineId = 'e1';
+      runtime.engineSessionUp = () => false;
+      expect(runtime.engineState, EngineLinkState.failed);
+      expect(engineCardViewFor(runtime).title, isNot(startsWith('Connected')));
+      runtime.engineSessionUp = () => true;
+      expect(runtime.engineState, EngineLinkState.connected);
+    },
+  );
 }
 
 /// `label:enabled` for every button under [root], in tree order.
 List<String> _buttons(Finder root) {
   final List<String> seen = <String>[];
-  for (final Element element in find
-      .descendant(
-        of: root,
-        matching: find.byWidgetPredicate(
-          (Widget w) =>
-              w is FilledButton || w is OutlinedButton || w is TextButton,
-        ),
-      )
-      .evaluate()) {
+  for (final Element element
+      in find
+          .descendant(
+            of: root,
+            matching: find.byWidgetPredicate(
+              (Widget w) =>
+                  w is FilledButton || w is OutlinedButton || w is TextButton,
+            ),
+          )
+          .evaluate()) {
     final Widget w = element.widget;
     final Text label =
         find
@@ -108,7 +115,12 @@ List<String> _buttons(Finder root) {
 /// A card state: how to put the runtime there, and the buttons expected as
 /// `label:enabled`.
 final class _Case {
-  const _Case(this.name, this.setup, this.buttons, {this.absent = const <String>[]});
+  const _Case(
+    this.name,
+    this.setup,
+    this.buttons, {
+    this.absent = const <String>[],
+  });
   final String name;
   final void Function(HiveRuntime runtime) setup;
   final List<String> buttons;
@@ -139,15 +151,25 @@ void main() {
   }
 
   final List<_Case> cases = <_Case>[
-    _Case('connected', (HiveRuntime r) {
-      r.nodes = <NodeView>[_engine('a')];
-      r.homeEngineId = 'a';
-      r.engineState = EngineLinkState.connected;
-    }, <String>['Disconnect:true'], absent: <String>['Connect', 'Reconnect']),
-    _Case('connecting', (HiveRuntime r) {
-      r.nodes = <NodeView>[_engine('a')];
-      r.engineState = EngineLinkState.connecting;
-    }, <String>['Cancel:true'], absent: <String>['Connect', 'Disconnect']),
+    _Case(
+      'connected',
+      (HiveRuntime r) {
+        r.nodes = <NodeView>[_engine('a')];
+        r.homeEngineId = 'a';
+        r.engineState = EngineLinkState.connected;
+      },
+      <String>['Disconnect:true'],
+      absent: <String>['Connect', 'Reconnect'],
+    ),
+    _Case(
+      'connecting',
+      (HiveRuntime r) {
+        r.nodes = <NodeView>[_engine('a')];
+        r.engineState = EngineLinkState.connecting;
+      },
+      <String>['Cancel:true'],
+      absent: <String>['Connect', 'Disconnect'],
+    ),
     _Case('failed, candidate', (HiveRuntime r) {
       r.nodes = <NodeView>[_engine('a')];
       r.engineState = EngineLinkState.failed;
@@ -166,9 +188,14 @@ void main() {
       r.engineState = EngineLinkState.failed;
       r.autoConnect = false;
     }, <String>['Connect:false']),
-    _Case('disconnected, single candidate', (HiveRuntime r) {
-      r.nodes = <NodeView>[_engine('a')];
-    }, <String>['Cancel:true'], absent: <String>['Connect']),
+    _Case(
+      'disconnected, single candidate',
+      (HiveRuntime r) {
+        r.nodes = <NodeView>[_engine('a')];
+      },
+      <String>['Cancel:true'],
+      absent: <String>['Connect'],
+    ),
     _Case('disconnected, several (pick)', (HiveRuntime r) {
       r.nodes = <NodeView>[_engine('a'), _engine('b')];
     }, <String>['Pause:true']),
@@ -198,7 +225,8 @@ void main() {
       expect(inCard, c.buttons, reason: 'card buttons: $inCard');
       for (final String label in c.absent) {
         expect(
-          _buttons(find.byType(DevicesSection)).any((String s) => s.startsWith('$label:')),
+          _buttons(find.byType(DevicesSection))
+              .any((String s) => s.startsWith('$label:')),
           isFalse,
           reason: '$label must not be visible anywhere',
         );
@@ -206,22 +234,25 @@ void main() {
     });
   }
 
-  testWidgets('a disabled Connect shows its caption and uses the disabled style', (
-    WidgetTester tester,
-  ) async {
-    final HiveRuntime runtime = (await tester.runAsync(_runtime))!;
-    addTearDown(runtime.dispose);
-    runtime.nodes = <NodeView>[_engine('a', online: false)];
-    await pump(tester, runtime);
-    expect(
-      find.text('No engine is online. This device connects as soon as one appears.'),
-      findsOneWidget,
-    );
-    final FilledButton connect = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Connect'),
-    );
-    expect(connect.onPressed, isNull);
-  });
+  testWidgets(
+    'a disabled Connect shows its caption and uses the disabled style',
+    (WidgetTester tester) async {
+      final HiveRuntime runtime = (await tester.runAsync(_runtime))!;
+      addTearDown(runtime.dispose);
+      runtime.nodes = <NodeView>[_engine('a', online: false)];
+      await pump(tester, runtime);
+      expect(
+        find.text(
+          'No engine is online. This device connects as soon as one appears.',
+        ),
+        findsOneWidget,
+      );
+      final FilledButton connect = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Connect'),
+      );
+      expect(connect.onPressed, isNull);
+    },
+  );
 
   testWidgets('the pick row keeps one enabled Connect per engine tile', (
     WidgetTester tester,
@@ -236,7 +267,9 @@ void main() {
     expect(find.widgetWithText(TextButton, 'Pause'), findsOneWidget);
   });
 
-  testWidgets('the connecting card shows a progress bar', (WidgetTester tester) async {
+  testWidgets('the connecting card shows a progress bar', (
+    WidgetTester tester,
+  ) async {
     final HiveRuntime runtime = (await tester.runAsync(_runtime))!;
     addTearDown(runtime.dispose);
     runtime.nodes = <NodeView>[_engine('a')];
@@ -245,31 +278,43 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
   });
 
-  test('the title chip is amber, never disconnected, while the card connects', () async {
-    final HiveRuntime runtime = await _runtime();
-    addTearDown(runtime.dispose);
-    final DashboardController dashboard = DashboardController(_noEngine)
-      ..connectionStatus = EngineConnectionStatus.disconnected;
-    addTearDown(dashboard.dispose);
+  test(
+    'the title chip is amber, never disconnected, while the card connects',
+    () async {
+      final HiveRuntime runtime = await _runtime();
+      addTearDown(runtime.dispose);
+      final DashboardController dashboard = DashboardController(_noEngine)
+        ..connectionStatus = EngineConnectionStatus.disconnected;
+      addTearDown(dashboard.dispose);
 
-    runtime.nodes = <NodeView>[_engine('a')];
-    runtime.engineState = EngineLinkState.connecting;
-    final (AppStatus, String) connecting = captionPresentation(
-      dashboard.connectionStatus,
-      runtime,
-    );
-    expect(connecting.$2, 'connecting');
-    expect(connecting.$1, AppStatus.connecting);
+      runtime.nodes = <NodeView>[_engine('a')];
+      runtime.engineState = EngineLinkState.connecting;
+      final (AppStatus, String) connecting = captionPresentation(
+        dashboard.connectionStatus,
+        runtime,
+      );
+      expect(connecting.$2, 'connecting');
+      expect(connecting.$1, AppStatus.connecting);
 
-    runtime.engineState = EngineLinkState.disconnected;
-    runtime.nodes = <NodeView>[_engine('a', online: false)];
-    runtime.autoConnect = false;
-    expect(captionPresentation(dashboard.connectionStatus, runtime).$2, 'disconnected');
+      runtime.engineState = EngineLinkState.disconnected;
+      runtime.nodes = <NodeView>[_engine('a', online: false)];
+      runtime.autoConnect = false;
+      expect(
+        captionPresentation(dashboard.connectionStatus, runtime).$2,
+        'disconnected',
+      );
 
-    runtime.linkingLocalEngine = true;
-    expect(captionPresentation(dashboard.connectionStatus, runtime).$2, 'starting engine');
+      runtime.linkingLocalEngine = true;
+      expect(
+        captionPresentation(dashboard.connectionStatus, runtime).$2,
+        'starting engine',
+      );
 
-    dashboard.connectionStatus = EngineConnectionStatus.connected;
-    expect(captionPresentation(dashboard.connectionStatus, runtime).$2, 'connected');
-  });
+      dashboard.connectionStatus = EngineConnectionStatus.connected;
+      expect(
+        captionPresentation(dashboard.connectionStatus, runtime).$2,
+        'connected',
+      );
+    },
+  );
 }

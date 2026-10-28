@@ -29,14 +29,29 @@ final class DashboardPage extends StatelessWidget {
     // full-height chat), whatever the popup or side panel width.
     final bool forceMobile =
         (extensionHost ?? ExtensionHost.instance).isExtension;
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (BuildContext context, Widget? child) =>
+          _layout(context, forceMobile),
+    );
+  }
+
+  Widget _layout(BuildContext context, bool forceMobile) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
+        // The small chat-only window is a desktop window, not a phone: it
+        // keeps the desktop shell (title bar with its toggle, 32 dp controls)
+        // however narrow it is.
+        if (controller.chatOnly) {
+          return DesktopWebDashboardView(
+            controller: controller,
+            accountController: accountController,
+          );
+        }
         if (forceMobile || constraints.maxWidth < wideLayoutBreakpoint) {
           return MobileDashboardView(
             controller: controller,
             accountController: accountController,
-            // A pointer drives the extension: use the kit's 32 dp controls.
-            compactControls: forceMobile,
           );
         }
         return DesktopWebDashboardView(

@@ -95,7 +95,10 @@ Future<void> _openRequestStep(WidgetTester tester) async {
 
 Future<void> _reachConfirmStep(WidgetTester tester) async {
   await _openRequestStep(tester);
-  await tester.enterText(find.widgetWithText(TextFormField, 'you@example.com'), 'a@b.c');
+  await tester.enterText(
+    find.widgetWithText(TextFormField, 'you@example.com'),
+    'a@b.c',
+  );
   await tester.tap(find.text('Send reset code'));
   await tester.pump();
   await tester.pump();
@@ -106,23 +109,37 @@ void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues(<String, String>{}));
 
   group('AccountController', () {
-    test('requestPasswordReset sets the notice and returns the message', () async {
-      final List<http.Request> requests = <http.Request>[];
-      final HiveRuntime runtime = _runtime(requests);
-      addTearDown(runtime.dispose);
-      final AccountController account = AccountController(session: runtime, clientProvider: () => null);
-      addTearDown(account.dispose);
-      expect(await account.requestPasswordReset(email: ' a@b.c '), 'Sent.');
-      expect(account.notice, 'Sent.');
-      expect(account.error, isNull);
-      expect(account.isBusy, isFalse);
-      expect(jsonDecode(requests.single.body), <String, dynamic>{'email': 'a@b.c'});
-    });
+    test(
+      'requestPasswordReset sets the notice and returns the message',
+      () async {
+        final List<http.Request> requests = <http.Request>[];
+        final HiveRuntime runtime = _runtime(requests);
+        addTearDown(runtime.dispose);
+        final AccountController account = AccountController(
+          session: runtime,
+          clientProvider: () => null,
+        );
+        addTearDown(account.dispose);
+        expect(await account.requestPasswordReset(email: ' a@b.c '), 'Sent.');
+        expect(account.notice, 'Sent.');
+        expect(account.error, isNull);
+        expect(account.isBusy, isFalse);
+        expect(jsonDecode(requests.single.body), <String, dynamic>{
+          'email': 'a@b.c',
+        });
+      },
+    );
 
     test('requestPasswordReset maps 429 to a wait message', () async {
-      final HiveRuntime runtime = _runtime(<http.Request>[], requestStatus: 429);
+      final HiveRuntime runtime = _runtime(
+        <http.Request>[],
+        requestStatus: 429,
+      );
       addTearDown(runtime.dispose);
-      final AccountController account = AccountController(session: runtime, clientProvider: () => null);
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => null,
+      );
       addTearDown(account.dispose);
       expect(await account.requestPasswordReset(email: 'a@b.c'), isNull);
       expect(account.error, contains('Too many attempts'));
@@ -131,22 +148,39 @@ void main() {
     test('confirmPasswordReset signs in on success', () async {
       final HiveRuntime runtime = _runtime(<http.Request>[]);
       addTearDown(runtime.dispose);
-      final AccountController account = AccountController(session: runtime, clientProvider: () => null);
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => null,
+      );
       addTearDown(account.dispose);
       expect(
-        await account.confirmPasswordReset(email: 'a@b.c', code: '123456', newPassword: 'new-pass-1'),
+        await account.confirmPasswordReset(
+          email: 'a@b.c',
+          code: '123456',
+          newPassword: 'new-pass-1',
+        ),
         isTrue,
       );
       expect(account.isAuthenticated, isTrue);
     });
 
     test('confirmPasswordReset maps 400 to an actionable error', () async {
-      final HiveRuntime runtime = _runtime(<http.Request>[], confirmStatus: 400);
+      final HiveRuntime runtime = _runtime(
+        <http.Request>[],
+        confirmStatus: 400,
+      );
       addTearDown(runtime.dispose);
-      final AccountController account = AccountController(session: runtime, clientProvider: () => null);
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => null,
+      );
       addTearDown(account.dispose);
       expect(
-        await account.confirmPasswordReset(email: 'a@b.c', code: '1', newPassword: 'new-pass-1'),
+        await account.confirmPasswordReset(
+          email: 'a@b.c',
+          code: '1',
+          newPassword: 'new-pass-1',
+        ),
         isFalse,
       );
       expect(account.error, contains('Invalid or expired reset code'));
@@ -157,7 +191,10 @@ void main() {
 
   testWidgets('sign-in email and password fields share one height and use the '
       'settings label style', (WidgetTester tester) async {
-    final AccountController account = await _controller(tester, <http.Request>[]);
+    final AccountController account = await _controller(
+      tester,
+      <http.Request>[],
+    );
     await _pump(tester, account);
     final Finder email = find.widgetWithText(TextFormField, 'you@example.com');
     final Finder password = find.widgetWithText(
@@ -174,13 +211,20 @@ void main() {
   });
 
   group('AccountPanel forgot password', () {
-    testWidgets('the link is shown on the sign-in form', (WidgetTester tester) async {
-      final AccountController account = await _controller(tester, <http.Request>[]);
+    testWidgets('the link is shown on the sign-in form', (
+      WidgetTester tester,
+    ) async {
+      final AccountController account = await _controller(
+        tester,
+        <http.Request>[],
+      );
       await _pump(tester, account);
       expect(find.text('Forgot password?'), findsOneWidget);
     });
 
-    testWidgets('an invalid email makes no request', (WidgetTester tester) async {
+    testWidgets('an invalid email makes no request', (
+      WidgetTester tester,
+    ) async {
       final List<http.Request> requests = <http.Request>[];
       final AccountController account = await _controller(tester, requests);
       await _pump(tester, account);
@@ -191,18 +235,29 @@ void main() {
       expect(requests, isEmpty);
     });
 
-    testWidgets('a valid email reaches the code step and disables resend', (WidgetTester tester) async {
+    testWidgets('a valid email reaches the code step and disables resend', (
+      WidgetTester tester,
+    ) async {
       final List<http.Request> requests = <http.Request>[];
       final AccountController account = await _controller(tester, requests);
       await _pump(tester, account);
       await _reachConfirmStep(tester);
       expect(find.text('Code sent to a@b.c'), findsOneWidget);
-      expect(find.widgetWithText(TextFormField, 'Code from your email'), findsOneWidget);
-      expect(find.widgetWithText(TextFormField, 'At least 8 characters'), findsOneWidget);
-    // Labels sit above the fields (the app's settings form style).
-    expect(find.text('Reset code'), findsOneWidget);
-    expect(find.text('New password'), findsOneWidget);
-      final Finder resend = find.widgetWithText(TextButton, 'Send a new code in 60s');
+      expect(
+        find.widgetWithText(TextFormField, 'Code from your email'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(TextFormField, 'At least 8 characters'),
+        findsOneWidget,
+      );
+      // Labels sit above the fields (the app's settings form style).
+      expect(find.text('Reset code'), findsOneWidget);
+      expect(find.text('New password'), findsOneWidget);
+      final Finder resend = find.widgetWithText(
+        TextButton,
+        'Send a new code in 60s',
+      );
       expect(tester.widget<TextButton>(resend).onPressed, isNull);
       expect(requests.single.url.path, '/auth/password-reset/request');
       // Let the cooldown timer finish so no timer is left pending.
@@ -210,17 +265,25 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('empty code or short password makes no confirm call', (WidgetTester tester) async {
+    testWidgets('empty code or short password makes no confirm call', (
+      WidgetTester tester,
+    ) async {
       final List<http.Request> requests = <http.Request>[];
       final AccountController account = await _controller(tester, requests);
       await _pump(tester, account);
       await _reachConfirmStep(tester);
-      await tester.enterText(find.widgetWithText(TextFormField, 'At least 8 characters'), 'short');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'At least 8 characters'),
+        'short',
+      );
       await tester.tap(find.text('Reset password'));
       await tester.pump();
       expect(find.text('Enter the code from your email.'), findsOneWidget);
       expect(find.text('Use at least 8 characters.'), findsOneWidget);
-      expect(requests.where((http.Request r) => r.url.path.endsWith('confirm')), isEmpty);
+      expect(
+        requests.where((http.Request r) => r.url.path.endsWith('confirm')),
+        isEmpty,
+      );
       await tester.pump(const Duration(seconds: 61));
       await tester.pump(const Duration(seconds: 1));
     });
@@ -230,8 +293,14 @@ void main() {
       final AccountController account = await _controller(tester, requests);
       await _pump(tester, account);
       await _reachConfirmStep(tester);
-      await tester.enterText(find.widgetWithText(TextFormField, 'Code from your email'), '123456');
-      await tester.enterText(find.widgetWithText(TextFormField, 'At least 8 characters'), 'new-pass-1');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Code from your email'),
+        '123456',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'At least 8 characters'),
+        'new-pass-1',
+      );
       await tester.tap(find.text('Reset password'));
       await tester.pump();
       await tester.pump();
@@ -242,23 +311,50 @@ void main() {
       expect(jsonDecode(confirm.body)['new_password'], 'new-pass-1');
     });
 
-    testWidgets('a 400 shows the error and keeps the form usable', (WidgetTester tester) async {
-      final AccountController account = await _controller(tester, <http.Request>[], confirmStatus: 400);
+    testWidgets('a 400 shows the error and keeps the form usable', (
+      WidgetTester tester,
+    ) async {
+      final AccountController account = await _controller(
+        tester,
+        <http.Request>[],
+        confirmStatus: 400,
+      );
       await _pump(tester, account);
       await _reachConfirmStep(tester);
-      await tester.enterText(find.widgetWithText(TextFormField, 'Code from your email'), '000000');
-      await tester.enterText(find.widgetWithText(TextFormField, 'At least 8 characters'), 'new-pass-1');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Code from your email'),
+        '000000',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'At least 8 characters'),
+        'new-pass-1',
+      );
       await tester.tap(find.text('Reset password'));
       await tester.pump();
       await tester.pump();
-      expect(find.textContaining('Invalid or expired reset code'), findsOneWidget);
-      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Reset password')).onPressed, isNotNull);
+      expect(
+        find.textContaining('Invalid or expired reset code'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Reset password'),
+            )
+            .onPressed,
+        isNotNull,
+      );
       await tester.pump(const Duration(seconds: 61));
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('Back to sign in works from the request step', (WidgetTester tester) async {
-      final AccountController account = await _controller(tester, <http.Request>[]);
+    testWidgets('Back to sign in works from the request step', (
+      WidgetTester tester,
+    ) async {
+      final AccountController account = await _controller(
+        tester,
+        <http.Request>[],
+      );
       await _pump(tester, account);
       await _openRequestStep(tester);
       expect(find.text('Reset your password'), findsOneWidget);
@@ -268,8 +364,13 @@ void main() {
       expect(find.text('Reset your password'), findsNothing);
     });
 
-    testWidgets('Back to sign in works from the code step', (WidgetTester tester) async {
-      final AccountController account = await _controller(tester, <http.Request>[]);
+    testWidgets('Back to sign in works from the code step', (
+      WidgetTester tester,
+    ) async {
+      final AccountController account = await _controller(
+        tester,
+        <http.Request>[],
+      );
       await _pump(tester, account);
       await _reachConfirmStep(tester);
       await tester.tap(find.text('Back to sign in'));

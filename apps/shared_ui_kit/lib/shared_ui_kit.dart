@@ -21,6 +21,7 @@ export 'src/widgets/app_status_dot.dart';
 export 'src/widgets/app_toolbar.dart';
 export 'src/widgets/flyout_nav_button.dart';
 export 'src/widgets/sidebar_button.dart';
+export 'src/tokens/app_density.dart';
 export 'src/tokens/app_radii.dart';
 export 'src/tokens/app_spacing.dart';
 export 'src/widgets/app_switch.dart';

@@ -145,7 +145,9 @@ void main() {
       delay: noDelay,
     );
     expect(await subject.ensureRunning(), EngineStartOutcome.started);
-    expect(launcher.started, <String>[r'C:\App\engine\subconscious-desktop.exe']);
+    expect(launcher.started, <String>[
+      r'C:\App\engine\subconscious-desktop.exe',
+    ]);
     expect(pollsAfterStart, 3);
     expect(delays, 3);
     expect(launcher.locks.single.releases, 1);

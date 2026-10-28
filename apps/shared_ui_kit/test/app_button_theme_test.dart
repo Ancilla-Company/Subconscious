@@ -1,3 +1,5 @@
+// themeStyleOf is the one way to read the resolved theme style of a button.
+// ignore_for_file: invalid_use_of_protected_member, deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';

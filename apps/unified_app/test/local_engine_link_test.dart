@@ -26,8 +26,9 @@ const Map<String, dynamic> _loginBody = <String, dynamic>{
 final class _NoTransport implements PeerTransportFactory {
   const _NoTransport();
   @override
-  Future<PeerTransport> create({required List<Map<String, dynamic>> iceServers}) =>
-      throw UnimplementedError();
+  Future<PeerTransport> create({
+    required List<Map<String, dynamic>> iceServers,
+  }) => throw UnimplementedError();
 }
 
 Future<SignalSocket> _neverConnects(Uri _) => Completer<SignalSocket>().future;
@@ -64,7 +65,10 @@ final class _Rig {
         return http.Response('{}', 200);
       }
       if (r.method == 'GET' && r.url.path == '/nodes') {
-        return http.Response(jsonEncode(<String, dynamic>{'nodes': <Object?>[]}), 200);
+        return http.Response(
+          jsonEncode(<String, dynamic>{'nodes': <Object?>[]}),
+          200,
+        );
       }
       return http.Response('{}', 404);
     });
@@ -79,7 +83,8 @@ final class _Rig {
         Duration(milliseconds: 1),
         Duration(milliseconds: 1),
       ],
-      probeSleep: (Duration _) => Future<void>.delayed(const Duration(milliseconds: 1)),
+      probeSleep: (Duration _) =>
+          Future<void>.delayed(const Duration(milliseconds: 1)),
       hive: HiveClient(
         account: account,
         seedStore: seeds,
@@ -157,19 +162,22 @@ void main() {
     expect(rig.registrations, 0);
   });
 
-  test('a late engine goes the engine path with zero device registrations', () async {
-    final _Rig rig = await _Rig.create(probesBeforeFound: 1);
-    addTearDown(rig.runtime.dispose);
-    int reconnects = 0;
-    rig.runtime.onEngineAvailable = () async => reconnects++;
-    await rig.runtime.signIn(email: 'a@b.c', password: 'password1');
-    await until(() => rig.runtime.hasLocalFullNode);
-    expect(rig.runtime.hasLocalFullNode, isTrue);
-    expect(rig.runtime.linkingLocalEngine, isFalse);
-    expect(reconnects, greaterThan(0));
-    await until(() => rig.patches.isNotEmpty);
-    expect(rig.registrations, 0);
-  });
+  test(
+    'a late engine goes the engine path with zero device registrations',
+    () async {
+      final _Rig rig = await _Rig.create(probesBeforeFound: 1);
+      addTearDown(rig.runtime.dispose);
+      int reconnects = 0;
+      rig.runtime.onEngineAvailable = () async => reconnects++;
+      await rig.runtime.signIn(email: 'a@b.c', password: 'password1');
+      await until(() => rig.runtime.hasLocalFullNode);
+      expect(rig.runtime.hasLocalFullNode, isTrue);
+      expect(rig.runtime.linkingLocalEngine, isFalse);
+      expect(reconnects, greaterThan(0));
+      await until(() => rig.patches.isNotEmpty);
+      expect(rig.registrations, 0);
+    },
+  );
 
   test('useThisPcAsRemoteClient registers a thin device', () async {
     final _Rig rig = await _Rig.create();
@@ -192,7 +200,9 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(rig.patches, hasLength(1));
     final http.Request patch = rig.patches.single;
-    expect(jsonDecode(patch.body), <String, dynamic>{'parent_node_id': 'n_engine'});
+    expect(jsonDecode(patch.body), <String, dynamic>{
+      'parent_node_id': 'n_engine',
+    });
     expect(rig.registrations, 0);
   });
 
@@ -208,34 +218,41 @@ void main() {
     expect(rig.runtime.status, HiveStatus.ready);
   });
 
-  test('sign-in sends device_name and a 32 hex client_id to the engine login', () async {
-    final _Rig rig = await _Rig.create();
-    addTearDown(rig.runtime.dispose);
-    final List<http.Request> engineLogins = <http.Request>[];
-    rig.runtime.localEngineClient = () async => RestEngineClient(
-      baseUri: Uri.parse('http://127.0.0.1:1/api/v1/'),
-      token: 't',
-      client: MockClient((http.Request r) async {
-        engineLogins.add(r);
-        return http.Response(
-          jsonEncode(<String, dynamic>{'signedIn': true, 'email': 'a@b.c'}),
-          200,
-        );
-      }),
-    );
-    final AccountController controller = AccountController(
-      session: rig.runtime,
-      clientProvider: () => rig.runtime.localEngineClient!.call(),
-    );
-    addTearDown(controller.dispose);
-    expect(await controller.signIn(email: 'a@b.c', password: 'password1'), isTrue);
-    final http.Request login = engineLogins.firstWhere(
-      (http.Request r) => r.url.path.endsWith('/account/login'),
-    );
-    final Map<String, dynamic> body = jsonDecode(login.body) as Map<String, dynamic>;
-    expect(body['device_name'], rig.runtime.deviceName);
-    expect(body['client_id'], matches(RegExp(r'^[0-9a-f]{32}$')));
-    // The id is stable across calls.
-    expect(await rig.runtime.clientId(), body['client_id']);
-  });
+  test(
+    'sign-in sends device_name and a 32 hex client_id to the engine login',
+    () async {
+      final _Rig rig = await _Rig.create();
+      addTearDown(rig.runtime.dispose);
+      final List<http.Request> engineLogins = <http.Request>[];
+      rig.runtime.localEngineClient = () async => RestEngineClient(
+        baseUri: Uri.parse('http://127.0.0.1:1/api/v1/'),
+        token: 't',
+        client: MockClient((http.Request r) async {
+          engineLogins.add(r);
+          return http.Response(
+            jsonEncode(<String, dynamic>{'signedIn': true, 'email': 'a@b.c'}),
+            200,
+          );
+        }),
+      );
+      final AccountController controller = AccountController(
+        session: rig.runtime,
+        clientProvider: () => rig.runtime.localEngineClient!.call(),
+      );
+      addTearDown(controller.dispose);
+      expect(
+        await controller.signIn(email: 'a@b.c', password: 'password1'),
+        isTrue,
+      );
+      final http.Request login = engineLogins.firstWhere(
+        (http.Request r) => r.url.path.endsWith('/account/login'),
+      );
+      final Map<String, dynamic> body =
+          jsonDecode(login.body) as Map<String, dynamic>;
+      expect(body['device_name'], rig.runtime.deviceName);
+      expect(body['client_id'], matches(RegExp(r'^[0-9a-f]{32}$')));
+      // The id is stable across calls.
+      expect(await rig.runtime.clientId(), body['client_id']);
+    },
+  );
 }

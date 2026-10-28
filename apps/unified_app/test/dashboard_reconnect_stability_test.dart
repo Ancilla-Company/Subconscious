@@ -14,7 +14,8 @@ final class _FakeSocket implements EngineSocket {
   bool get isConnected => connected;
 
   @override
-  Stream<WireFrame> get frames => Stream<WireFrame>.fromIterable(const <WireFrame>[]);
+  Stream<WireFrame> get frames =>
+      Stream<WireFrame>.fromIterable(const <WireFrame>[]);
 
   @override
   Future<void> connect() async => connected = true;
@@ -79,13 +80,13 @@ void main() {
   ) async {
     int resolverCalls = 0;
     int startupCalls = 0;
-    final DashboardController controller = DashboardController(
-      ({Uri? explicitEndpoint, String? explicitToken}) async {
-        resolverCalls++;
-        return null;
-      },
-      engineStartup: () async => startupCalls++,
-    );
+    final DashboardController controller = DashboardController(({
+      Uri? explicitEndpoint,
+      String? explicitToken,
+    }) async {
+      resolverCalls++;
+      return null;
+    }, engineStartup: () async => startupCalls++);
 
     unawaited(controller.load());
     await tester.pump();
@@ -148,7 +149,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 10));
     }
 
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
     await tester.pump();
     expect(controller.connectionStatus, EngineConnectionStatus.disconnected);
     expect(controller.error.toString(), contains('rejected this app'));

@@ -75,51 +75,66 @@ void main() {
     expect(backoff.next().inSeconds, 5);
   });
 
-  test('the home engine survives a short offline blip and drops after the grace', () async {
-    final HiveRuntime runtime = await _runtime();
-    addTearDown(runtime.dispose);
-    runtime.onEngineAvailable = () async {};
-    runtime.homeEngineId = 'a';
-    runtime.engineState = EngineLinkState.connected;
-    runtime.nodes = <NodeView>[_engine('a', online: false)];
-    await runtime.maybeAutoConnect();
-    expect(runtime.homeEngineId, 'a', reason: 'inside the grace window');
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    await runtime.maybeAutoConnect();
-    expect(runtime.homeEngineId, 'a');
-    expect(runtime.engineState, EngineLinkState.connected);
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-    expect(runtime.homeEngineId, isNull, reason: 'still offline after the grace');
-    expect(runtime.engineState, EngineLinkState.disconnected);
-  });
+  test(
+    'the home engine survives a short offline blip and drops after the grace',
+    () async {
+      final HiveRuntime runtime = await _runtime();
+      addTearDown(runtime.dispose);
+      runtime.onEngineAvailable = () async {};
+      runtime.homeEngineId = 'a';
+      runtime.engineState = EngineLinkState.connected;
+      runtime.nodes = <NodeView>[_engine('a', online: false)];
+      await runtime.maybeAutoConnect();
+      expect(runtime.homeEngineId, 'a', reason: 'inside the grace window');
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await runtime.maybeAutoConnect();
+      expect(runtime.homeEngineId, 'a');
+      expect(runtime.engineState, EngineLinkState.connected);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(
+        runtime.homeEngineId,
+        isNull,
+        reason: 'still offline after the grace',
+      );
+      expect(runtime.engineState, EngineLinkState.disconnected);
+    },
+  );
 
-  test('an engine that comes back inside the grace window keeps the link', () async {
-    final HiveRuntime runtime = await _runtime();
-    addTearDown(runtime.dispose);
-    runtime.onEngineAvailable = () async {};
-    runtime.homeEngineId = 'a';
-    runtime.engineState = EngineLinkState.connected;
-    runtime.nodes = <NodeView>[_engine('a', online: false)];
-    await runtime.maybeAutoConnect();
-    runtime.nodes = <NodeView>[_engine('a')];
-    await runtime.maybeAutoConnect();
-    await Future<void>.delayed(const Duration(milliseconds: 450));
-    expect(runtime.homeEngineId, 'a');
-    expect(runtime.engineState, EngineLinkState.connected);
-  });
+  test(
+    'an engine that comes back inside the grace window keeps the link',
+    () async {
+      final HiveRuntime runtime = await _runtime();
+      addTearDown(runtime.dispose);
+      runtime.onEngineAvailable = () async {};
+      runtime.homeEngineId = 'a';
+      runtime.engineState = EngineLinkState.connected;
+      runtime.nodes = <NodeView>[_engine('a', online: false)];
+      await runtime.maybeAutoConnect();
+      runtime.nodes = <NodeView>[_engine('a')];
+      await runtime.maybeAutoConnect();
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      expect(runtime.homeEngineId, 'a');
+      expect(runtime.engineState, EngineLinkState.connected);
+    },
+  );
 
-  test('inEngineHysteresis covers the window after the last engine left', () async {
-    final HiveRuntime runtime = await _runtime(grace: const Duration(milliseconds: 200));
-    addTearDown(runtime.dispose);
-    runtime.onEngineAvailable = () async {};
-    runtime.nodes = <NodeView>[_engine('a')];
-    await runtime.maybeAutoConnect();
-    runtime.nodes = <NodeView>[_engine('a', online: false)];
-    await runtime.maybeAutoConnect();
-    expect(runtime.inEngineHysteresis, isTrue);
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    expect(runtime.inEngineHysteresis, isFalse);
-  });
+  test(
+    'inEngineHysteresis covers the window after the last engine left',
+    () async {
+      final HiveRuntime runtime = await _runtime(
+        grace: const Duration(milliseconds: 200),
+      );
+      addTearDown(runtime.dispose);
+      runtime.onEngineAvailable = () async {};
+      runtime.nodes = <NodeView>[_engine('a')];
+      await runtime.maybeAutoConnect();
+      runtime.nodes = <NodeView>[_engine('a', online: false)];
+      await runtime.maybeAutoConnect();
+      expect(runtime.inEngineHysteresis, isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(runtime.inEngineHysteresis, isFalse);
+    },
+  );
 
   test('disconnect never leaves connected with auto-connect off', () async {
     final HiveRuntime runtime = await _runtime();
@@ -127,7 +142,8 @@ void main() {
     runtime.onEngineAvailable = () async {};
     final List<String> bad = <String>[];
     runtime.addListener(() {
-      if (runtime.engineState == EngineLinkState.connected && !runtime.autoConnect) {
+      if (runtime.engineState == EngineLinkState.connected &&
+          !runtime.autoConnect) {
         bad.add('connected with auto-connect off');
       }
     });
@@ -158,83 +174,90 @@ void main() {
     runtime.serverUnavailable = false;
     runtime.hasLocalFullNode = true;
     runtime.signalConnected = false;
-    expect(runtime.shouldReconcile, isFalse, reason: 'local engine owns the list');
+    expect(
+      runtime.shouldReconcile,
+      isFalse,
+      reason: 'local engine owns the list',
+    );
   });
 
-  test('502 keeps the list and sets serverUnavailable; success clears both', () async {
-    final MemoryIdentitySeedStore seeds = MemoryIdentitySeedStore();
-    final NodeIdentity me = await loadOrCreateIdentity(seeds);
-    int listCalls = 0;
-    int failures = 2;
-    final MockClient mock = MockClient((http.Request r) async {
-      if (r.url.path == '/auth/email/login') {
-        return http.Response(jsonEncode(_loginBody), 200);
-      }
-      if (r.method == 'POST' && r.url.path == '/nodes') {
-        return http.Response('{}', 200);
-      }
-      if (r.method == 'GET' && r.url.path == '/nodes') {
-        listCalls++;
-        if (listCalls > 1 && failures > 0) {
-          failures--;
-          return http.Response('bad gateway', 502);
+  test(
+    '502 keeps the list and sets serverUnavailable; success clears both',
+    () async {
+      final MemoryIdentitySeedStore seeds = MemoryIdentitySeedStore();
+      final NodeIdentity me = await loadOrCreateIdentity(seeds);
+      int listCalls = 0;
+      int failures = 2;
+      final MockClient mock = MockClient((http.Request r) async {
+        if (r.url.path == '/auth/email/login') {
+          return http.Response(jsonEncode(_loginBody), 200);
         }
-        return http.Response(
-          jsonEncode(<String, dynamic>{
-            'hive_id': 'h',
-            'nodes': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'id': me.nodeId,
-                'public_key': me.publicKeyB64u,
-                'kind': 'thin',
-                'name': 'Me',
-                'platform': 'android',
-                'status': 'active',
-                'online': true,
-              },
-            ],
-          }),
-          200,
-        );
-      }
-      return http.Response('{}', 404);
-    });
-    final ServerAccountClient account = ServerAccountClient(
-      baseUri: Uri.parse('https://api.test'),
-      tokenStore: MemoryRefreshTokenStore(),
-      client: mock,
-    );
-    final HiveRuntime runtime = HiveRuntime(
-      account: account,
-      hive: HiveClient(
+        if (r.method == 'POST' && r.url.path == '/nodes') {
+          return http.Response('{}', 200);
+        }
+        if (r.method == 'GET' && r.url.path == '/nodes') {
+          listCalls++;
+          if (listCalls > 1 && failures > 0) {
+            failures--;
+            return http.Response('bad gateway', 502);
+          }
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'hive_id': 'h',
+              'nodes': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': me.nodeId,
+                  'public_key': me.publicKeyB64u,
+                  'kind': 'thin',
+                  'name': 'Me',
+                  'platform': 'android',
+                  'status': 'active',
+                  'online': true,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 404);
+      });
+      final ServerAccountClient account = ServerAccountClient(
+        baseUri: Uri.parse('https://api.test'),
+        tokenStore: MemoryRefreshTokenStore(),
+        client: mock,
+      );
+      final HiveRuntime runtime = HiveRuntime(
         account: account,
-        seedStore: seeds,
-        pinStoreFactory: (String _) async => MemoryPinStore(),
-        transportFactory: const _NoTransport(),
-        deviceName: 'Me',
-        platform: 'android',
-        appVersion: '1',
-        signalConnect: _neverConnects,
-        httpClient: mock,
-        apiRetryDelays: const <Duration>[],
-      ),
-    );
-    addTearDown(runtime.dispose);
-    await runtime.signIn(email: 'a@b.c', password: 'password1');
-    expect(runtime.nodes, hasLength(1));
-    expect(runtime.serverUnavailable, isFalse);
+        hive: HiveClient(
+          account: account,
+          seedStore: seeds,
+          pinStoreFactory: (String _) async => MemoryPinStore(),
+          transportFactory: const _NoTransport(),
+          deviceName: 'Me',
+          platform: 'android',
+          appVersion: '1',
+          signalConnect: _neverConnects,
+          httpClient: mock,
+          apiRetryDelays: const <Duration>[],
+        ),
+      );
+      addTearDown(runtime.dispose);
+      await runtime.signIn(email: 'a@b.c', password: 'password1');
+      expect(runtime.nodes, hasLength(1));
+      expect(runtime.serverUnavailable, isFalse);
 
-    await runtime.refresh(); // 502
-    expect(runtime.serverUnavailable, isTrue);
-    expect(runtime.error, isNull, reason: '502 is not an error to act on');
-    expect(runtime.nodes, hasLength(1), reason: 'the last list is kept');
-    await runtime.refresh(); // 502
-    expect(runtime.serverUnavailable, isTrue);
-    await runtime.refresh(); // 200
-    expect(runtime.serverUnavailable, isFalse);
-    expect(runtime.error, isNull);
-    expect(runtime.nodes, hasLength(1));
-  });
+      await runtime.refresh(); // 502
+      expect(runtime.serverUnavailable, isTrue);
+      expect(runtime.error, isNull, reason: '502 is not an error to act on');
+      expect(runtime.nodes, hasLength(1), reason: 'the last list is kept');
+      await runtime.refresh(); // 502
+      expect(runtime.serverUnavailable, isTrue);
+      await runtime.refresh(); // 200
+      expect(runtime.serverUnavailable, isFalse);
+      expect(runtime.error, isNull);
+      expect(runtime.nodes, hasLength(1));
+    },
+  );
 
   test('the card view names the reconnect window and the pick row', () async {
     final EngineCardView view = buildEngineCardView(
@@ -252,6 +275,7 @@ void main() {
 final class _NoTransport implements PeerTransportFactory {
   const _NoTransport();
   @override
-  Future<PeerTransport> create({required List<Map<String, dynamic>> iceServers}) =>
-      throw UnimplementedError();
+  Future<PeerTransport> create({
+    required List<Map<String, dynamic>> iceServers,
+  }) => throw UnimplementedError();
 }

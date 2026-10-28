@@ -153,7 +153,11 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.byType(TextFormField), findsWidgets, reason: 'one sign-in form');
+    expect(
+      find.byType(TextFormField),
+      findsWidgets,
+      reason: 'one sign-in form',
+    );
 
     await tester.runAsync(
       () => account.signIn(email: 'a@b.c', password: 'password1'),
@@ -206,98 +210,117 @@ void main() {
     },
   );
 
-  testWidgets('devices section renders nothing when the account is signed out', (
-    WidgetTester tester,
-  ) async {
-    final List<http.Request> requests = <http.Request>[];
-    final HiveRuntime runtime = _signedOutRuntime(requests);
-    addTearDown(runtime.dispose);
-    final AccountController account = AccountController(
-      session: runtime,
-      clientProvider: () => null,
-    )..status = AccountStatus.anonymous;
-    addTearDown(account.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: DevicesSection(account: account)),
-      ),
-    );
-    await tester.pump();
-    expect(find.byType(TextField), findsNothing);
-    expect(find.text('No devices yet.'), findsNothing);
-    expect(requests, isEmpty);
-  });
+  testWidgets(
+    'devices section renders nothing when the account is signed out',
+    (WidgetTester tester) async {
+      final List<http.Request> requests = <http.Request>[];
+      final HiveRuntime runtime = _signedOutRuntime(requests);
+      addTearDown(runtime.dispose);
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => null,
+      )..status = AccountStatus.anonymous;
+      addTearDown(account.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: DevicesSection(account: account)),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('No devices yet.'), findsNothing);
+      expect(requests, isEmpty);
+    },
+  );
 
-  test('the server session is the source of truth; the engine follows', () async {
-    final List<http.Request> serverRequests = <http.Request>[];
-    final List<http.Request> engineRequests = <http.Request>[];
-    final HiveRuntime runtime = _failingFetchRuntime(serverRequests);
-    addTearDown(runtime.dispose);
-    final AccountController account = AccountController(
-      session: runtime,
-      clientProvider: () => _engineClient(engineRequests),
-    );
-    addTearDown(account.dispose);
+  test(
+    'the server session is the source of truth; the engine follows',
+    () async {
+      final List<http.Request> serverRequests = <http.Request>[];
+      final List<http.Request> engineRequests = <http.Request>[];
+      final HiveRuntime runtime = _failingFetchRuntime(serverRequests);
+      addTearDown(runtime.dispose);
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => _engineClient(engineRequests),
+      );
+      addTearDown(account.dispose);
 
-    expect(runtime.isSignedIn, isFalse);
-    final bool signedIn = await account.signIn(
-      email: 'a@b.c',
-      password: 'password1',
-    );
-    expect(signedIn, isTrue);
-    expect(account.isAuthenticated, isTrue);
-    expect(runtime.isSignedIn, isTrue);
-    expect(
-      serverRequests.where((http.Request r) => r.url.path == '/auth/email/login'),
-      hasLength(1),
-    );
-    expect(
-      engineRequests.where((http.Request r) => r.url.path.endsWith('/account/login')),
-      hasLength(1),
-      reason: 'the local engine is signed in with the same credentials',
-    );
-    expect(account.notice, isNull);
+      expect(runtime.isSignedIn, isFalse);
+      final bool signedIn = await account.signIn(
+        email: 'a@b.c',
+        password: 'password1',
+      );
+      expect(signedIn, isTrue);
+      expect(account.isAuthenticated, isTrue);
+      expect(runtime.isSignedIn, isTrue);
+      expect(
+        serverRequests.where(
+          (http.Request r) => r.url.path == '/auth/email/login',
+        ),
+        hasLength(1),
+      );
+      expect(
+        engineRequests.where(
+          (http.Request r) => r.url.path.endsWith('/account/login'),
+        ),
+        hasLength(1),
+        reason: 'the local engine is signed in with the same credentials',
+      );
+      expect(account.notice, isNull);
 
-    await account.signOut();
-    expect(account.isAuthenticated, isFalse);
-    expect(runtime.isSignedIn, isFalse);
-    expect(
-      engineRequests.where((http.Request r) => r.url.path.endsWith('/account/logout')),
-      hasLength(1),
-    );
-  });
+      await account.signOut();
+      expect(account.isAuthenticated, isFalse);
+      expect(runtime.isSignedIn, isFalse);
+      expect(
+        engineRequests.where(
+          (http.Request r) => r.url.path.endsWith('/account/logout'),
+        ),
+        hasLength(1),
+      );
+    },
+  );
 
-  test('a rejected sign-in touches neither the session nor the engine', () async {
-    final List<http.Request> serverRequests = <http.Request>[];
-    final List<http.Request> engineRequests = <http.Request>[];
-    final HiveRuntime runtime = _signedOutRuntime(serverRequests);
-    addTearDown(runtime.dispose);
-    final AccountController account = AccountController(
-      session: runtime,
-      clientProvider: () => _engineClient(engineRequests),
-    );
-    addTearDown(account.dispose);
+  test(
+    'a rejected sign-in touches neither the session nor the engine',
+    () async {
+      final List<http.Request> serverRequests = <http.Request>[];
+      final List<http.Request> engineRequests = <http.Request>[];
+      final HiveRuntime runtime = _signedOutRuntime(serverRequests);
+      addTearDown(runtime.dispose);
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => _engineClient(engineRequests),
+      );
+      addTearDown(account.dispose);
 
-    expect(await account.signIn(email: 'a@b.c', password: 'nope'), isFalse);
-    expect(account.isAuthenticated, isFalse);
-    expect(runtime.isSignedIn, isFalse);
-    expect(account.error, isNotNull);
-    expect(engineRequests, isEmpty);
-  });
+      expect(await account.signIn(email: 'a@b.c', password: 'nope'), isFalse);
+      expect(account.isAuthenticated, isFalse);
+      expect(runtime.isSignedIn, isFalse);
+      expect(account.error, isNotNull);
+      expect(engineRequests, isEmpty);
+    },
+  );
 
-  test('an unreachable local engine keeps the account signed in and says so', () async {
-    final HiveRuntime runtime = _failingFetchRuntime(<http.Request>[]);
-    addTearDown(runtime.dispose);
-    final AccountController account = AccountController(
-      session: runtime,
-      clientProvider: () => null,
-    );
-    addTearDown(account.dispose);
+  test(
+    'an unreachable local engine keeps the account signed in and says so',
+    () async {
+      final HiveRuntime runtime = _failingFetchRuntime(<http.Request>[]);
+      addTearDown(runtime.dispose);
+      final AccountController account = AccountController(
+        session: runtime,
+        clientProvider: () => null,
+      );
+      addTearDown(account.dispose);
 
-    expect(await account.signIn(email: 'a@b.c', password: 'password1'), isTrue);
-    expect(account.isAuthenticated, isTrue);
-    expect(account.notice, contains('local engine'));
-  });
+      expect(
+        await account.signIn(email: 'a@b.c', password: 'password1'),
+        isTrue,
+      );
+      expect(account.isAuthenticated, isTrue);
+      expect(account.notice, contains('local engine'));
+    },
+  );
 
   test('a thin client never touches an engine', () async {
     final List<http.Request> engineRequests = <http.Request>[];

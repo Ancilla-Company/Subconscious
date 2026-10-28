@@ -7,7 +7,10 @@ import 'package:unified_app/features/chat/presentation/engine_chat_panel.dart';
 
 EngineLlmProvider _provider() {
   final EngineRepository repository = EngineRepository(
-    rest: RestEngineClient(baseUri: Uri.parse('http://peer/api/v1/'), token: ''),
+    rest: RestEngineClient(
+      baseUri: Uri.parse('http://peer/api/v1/'),
+      token: '',
+    ),
     socket: PeerEngineSocket(linkProvider: () async => throw StateError('x')),
   );
   return EngineLlmProvider(repository: repository)
@@ -69,7 +72,9 @@ void main() {
           body: EngineChatPanel(
             provider: EngineLlmProvider(),
             isComposerEnabled: false,
-            errorMessage: StateError('The Subconscious engine is not connected.'),
+            errorMessage: StateError(
+              'The Subconscious engine is not connected.',
+            ),
           ),
         ),
       ),
@@ -89,9 +94,7 @@ void main() {
     WidgetTester tester,
   ) async {
     final EngineLlmProvider provider = _provider();
-    await tester.pumpWidget(
-      _app(provider, connected: false, onDevices: () {}),
-    );
+    await tester.pumpWidget(_app(provider, connected: false, onDevices: () {}));
     expect(find.text('No engine is reachable'), findsOneWidget);
     await tester.pumpWidget(_app(provider, connected: true, onDevices: () {}));
     await tester.pump();

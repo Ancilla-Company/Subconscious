@@ -46,7 +46,13 @@ void expectCover(String text) {
 void main() {
   test('headings', () {
     expect(seg('# Title'), <String>['# |h1+m', 'Title|h1']);
-    expect(seg('### A *b*'), <String>['### |h3+m', 'A |h3', '*|h3+i+m', 'b|h3+i', '*|h3+i+m']);
+    expect(seg('### A *b*'), <String>[
+      '### |h3+m',
+      'A |h3',
+      '*|h3+i+m',
+      'b|h3+i',
+      '*|h3+i+m',
+    ]);
     expect(seg('## Title ##'), <String>['## |h2+m', 'Title|h2', ' ##|h2+m']);
     expect(seg('#nospace'), <String>['#nospace|']);
     expect(seg('####### seven'), <String>['####### seven|']);
@@ -56,53 +62,141 @@ void main() {
     expect(seg('**bold** x'), <String>['**|b+m', 'bold|b', '**|b+m', ' x|']);
     expect(seg('*it*'), <String>['*|i+m', 'it|i', '*|i+m']);
     expect(seg('~~gone~~'), <String>['~~|s+m', 'gone|s', '~~|s+m']);
-    expect(seg('***both***'), <String>['*|i+m', '**|b+i+m', 'both|b+i', '**|b+i+m', '*|i+m']);
+    expect(seg('***both***'), <String>[
+      '*|i+m',
+      '**|b+i+m',
+      'both|b+i',
+      '**|b+i+m',
+      '*|i+m',
+    ]);
     expect(seg('**bold *nested* bold**'), <String>[
-      '**|b+m', 'bold |b', '*|b+i+m', 'nested|b+i', '*|b+i+m', ' bold|b', '**|b+m',
+      '**|b+m',
+      'bold |b',
+      '*|b+i+m',
+      'nested|b+i',
+      '*|b+i+m',
+      ' bold|b',
+      '**|b+m',
     ]);
     expect(seg('snake_case_word'), <String>['snake_case_word|']);
     expect(seg('2 * 3 * 4'), <String>['2 * 3 * 4|']);
     expect(seg('**unterminated'), <String>['**unterminated|']);
     expect(seg(r'\*not\*'), <String>[r'\*not\*|']);
-    expect(seg('_it_ and __bd__'), <String>['_|i+m', 'it|i', '_|i+m', ' and |', '__|b+m', 'bd|b', '__|b+m']);
+    expect(seg('_it_ and __bd__'), <String>[
+      '_|i+m',
+      'it|i',
+      '_|i+m',
+      ' and |',
+      '__|b+m',
+      'bd|b',
+      '__|b+m',
+    ]);
   });
 
   test('code', () {
-    expect(seg('a `code **x**` b'), <String>['a |', '`|c+m', 'code **x**|c', '`|c+m', ' b|']);
+    expect(seg('a `code **x**` b'), <String>[
+      'a |',
+      '`|c+m',
+      'code **x**|c',
+      '`|c+m',
+      ' b|',
+    ]);
     expect(seg('``a ` b``'), <String>['``|c+m', 'a ` b|c', '``|c+m']);
     expect(seg('`open'), <String>['`open|']);
     expect(seg('```py\nx = 1 * 2\n```\nafter'), <String>[
-      '```py|m+cb', '\\n|', 'x = 1 * 2|cb', '\\n|', '```|m+cb', '\\nafter|',
+      '```py|m+cb',
+      '\\n|',
+      'x = 1 * 2|cb',
+      '\\n|',
+      '```|m+cb',
+      '\\nafter|',
     ]);
-    expect(seg('~~~\n# not heading\n~~~'), <String>['~~~|m+cb', '\\n|', '# not heading|cb', '\\n|', '~~~|m+cb']);
+    expect(seg('~~~\n# not heading\n~~~'), <String>[
+      '~~~|m+cb',
+      '\\n|',
+      '# not heading|cb',
+      '\\n|',
+      '~~~|m+cb',
+    ]);
     // unterminated fence runs to the end
-    expect(seg('```\ncode\nmore'), <String>['```|m+cb', '\\n|', 'code|cb', '\\n|', 'more|cb']);
+    expect(seg('```\ncode\nmore'), <String>[
+      '```|m+cb',
+      '\\n|',
+      'code|cb',
+      '\\n|',
+      'more|cb',
+    ]);
   });
 
   test('links', () {
-    expect(seg('[a](http://x.y/a_b_c)'), <String>['[|m', 'a|l', '](|m', 'http://x.y/a_b_c|u', ')|m']);
-    expect(seg('![alt](i.png "t")'), <String>['![|m', 'alt|l', '](|m', 'i.png "t"|u', ')|m']);
-    expect(seg('see https://example.com/x, ok'), <String>['see |', 'https://example.com/x|l', ', ok|']);
+    expect(seg('[a](http://x.y/a_b_c)'), <String>[
+      '[|m',
+      'a|l',
+      '](|m',
+      'http://x.y/a_b_c|u',
+      ')|m',
+    ]);
+    expect(seg('![alt](i.png "t")'), <String>[
+      '![|m',
+      'alt|l',
+      '](|m',
+      'i.png "t"|u',
+      ')|m',
+    ]);
+    expect(seg('see https://example.com/x, ok'), <String>[
+      'see |',
+      'https://example.com/x|l',
+      ', ok|',
+    ]);
     expect(seg('<https://a.b>'), <String>['<|m', 'https://a.b|l', '>|m']);
-    expect(seg('[**b**](u)'), <String>['[|m', '**|b+l+m', 'b|b+l', '**|b+l+m', '](|m', 'u|u', ')|m']);
+    expect(seg('[**b**](u)'), <String>[
+      '[|m',
+      '**|b+l+m',
+      'b|b+l',
+      '**|b+l+m',
+      '](|m',
+      'u|u',
+      ')|m',
+    ]);
     expect(seg('[broken](x'), <String>['[broken](x|']);
     expect(seg('<b>x</b>'), <String>['<b>|html', 'x|', '</b>|html']);
   });
 
   test('blocks', () {
     expect(seg('- item'), <String>['- |li', 'item|']);
-    expect(seg('  * nested **b**'), <String>['  |', '* |li', 'nested |', '**|b+m', 'b|b', '**|b+m']);
+    expect(seg('  * nested **b**'), <String>[
+      '  |',
+      '* |li',
+      'nested |',
+      '**|b+m',
+      'b|b',
+      '**|b+m',
+    ]);
     expect(seg('1. one'), <String>['1. |li', 'one|']);
     expect(seg('2) two'), <String>['2) |li', 'two|']);
     expect(seg('- [ ] todo'), <String>['- [ ] |li', 'todo|']);
     expect(seg('- [x] done'), <String>['- [x] |li', 'done|']);
     expect(seg('**not a list**'), <String>['**|b+m', 'not a list|b', '**|b+m']);
-    expect(seg('> quote **b**'), <String>['> |m+q', 'quote |q', '**|b+m+q', 'b|b+q', '**|b+m+q']);
+    expect(seg('> quote **b**'), <String>[
+      '> |m+q',
+      'quote |q',
+      '**|b+m+q',
+      'b|b+q',
+      '**|b+m+q',
+    ]);
     expect(seg('> > deep'), <String>['> > |m+q', 'deep|q']);
     expect(seg('---'), <String>['---|m+hr']);
     expect(seg('* * *'), <String>['* * *|m+hr']);
     expect(seg('> ```\n> code\n> ```\nout'), <String>[
-      '> |m+q', '```|m+q+cb', '\\n|', '> |m+q', 'code|cb', '\\n|', '> |m+q', '```|m+cb', '\\nout|',
+      '> |m+q',
+      '```|m+q+cb',
+      '\\n|',
+      '> |m+q',
+      'code|cb',
+      '\\n|',
+      '> |m+q',
+      '```|m+cb',
+      '\\nout|',
     ]);
   });
 
@@ -132,7 +226,8 @@ void main() {
     for (int round = 0; round < 4000; round++) {
       final int length = random.nextInt(60);
       final String text = String.fromCharCodes(<int>[
-        for (int i = 0; i < length; i++) alphabet.codeUnitAt(random.nextInt(alphabet.length)),
+        for (int i = 0; i < length; i++)
+          alphabet.codeUnitAt(random.nextInt(alphabet.length)),
       ]);
       expectCover(text);
     }
@@ -142,7 +237,9 @@ void main() {
     final StringBuffer buffer = StringBuffer();
     for (int i = 0; i < 6000; i++) {
       buffer.writeln('## Section $i');
-      buffer.writeln('Some **bold** and _italic_ text with `code` and a [link](http://example.com/$i).');
+      buffer.writeln(
+        'Some **bold** and _italic_ text with `code` and a [link](http://example.com/$i).',
+      );
       buffer.writeln('- item one\n- [ ] item two\n');
     }
     final String text = buffer.toString();
@@ -150,7 +247,9 @@ void main() {
     final List<MdRun> runs = tokenizeMarkdown(text);
     watch.stop();
     // ignore: avoid_print
-    print('tokenized ${text.length} chars into ${runs.length} runs in ${watch.elapsedMilliseconds} ms');
+    print(
+      'tokenized ${text.length} chars into ${runs.length} runs in ${watch.elapsedMilliseconds} ms',
+    );
     expectCover(text);
   });
 }

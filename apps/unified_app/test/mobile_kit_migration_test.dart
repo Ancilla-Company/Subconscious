@@ -2,6 +2,9 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'screen_helpers.dart';
+
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 import 'package:unified_app/features/account/account_controller.dart';
 import 'package:unified_app/features/dashboard/controller/dashboard_controller.dart';
@@ -21,9 +24,7 @@ void main() {
     WidgetTester tester, {
     Brightness brightness = Brightness.light,
   }) async {
-    tester.view.physicalSize = const Size(360 * 3, 800 * 3);
-    tester.view.devicePixelRatio = 3;
-    addTearDown(tester.view.reset);
+    useScreen(tester, const Size(360, 800));
     final DashboardController dashboard = DashboardController(_noEngine);
     addTearDown(dashboard.dispose);
     final HiveRuntime runtime = HiveRuntime();

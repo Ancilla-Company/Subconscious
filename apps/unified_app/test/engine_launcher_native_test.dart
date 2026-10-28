@@ -65,21 +65,27 @@ void main() {
       await directory.delete(recursive: true);
     });
 
-    test('a second acquire is refused until the first is released', () async {
-      final PlatformEngineLauncher first = PlatformEngineLauncher(
-        dataDirectory: directory.path,
-      );
-      final PlatformEngineLauncher second = PlatformEngineLauncher(
-        dataDirectory: directory.path,
-      );
-      final EngineLaunchLock? held = await first.tryAcquireLock();
-      expect(held, isNotNull);
-      expect(await second.tryAcquireLock(), isNull);
-      await held!.release();
-      final EngineLaunchLock? reacquired = await second.tryAcquireLock();
-      expect(reacquired, isNotNull);
-      await reacquired!.release();
-    }, skip: Platform.isWindows ? false : 'Same-process locks only conflict on Windows.');
+    test(
+      'a second acquire is refused until the first is released',
+      () async {
+        final PlatformEngineLauncher first = PlatformEngineLauncher(
+          dataDirectory: directory.path,
+        );
+        final PlatformEngineLauncher second = PlatformEngineLauncher(
+          dataDirectory: directory.path,
+        );
+        final EngineLaunchLock? held = await first.tryAcquireLock();
+        expect(held, isNotNull);
+        expect(await second.tryAcquireLock(), isNull);
+        await held!.release();
+        final EngineLaunchLock? reacquired = await second.tryAcquireLock();
+        expect(reacquired, isNotNull);
+        await reacquired!.release();
+      },
+      skip: Platform.isWindows
+          ? false
+          : 'Same-process locks only conflict on Windows.',
+    );
 
     test('creates the data directory when it is missing', () async {
       final String nested = '${directory.path}${Platform.pathSeparator}new';

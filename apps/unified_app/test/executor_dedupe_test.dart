@@ -49,16 +49,17 @@ void main() {
 
       // Before the app knows which node it is talking to, the same engine
       // appears twice: as the default and as a directory entry.
-      expect(runtime.options.map((ExecutorOption o) => o.name).toList(), <String>[
-        'Connected engine',
-        'Brian-XPS',
-      ]);
+      expect(
+        runtime.options.map((ExecutorOption o) => o.name).toList(),
+        <String>['Connected engine', 'Brian-XPS'],
+      );
 
       await runtime.resolveDirectEngine();
 
-      expect(runtime.options.map((ExecutorOption o) => o.name).toList(), <String>[
-        'Brian-XPS (home)',
-      ]);
+      expect(
+        runtime.options.map((ExecutorOption o) => o.name).toList(),
+        <String>['Brian-XPS (home)'],
+      );
     },
   );
 

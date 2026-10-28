@@ -2,6 +2,9 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../screen_helpers.dart';
+
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 import 'package:unified_app/features/account/account_controller.dart';
 import 'package:unified_app/features/dashboard/controller/dashboard_controller.dart';
@@ -83,10 +86,10 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('touch layouts keep 48 dp controls', (WidgetTester tester) async {
-    tester.view.physicalSize = const Size(800, 1600);
-    tester.view.devicePixelRatio = 2;
-    addTearDown(tester.view.reset);
+  testWidgets('a small display gets 48 dp controls', (
+    WidgetTester tester,
+  ) async {
+    useScreen(tester, const Size(400, 800), ratio: 2);
     final DashboardController dashboard = DashboardController(_noEngine);
     addTearDown(dashboard.dispose);
     final HiveRuntime runtime = HiveRuntime();
@@ -112,6 +115,25 @@ void main() {
     );
   });
 
+  testWidgets('a narrow window on a large display keeps 32 dp controls', (
+    WidgetTester tester,
+  ) async {
+    // A 400 dp wide window gets the phone structure, but the display it sits
+    // on is a 1920x1080 monitor, so nothing about the controls grows.
+    // pumpPage uses a pixel ratio of 2: 3840x2160 pixels is 1920x1080 dp.
+    tester.view.display.size = const Size(3840, 2160);
+    addTearDown(tester.view.display.reset);
+    await pumpPage(
+      tester,
+      host: FakeExtensionHost(isExtension: false),
+      size: const Size(400, 700),
+    );
+    expect(find.byType(MobileDashboardView), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(AppIconButton).first),
+      const Size.square(AppDensity.control),
+    );
+  });
   for (final (String, ThemeData) variant in <(String, ThemeData)>[
     ('light', AppTheme.light()),
     ('dark', AppTheme.dark()),

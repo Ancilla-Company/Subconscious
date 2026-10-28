@@ -31,14 +31,22 @@ final class _Link implements PeerLink {
     sent.add(envelope);
     scheduleMicrotask(() {
       if (envelope.type == 'client.hello') {
-        receive('control', Envelope(type: 'client.hello.ack', id: envelope.id, data: const <String, dynamic>{}));
+        receive(
+          'control',
+          Envelope(
+            type: 'client.hello.ack',
+            id: envelope.id,
+            data: const <String, dynamic>{},
+          ),
+        );
       } else {
         script?.call(envelope);
       }
     });
   }
 
-  void receive(String channel, Envelope e) => inbound.add(InboundEnvelope(channel, e));
+  void receive(String channel, Envelope e) =>
+      inbound.add(InboundEnvelope(channel, e));
 
   @override
   Future<void> close() async {
@@ -57,7 +65,10 @@ Map<String, dynamic> task(String status, {String? error}) => <String, dynamic>{
 Future<(EngineLlmProvider, _Link)> providerOver() async {
   final _Link link = _Link();
   final EngineRepository repository = EngineRepository(
-    rest: RestEngineClient(baseUri: Uri.parse('http://peer/api/v1/'), token: ''),
+    rest: RestEngineClient(
+      baseUri: Uri.parse('http://peer/api/v1/'),
+      token: '',
+    ),
     socket: PeerEngineSocket(linkProvider: () async => link),
   );
   await repository.connect();
@@ -111,33 +122,34 @@ void main() {
     expect(await store.read('th2'), 'n_other');
   });
 
-  testWidgets('the picker lists name, platform and tier and reports the choice', (
-    WidgetTester tester,
-  ) async {
-    final (EngineLlmProvider provider, _) = await providerOver();
-    final _Directory directory = _Directory(<ExecutorOption>[_home, _laptop]);
-    String? chosen = 'unset';
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ExecutorPicker(
-            provider: provider,
-            directory: directory,
-            onSelected: (String? id) => chosen = id,
+  testWidgets(
+    'the picker lists name, platform and tier and reports the choice',
+    (WidgetTester tester) async {
+      final (EngineLlmProvider provider, _) = await providerOver();
+      final _Directory directory = _Directory(<ExecutorOption>[_home, _laptop]);
+      String? chosen = 'unset';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ExecutorPicker(
+              provider: provider,
+              directory: directory,
+              onSelected: (String? id) => chosen = id,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.tap(find.byKey(const ValueKey<String>('executor-picker')));
-    await tester.pumpAndSettle();
-    expect(find.text('Desktop (home)'), findsOneWidget);
-    expect(find.text('windows \u00b7 direct'), findsOneWidget);
-    expect(find.text('Work laptop'), findsOneWidget);
-    expect(find.text('macos \u00b7 ws-relay'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey<String>('executor-n_laptop')));
-    await tester.pumpAndSettle();
-    expect(chosen, 'n_laptop');
-  });
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('executor-picker')));
+      await tester.pumpAndSettle();
+      expect(find.text('Desktop (home)'), findsOneWidget);
+      expect(find.text('windows \u00b7 direct'), findsOneWidget);
+      expect(find.text('Work laptop'), findsOneWidget);
+      expect(find.text('macos \u00b7 ws-relay'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey<String>('executor-n_laptop')));
+      await tester.pumpAndSettle();
+      expect(chosen, 'n_laptop');
+    },
+  );
 
   testWidgets('the picker is hidden when there is nothing to choose', (
     WidgetTester tester,
@@ -157,36 +169,76 @@ void main() {
     expect(find.byKey(const ValueKey<String>('executor-picker')), findsNothing);
   });
 
-  test('a remote executor message runs as a task and badges the reply', () async {
-    final (EngineLlmProvider provider, _Link link) = await providerOver();
-    link.script = (Envelope e) {
-      if (e.type != 'task.submit') return;
-      expect(e.dataMap!['executor'], 'n_laptop');
-      expect(e.dataMap!['thread_uuid'], 'th1');
-      link.receive('control', Envelope(type: 'task.accepted', id: e.id, data: task('queued')));
-      link.receive('control', Envelope(type: 'task.status', id: 't1', data: task('running')));
-      link.receive('events', Envelope(type: 'chat.delta', id: 't1', data: const <String, dynamic>{'delta': 'Hi '}));
-      link.receive('events', Envelope(type: 'chat.delta', id: 't1', data: const <String, dynamic>{'delta': 'there'}));
-      link.receive('control', Envelope(type: 'task.status', id: 't1', data: task('done')));
-    };
-    provider.selectExecutor('n_laptop');
-    final List<String> deltas = await provider.sendMessageStream('hello').toList();
-    expect(deltas.join(), 'Hi there');
-    expect(provider.taskStatus, TaskStatus.done);
-    expect(provider.history.last.text, 'Hi there');
-    expect(provider.history.last.ranOn, 'Work laptop');
-    expect(provider.ranOnLabel, 'Work laptop');
-    expect(link.sent.any((Envelope e) => e.type == 'chat.send'), isFalse);
-  });
+  test(
+    'a remote executor message runs as a task and badges the reply',
+    () async {
+      final (EngineLlmProvider provider, _Link link) = await providerOver();
+      link.script = (Envelope e) {
+        if (e.type != 'task.submit') return;
+        expect(e.dataMap!['executor'], 'n_laptop');
+        expect(e.dataMap!['thread_uuid'], 'th1');
+        link.receive(
+          'control',
+          Envelope(type: 'task.accepted', id: e.id, data: task('queued')),
+        );
+        link.receive(
+          'control',
+          Envelope(type: 'task.status', id: 't1', data: task('running')),
+        );
+        link.receive(
+          'events',
+          Envelope(
+            type: 'chat.delta',
+            id: 't1',
+            data: const <String, dynamic>{'delta': 'Hi '},
+          ),
+        );
+        link.receive(
+          'events',
+          Envelope(
+            type: 'chat.delta',
+            id: 't1',
+            data: const <String, dynamic>{'delta': 'there'},
+          ),
+        );
+        link.receive(
+          'control',
+          Envelope(type: 'task.status', id: 't1', data: task('done')),
+        );
+      };
+      provider.selectExecutor('n_laptop');
+      final List<String> deltas = await provider
+          .sendMessageStream('hello')
+          .toList();
+      expect(deltas.join(), 'Hi there');
+      expect(provider.taskStatus, TaskStatus.done);
+      expect(provider.history.last.text, 'Hi there');
+      expect(provider.history.last.ranOn, 'Work laptop');
+      expect(provider.ranOnLabel, 'Work laptop');
+      expect(link.sent.any((Envelope e) => e.type == 'chat.send'), isFalse);
+    },
+  );
 
   test('without an executor the existing chat path is used', () async {
     final (EngineLlmProvider provider, _Link link) = await providerOver();
     link.script = (Envelope e) {
       if (e.type != 'chat.send') return;
-      link.receive('events', Envelope(type: 'chat.delta', id: e.id, data: const <String, dynamic>{'delta': 'ok'}));
-      link.receive('events', Envelope(type: 'chat.done', id: e.id, data: const <String, dynamic>{}));
+      link.receive(
+        'events',
+        Envelope(
+          type: 'chat.delta',
+          id: e.id,
+          data: const <String, dynamic>{'delta': 'ok'},
+        ),
+      );
+      link.receive(
+        'events',
+        Envelope(type: 'chat.done', id: e.id, data: const <String, dynamic>{}),
+      );
     };
-    final List<String> deltas = await provider.sendMessageStream('hello').toList();
+    final List<String> deltas = await provider
+        .sendMessageStream('hello')
+        .toList();
     expect(deltas.join(), 'ok');
     expect(provider.taskStatus, isNull);
     expect(link.sent.any((Envelope e) => e.type == 'task.submit'), isFalse);
@@ -196,44 +248,66 @@ void main() {
     final (EngineLlmProvider provider, _Link link) = await providerOver();
     link.script = (Envelope e) {
       if (e.type != 'task.submit') return;
-      link.receive('control', Envelope(type: 'task.accepted', id: e.id, data: task('running')));
-      link.receive('control', Envelope(type: 'task.status', id: 't1', data: task('failed', error: 'model missing')));
+      link.receive(
+        'control',
+        Envelope(type: 'task.accepted', id: e.id, data: task('running')),
+      );
+      link.receive(
+        'control',
+        Envelope(
+          type: 'task.status',
+          id: 't1',
+          data: task('failed', error: 'model missing'),
+        ),
+      );
     };
     provider.selectExecutor('n_laptop');
-    await expectLater(provider.sendMessageStream('hello').toList(), throwsStateError);
+    await expectLater(
+      provider.sendMessageStream('hello').toList(),
+      throwsStateError,
+    );
     expect(provider.taskStatus, TaskStatus.failed);
     expect(provider.taskError, 'model missing');
   });
 
-  testWidgets('the status bar shows state and node, and cancel sends task.cancel', (
-    WidgetTester tester,
-  ) async {
-    final (EngineLlmProvider provider, _Link link) = await providerOver();
-    provider
-      ..taskStatus = TaskStatus.running
-      ..activeTaskId = 't1'
-      ..taskExecutorNodeId = 'n_laptop';
-    await tester.pumpWidget(
-      MaterialApp(home: Scaffold(body: TaskStatusBar(provider: provider))),
-    );
-    expect(find.text('Running on Work laptop'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey<String>('task-cancel')));
-    await tester.pump();
-    final Envelope cancel = link.sent.firstWhere((Envelope e) => e.type == 'task.cancel');
-    expect(cancel.dataMap!['task_id'], 't1');
-
-    for (final (TaskStatus status, String label) in <(TaskStatus, String)>[
-      (TaskStatus.queued, 'Queued on Work laptop'),
-      (TaskStatus.waitingApproval, 'Waiting for approval on Work laptop'),
-      (TaskStatus.done, 'Done on Work laptop'),
-      (TaskStatus.cancelled, 'Cancelled on Work laptop'),
-      (TaskStatus.interrupted, 'Interrupted on Work laptop'),
-    ]) {
-      provider.taskStatus = status;
-      provider.bindThread('th1'); // notifies listeners
+  testWidgets(
+    'the status bar shows state and node, and cancel sends task.cancel',
+    (WidgetTester tester) async {
+      final (EngineLlmProvider provider, _Link link) = await providerOver();
+      provider
+        ..taskStatus = TaskStatus.running
+        ..activeTaskId = 't1'
+        ..taskExecutorNodeId = 'n_laptop';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: TaskStatusBar(provider: provider)),
+        ),
+      );
+      expect(find.text('Running on Work laptop'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey<String>('task-cancel')));
       await tester.pump();
-      expect(find.text(label), findsOneWidget, reason: '$status');
-    }
-    expect(find.byKey(const ValueKey<String>('task-cancel')), findsNothing, reason: 'finished tasks cannot be cancelled');
-  });
+      final Envelope cancel = link.sent.firstWhere(
+        (Envelope e) => e.type == 'task.cancel',
+      );
+      expect(cancel.dataMap!['task_id'], 't1');
+
+      for (final (TaskStatus status, String label) in <(TaskStatus, String)>[
+        (TaskStatus.queued, 'Queued on Work laptop'),
+        (TaskStatus.waitingApproval, 'Waiting for approval on Work laptop'),
+        (TaskStatus.done, 'Done on Work laptop'),
+        (TaskStatus.cancelled, 'Cancelled on Work laptop'),
+        (TaskStatus.interrupted, 'Interrupted on Work laptop'),
+      ]) {
+        provider.taskStatus = status;
+        provider.bindThread('th1'); // notifies listeners
+        await tester.pump();
+        expect(find.text(label), findsOneWidget, reason: '$status');
+      }
+      expect(
+        find.byKey(const ValueKey<String>('task-cancel')),
+        findsNothing,
+        reason: 'finished tasks cannot be cancelled',
+      );
+    },
+  );
 }

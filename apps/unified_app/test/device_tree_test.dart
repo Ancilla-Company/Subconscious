@@ -34,8 +34,14 @@ void main() {
       _node('n_gui', parent: 'n_pc'),
       _node('n_phone'),
     ]);
-    expect(<String>[for (final DeviceGroup g in groups) g.root.node.id], <String>['n_pc', 'n_phone']);
-    expect(<String>[for (final NodeView c in groups.first.children) c.node.id], <String>['n_gui']);
+    expect(
+      <String>[for (final DeviceGroup g in groups) g.root.node.id],
+      <String>['n_pc', 'n_phone'],
+    );
+    expect(
+      <String>[for (final NodeView c in groups.first.children) c.node.id],
+      <String>['n_gui'],
+    );
     expect(groups.last.children, isEmpty);
   });
 

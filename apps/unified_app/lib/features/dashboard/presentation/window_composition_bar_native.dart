@@ -35,9 +35,16 @@ Future<void> initializeDesktopWindow() async {
 }
 
 final class EngineCompositionBar extends StatefulWidget {
-  const EngineCompositionBar({required this.controller, super.key});
+  const EngineCompositionBar({
+    required this.controller,
+    this.onToggleFlyout,
+    super.key,
+  });
 
   final DashboardController controller;
+
+  /// Adds a flyout button before the logo (the chat-only window).
+  final VoidCallback? onToggleFlyout;
 
   @override
   State<EngineCompositionBar> createState() => _EngineCompositionBarState();
@@ -182,7 +189,7 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
       _maximizedBeforeChatOnly = await windowManager.isMaximized();
       if (_maximizedBeforeChatOnly) await windowManager.unmaximize();
       _boundsBeforeChatOnly = await windowManager.getBounds();
-      await windowManager.setMinimumSize(const Size(320, 360));
+      await windowManager.setMinimumSize(const Size(360, 360));
       await windowManager.setSize(const Size(420, 720));
       await windowManager.setAlwaysOnTop(true);
       return;
@@ -382,19 +389,30 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
             height: kWindowCaptionHeight,
             child: Row(
               children: <Widget>[
+                // Outside the drag area: a press there starts a window drag.
+                if (widget.onToggleFlyout case final VoidCallback toggle)
+                  CaptionFlyoutButton(
+                    brightness: brightness,
+                    onPressed: toggle,
+                  ),
                 Expanded(
                   child: DragToMoveArea(
-                    child: CaptionTitleContent(controller: widget.controller),
+                    child: CaptionTitleContent(
+                      controller: widget.controller,
+                      compact: widget.controller.chatOnly,
+                    ),
                   ),
                 ),
                 PanelVisibilityControls(
                   controller: widget.controller,
                   brightness: brightness,
                 ),
-                ThreadWorkspaceCaptionPicker(
-                  controller: widget.controller,
-                  brightness: brightness,
-                ),
+                // No room for the workspace picker in the small chat window.
+                if (!widget.controller.chatOnly)
+                  ThreadWorkspaceCaptionPicker(
+                    controller: widget.controller,
+                    brightness: brightness,
+                  ),
                 WindowCaptionButton.minimize(
                   brightness: brightness,
                   onPressed: windowManager.minimize,

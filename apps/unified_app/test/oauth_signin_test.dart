@@ -5,6 +5,9 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'screen_helpers.dart';
+
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:unified_app/features/account/account_controller.dart';
@@ -76,9 +79,7 @@ final class _Engine {
   List<Map<String, dynamic>> pending = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> tools = <Map<String, dynamic>>[];
   int completeStatus = 200;
-  Map<String, dynamic> completeBody = <String, dynamic>{
-    'status': 'authorized',
-  };
+  Map<String, dynamic> completeBody = <String, dynamic>{'status': 'authorized'};
   int cancelStatus = 204;
   Map<String, dynamic> authorizeBody = <String, dynamic>{
     'authId': 'auth-9',
@@ -97,7 +98,8 @@ final class _Engine {
   Future<http.Response> handle(http.Request request) async {
     requests.add(request);
     final String path = request.url.path;
-    if (path.endsWith('/health')) return _json(<String, dynamic>{'status': 'ok'});
+    if (path.endsWith('/health'))
+      return _json(<String, dynamic>{'status': 'ok'});
     if (path.endsWith('/oauth/pending')) return _json(pending);
     if (path.endsWith('/complete')) {
       return _json(completeBody, completeStatus);
@@ -185,35 +187,38 @@ void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues(<String, String>{}));
 
   group('DashboardController oauth', () {
-    test('an oauth.request frame becomes pendingOAuth, resolved clears it', () async {
-      final _Engine engine = _Engine();
-      final DashboardController controller = await _connected(engine);
-      addTearDown(controller.dispose);
+    test(
+      'an oauth.request frame becomes pendingOAuth, resolved clears it',
+      () async {
+        final _Engine engine = _Engine();
+        final DashboardController controller = await _connected(engine);
+        addTearDown(controller.dispose);
 
-      engine.emitRequest();
-      final OAuthAuthorization? auth = controller.pendingOAuth;
-      expect(auth?.authId, 'a1');
-      expect(auth?.toolName, 'Notion');
-      expect(auth?.turnId, 'turn-1');
+        engine.emitRequest();
+        final OAuthAuthorization? auth = controller.pendingOAuth;
+        expect(auth?.authId, 'a1');
+        expect(auth?.toolName, 'Notion');
+        expect(auth?.turnId, 'turn-1');
 
-      // The same prompt from the app-wide broadcast is not queued twice.
-      engine.emitRequest();
-      engine.emitRequest(authId: 'a2');
-      expect(controller.pendingOAuth?.authId, 'a1');
+        // The same prompt from the app-wide broadcast is not queued twice.
+        engine.emitRequest();
+        engine.emitRequest(authId: 'a2');
+        expect(controller.pendingOAuth?.authId, 'a1');
 
-      engine.emit('oauth.resolved', 'turn-1', <String, dynamic>{
-        'auth_id': 'a1',
-        'tool_uuid': 'tool-1',
-        'status': 'authorized',
-      });
-      expect(controller.pendingOAuth?.authId, 'a2', reason: 'queue advances');
-      engine.emit('oauth.resolved', null, <String, dynamic>{
-        'auth_id': 'a2',
-        'tool_uuid': 'tool-1',
-        'status': 'denied',
-      });
-      expect(controller.pendingOAuth, isNull);
-    });
+        engine.emit('oauth.resolved', 'turn-1', <String, dynamic>{
+          'auth_id': 'a1',
+          'tool_uuid': 'tool-1',
+          'status': 'authorized',
+        });
+        expect(controller.pendingOAuth?.authId, 'a2', reason: 'queue advances');
+        engine.emit('oauth.resolved', null, <String, dynamic>{
+          'auth_id': 'a2',
+          'tool_uuid': 'tool-1',
+          'status': 'denied',
+        });
+        expect(controller.pendingOAuth, isNull);
+      },
+    );
 
     test('a malformed oauth.request is ignored', () async {
       final _Engine engine = _Engine();
@@ -266,48 +271,57 @@ void main() {
       expect(engine.called('GET', '/oauth/pending'), isTrue);
     });
 
-    test('openOAuthSignIn launches the url, and reports a failed launch', () async {
-      final _Engine engine = _Engine();
-      final List<Uri> launched = <Uri>[];
-      final DashboardController controller = await _connected(
-        engine,
-        launched: launched,
-      );
-      addTearDown(controller.dispose);
-      engine.emitRequest();
-      await controller.openOAuthSignIn();
-      expect(launched.single.toString(), 'https://idp.example/authorize?x=a1');
-      expect(controller.oauthError, isNull);
+    test(
+      'openOAuthSignIn launches the url, and reports a failed launch',
+      () async {
+        final _Engine engine = _Engine();
+        final List<Uri> launched = <Uri>[];
+        final DashboardController controller = await _connected(
+          engine,
+          launched: launched,
+        );
+        addTearDown(controller.dispose);
+        engine.emitRequest();
+        await controller.openOAuthSignIn();
+        expect(
+          launched.single.toString(),
+          'https://idp.example/authorize?x=a1',
+        );
+        expect(controller.oauthError, isNull);
 
-      final List<Uri> none = <Uri>[];
-      final DashboardController failing = await _connected(
-        engine,
-        launched: none,
-        launchResult: false,
-      );
-      addTearDown(failing.dispose);
-      engine.emitRequest(authId: 'a5');
-      await failing.openOAuthSignIn();
-      expect('${failing.oauthError}', contains('Could not open the browser'));
-      expect(failing.pendingOAuth, isNotNull);
-    });
+        final List<Uri> none = <Uri>[];
+        final DashboardController failing = await _connected(
+          engine,
+          launched: none,
+          launchResult: false,
+        );
+        addTearDown(failing.dispose);
+        engine.emitRequest(authId: 'a5');
+        await failing.openOAuthSignIn();
+        expect('${failing.oauthError}', contains('Could not open the browser'));
+        expect(failing.pendingOAuth, isNotNull);
+      },
+    );
 
-    test('pasting a full redirect url posts redirectUrl and clears the card', () async {
-      final _Engine engine = _Engine();
-      final DashboardController controller = await _connected(engine);
-      addTearDown(controller.dispose);
-      engine.emitRequest();
-      await controller.completeOAuthFromPaste(
-        '  http://127.0.0.1:9/api/v1/oauth/callback?code=c1&state=s1  ',
-      );
-      final http.Request post = engine.last('POST', '/oauth/a1/complete');
-      expect(jsonDecode(post.body), <String, dynamic>{
-        'redirectUrl':
-            'http://127.0.0.1:9/api/v1/oauth/callback?code=c1&state=s1',
-      });
-      expect(controller.pendingOAuth, isNull);
-      expect(controller.oauthError, isNull);
-    });
+    test(
+      'pasting a full redirect url posts redirectUrl and clears the card',
+      () async {
+        final _Engine engine = _Engine();
+        final DashboardController controller = await _connected(engine);
+        addTearDown(controller.dispose);
+        engine.emitRequest();
+        await controller.completeOAuthFromPaste(
+          '  http://127.0.0.1:9/api/v1/oauth/callback?code=c1&state=s1  ',
+        );
+        final http.Request post = engine.last('POST', '/oauth/a1/complete');
+        expect(jsonDecode(post.body), <String, dynamic>{
+          'redirectUrl':
+              'http://127.0.0.1:9/api/v1/oauth/callback?code=c1&state=s1',
+        });
+        expect(controller.pendingOAuth, isNull);
+        expect(controller.oauthError, isNull);
+      },
+    );
 
     test('pasting a bare code posts code', () async {
       final _Engine engine = _Engine();
@@ -378,7 +392,10 @@ void main() {
   group('parseOAuthPaste', () {
     test('url, query string and bare code', () {
       expect(parseOAuthPaste('  '), isNull);
-      expect(parseOAuthPaste('https://h/cb?code=1')?.redirectUrl, 'https://h/cb?code=1');
+      expect(
+        parseOAuthPaste('https://h/cb?code=1')?.redirectUrl,
+        'https://h/cb?code=1',
+      );
       final OAuthPaste query = parseOAuthPaste('code=1&state=2')!;
       expect((query.code, query.state, query.redirectUrl), ('1', '2', null));
       final OAuthPaste bare = parseOAuthPaste('xyz')!;
@@ -427,10 +444,15 @@ void main() {
       expect(card, findsOneWidget);
       expect(find.text('Sign in to Notion'), findsOneWidget);
       expect(
-        find.textContaining('copy the address you end up on and paste it below'),
+        find.textContaining(
+          'copy the address you end up on and paste it below',
+        ),
         findsOneWidget,
       );
-      expect(find.widgetWithText(FilledButton, 'Open sign-in page'), findsOneWidget);
+      expect(
+        find.widgetWithText(FilledButton, 'Open sign-in page'),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(FilledButton, 'Submit'), findsOneWidget);
       expect(find.widgetWithText(TextButton, 'Cancel'), findsOneWidget);
     });
@@ -452,7 +474,10 @@ void main() {
       await tester.tap(submit, warnIfMissed: false);
       expect(pasted, isEmpty);
 
-      final Finder field = find.descendant(of: card, matching: find.byType(TextField));
+      final Finder field = find.descendant(
+        of: card,
+        matching: find.byType(TextField),
+      );
       await tester.enterText(field, '   ');
       await tester.pump();
       expect(tester.widget<FilledButton>(submit).onPressed, isNull);
@@ -502,16 +527,16 @@ void main() {
       expect(find.text('Approval required: write_file'), findsOneWidget);
       expect(
         tester.getTopLeft(card).dy,
-        lessThan(tester.getTopLeft(find.text('Approval required: write_file')).dy),
+        lessThan(
+          tester.getTopLeft(find.text('Approval required: write_file')).dy,
+        ),
       );
     });
 
     testWidgets('the mobile view shows the card for a pending sign-in', (
       WidgetTester tester,
     ) async {
-      tester.view.physicalSize = const Size(360 * 3, 800 * 3);
-      tester.view.devicePixelRatio = 3;
-      addTearDown(tester.view.reset);
+      useScreen(tester, const Size(360, 800));
       final _Engine engine = _Engine();
       late final DashboardController dashboard;
       await tester.runAsync(() async {
@@ -549,7 +574,8 @@ void main() {
       tester.view.physicalSize = const Size(1000, 3000);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      final _Engine engine = _Engine()..tools = <Map<String, dynamic>>[...tools];
+      final _Engine engine = _Engine()
+        ..tools = <Map<String, dynamic>>[...tools];
       final EngineRepository repository = engine.repository();
       final List<Uri> launched = <Uri>[];
       final DashboardSettingsController settings = DashboardSettingsController(
@@ -602,7 +628,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('HTTP URL').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey<String>('Authentication:None')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('Authentication:None')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('OAuth').last);
       await tester.pumpAndSettle();
@@ -623,7 +651,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Client ID (optional)'), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey<String>('Authentication:None')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('Authentication:None')),
+      );
       await tester.pumpAndSettle();
       expect(find.text('None'), findsWidgets);
       expect(find.text('API key'), findsWidgets);
@@ -642,9 +672,7 @@ void main() {
       );
       expect(find.text('Scopes (optional)'), findsOneWidget);
       final TextField secret = tester.widget<TextField>(
-        find.byWidgetPredicate(
-          (Widget w) => w is TextField && w.obscureText,
-        ),
+        find.byWidgetPredicate((Widget w) => w is TextField && w.obscureText),
       );
       expect(secret.obscureText, isTrue);
       expect(find.text('Connect'), findsNothing, reason: 'tool not saved yet');
@@ -656,7 +684,10 @@ void main() {
       final (DashboardSettingsController settings, _Engine engine, _) =
           await pump(tester);
       await chooseOAuthForNewHttpTool(tester);
-      await tester.enterText(find.widgetWithText(TextField, 'Tool name'), 'Notion');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tool name'),
+        'Notion',
+      );
       await tester.enterText(
         find.widgetWithText(TextField, 'https://'),
         'https://mcp.example/mcp',
@@ -676,9 +707,9 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await settle(tester);
 
-      final Map<String, dynamic> body =
-          jsonDecode(engine.last('POST', '/tool-registry').body)
-              as Map<String, dynamic>;
+      final Map<String, dynamic> body = jsonDecode(
+        engine.last('POST', '/tool-registry').body,
+      ) as Map<String, dynamic>;
       expect(body['authType'], 'oauth');
       expect(body['toolType'], 'mcp');
       expect(body['endpointUrl'], 'https://mcp.example/mcp');
@@ -696,16 +727,19 @@ void main() {
     ) async {
       final (_, _Engine engine, _) = await pump(tester);
       await chooseOAuthForNewHttpTool(tester);
-      await tester.enterText(find.widgetWithText(TextField, 'Tool name'), 'Notion');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tool name'),
+        'Notion',
+      );
       await tester.enterText(
         find.widgetWithText(TextField, 'https://'),
         'https://mcp.example/mcp',
       );
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await settle(tester);
-      final Map<String, dynamic> body =
-          jsonDecode(engine.last('POST', '/tool-registry').body)
-              as Map<String, dynamic>;
+      final Map<String, dynamic> body = jsonDecode(
+        engine.last('POST', '/tool-registry').body,
+      ) as Map<String, dynamic>;
       expect(body['authType'], 'oauth');
       expect(body.containsKey('oauthClientId'), isFalse);
       expect(body.containsKey('oauthClientSecret'), isFalse);
@@ -737,15 +771,25 @@ void main() {
     testWidgets('Connect opens the page, then a pasted address completes it', (
       WidgetTester tester,
     ) async {
-      final (DashboardSettingsController settings, _Engine engine, List<Uri> launched) =
-          await pump(
-            tester,
-            tools: <Map<String, dynamic>>[_toolJson('tool-1', connected: false)],
-          );
-      expect(find.text('Not connected'), findsOneWidget, reason: 'card trailing');
+      final (
+        DashboardSettingsController settings,
+        _Engine engine,
+        List<Uri> launched,
+      ) = await pump(
+        tester,
+        tools: <Map<String, dynamic>>[_toolJson('tool-1', connected: false)],
+      );
+      expect(
+        find.text('Not connected'),
+        findsOneWidget,
+        reason: 'card trailing',
+      );
       await tester.tap(find.text('Notion'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey<String>('oauth-status')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey<String>('oauth-status')),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(TextButton, 'Disconnect'), findsNothing);
 
       await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
@@ -762,7 +806,9 @@ void main() {
       );
       await tester.pump();
       // The engine now reports the tool as connected.
-      engine.tools = <Map<String, dynamic>>[_toolJson('tool-1', connected: true)];
+      engine.tools = <Map<String, dynamic>>[
+        _toolJson('tool-1', connected: true),
+      ];
       await tester.tap(submit);
       await settle(tester);
 
@@ -806,32 +852,39 @@ void main() {
       );
     });
 
-    testWidgets('Connect on an already connected tool refreshes without a paste box', (
-      WidgetTester tester,
-    ) async {
-      final (_, _Engine engine, List<Uri> launched) = await pump(
-        tester,
-        tools: <Map<String, dynamic>>[_toolJson('tool-1', connected: false)],
-      );
-      engine.authorizeBody = <String, dynamic>{
-        'authId': null,
-        'url': null,
-        'status': 'connected',
-      };
-      engine.tools = <Map<String, dynamic>>[_toolJson('tool-1', connected: true)];
-      await tester.tap(find.text('Notion'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
-      await settle(tester);
-      expect(launched, isEmpty);
-      expect(find.widgetWithText(FilledButton, 'Submit'), findsNothing);
-      expect(find.text('Connected'), findsWidgets);
-    });
+    testWidgets(
+      'Connect on an already connected tool refreshes without a paste box',
+      (WidgetTester tester) async {
+        final (_, _Engine engine, List<Uri> launched) = await pump(
+          tester,
+          tools: <Map<String, dynamic>>[_toolJson('tool-1', connected: false)],
+        );
+        engine.authorizeBody = <String, dynamic>{
+          'authId': null,
+          'url': null,
+          'status': 'connected',
+        };
+        engine.tools = <Map<String, dynamic>>[
+          _toolJson('tool-1', connected: true),
+        ];
+        await tester.tap(find.text('Notion'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(FilledButton, 'Connect'));
+        await settle(tester);
+        expect(launched, isEmpty);
+        expect(find.widgetWithText(FilledButton, 'Submit'), findsNothing);
+        expect(find.text('Connected'), findsWidgets);
+      },
+    );
 
     testWidgets('Disconnect asks first, then deletes the stored sign-in', (
       WidgetTester tester,
     ) async {
-      final (DashboardSettingsController settings, _Engine engine, _) = await pump(
+      final (
+        DashboardSettingsController settings,
+        _Engine engine,
+        _,
+      ) = await pump(
         tester,
         tools: <Map<String, dynamic>>[_toolJson('tool-1', connected: true)],
       );
@@ -883,12 +936,20 @@ void main() {
     ) async {
       final (_, _Engine engine, _) = await pump(tester);
       await chooseOAuthForNewHttpTool(tester);
-      await tester.enterText(find.widgetWithText(TextField, 'Tool name'), 'Notion');
-      await tester.enterText(find.widgetWithText(TextField, 'https://'), 'ftp://x');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tool name'),
+        'Notion',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'https://'),
+        'ftp://x',
+      );
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await tester.pumpAndSettle();
       expect(
-        find.text('OAuth needs an endpoint URL starting with http:// or https://.'),
+        find.text(
+          'OAuth needs an endpoint URL starting with http:// or https://.',
+        ),
         findsOneWidget,
       );
       expect(engine.called('POST', '/tool-registry'), isFalse);

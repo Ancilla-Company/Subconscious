@@ -52,12 +52,15 @@ void main() {
       text: span,
       textDirection: TextDirection.ltr,
     )..layout();
-    final double x = p.getOffsetForCaret(TextPosition(offset: offset), Rect.zero).dx;
+    final double x = p
+        .getOffsetForCaret(TextPosition(offset: offset), Rect.zero)
+        .dx;
     p.dispose();
     return x;
   }
 
-  TextSpan wrap(TextSpan inner) => TextSpan(style: mono, children: <InlineSpan>[inner]);
+  TextSpan wrap(TextSpan inner) =>
+      TextSpan(style: mono, children: <InlineSpan>[inner]);
 
   testWidgets('every tab is four columns wide', (WidgetTester tester) async {
     final double col = columnWidth();
@@ -86,36 +89,52 @@ void main() {
     expect(caretX(expanded, 2), closeTo(5 * col, tolerance));
   });
 
-  testWidgets('nested span trees keep track of line starts', (WidgetTester tester) async {
+  testWidgets('nested span trees keep track of line starts', (
+    WidgetTester tester,
+  ) async {
     final double col = columnWidth();
     // the shape a syntax highlighter produces: text split across children,
     // with the line break and the tab in different spans
-    final TextSpan tree = TextSpan(children: <InlineSpan>[
-      const TextSpan(text: 'if x:', style: TextStyle(color: Colors.red)),
-      const TextSpan(text: '\n'),
-      TextSpan(children: <InlineSpan>[
-        const TextSpan(text: '\t'),
-        const TextSpan(text: 'return', style: TextStyle(color: Colors.blue)),
+    final TextSpan tree = TextSpan(
+      children: <InlineSpan>[
+        const TextSpan(
+          text: 'if x:',
+          style: TextStyle(color: Colors.red),
+        ),
         const TextSpan(text: '\n'),
-      ]),
-      const TextSpan(text: '\t'),
-      const TextSpan(text: '\t'),
-      const TextSpan(text: 'pass'),
-    ]);
+        TextSpan(
+          children: <InlineSpan>[
+            const TextSpan(text: '\t'),
+            const TextSpan(
+              text: 'return',
+              style: TextStyle(color: Colors.blue),
+            ),
+            const TextSpan(text: '\n'),
+          ],
+        ),
+        const TextSpan(text: '\t'),
+        const TextSpan(text: '\t'),
+        const TextSpan(text: 'pass'),
+      ],
+    );
     final TextSpan expanded = wrap(TabDisplay.expand(tree, mono));
     final String plain = expanded.toPlainText();
     expect(plain, 'if x:\n\treturn\n\t\tpass');
     expect(boxLeft(expanded, plain.indexOf('return')), closeTo(4 * col, 0.6));
     expect(boxLeft(expanded, plain.indexOf('pass')), closeTo(8 * col, 0.6));
     // text with no tabs comes back untouched
-    final TextSpan plainTree = TextSpan(children: <InlineSpan>[
-      const TextSpan(text: 'abc'),
-      const TextSpan(text: 'def'),
-    ]);
+    final TextSpan plainTree = TextSpan(
+      children: <InlineSpan>[
+        const TextSpan(text: 'abc'),
+        const TextSpan(text: 'def'),
+      ],
+    );
     expect(identical(TabDisplay.expand(plainTree, mono), plainTree), isTrue);
   });
 
-  testWidgets('the code and plain controllers use the same widths', (WidgetTester tester) async {
+  testWidgets('the code and plain controllers use the same widths', (
+    WidgetTester tester,
+  ) async {
     final double col = columnWidth();
     const String text = 'def f():\n\tx = 1\n\t\ty = 2\nz\t= 3\n';
     final WorkspaceCodeController code = WorkspaceCodeController(
@@ -125,13 +144,25 @@ void main() {
     );
     final EditorTextController plain = EditorTextController(text: text);
     final Map<String, TextSpan> built = <String, TextSpan>{};
-    await tester.pumpWidget(MaterialApp(
-      home: Builder(builder: (BuildContext context) {
-        built['code'] = code.buildTextSpan(context: context, style: mono, withComposing: false);
-        built['plain'] = plain.buildTextSpan(context: context, style: mono, withComposing: false);
-        return const SizedBox();
-      }),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (BuildContext context) {
+            built['code'] = code.buildTextSpan(
+              context: context,
+              style: mono,
+              withComposing: false,
+            );
+            built['plain'] = plain.buildTextSpan(
+              context: context,
+              style: mono,
+              withComposing: false,
+            );
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
     for (final MapEntry<String, TextSpan> entry in built.entries) {
       final TextSpan span = entry.value;
       expect(span.toPlainText(), text, reason: entry.key);
@@ -141,7 +172,11 @@ void main() {
       expect(boxLeft(span, x), closeTo(4 * col, 0.6), reason: '${entry.key} x');
       expect(boxLeft(span, y), closeTo(8 * col, 0.6), reason: '${entry.key} y');
       // "z" then a tab then "= 3": z is one column, the tab four more
-      expect(boxLeft(span, eq), closeTo(5 * col, 0.6), reason: '${entry.key} =');
+      expect(
+        boxLeft(span, eq),
+        closeTo(5 * col, 0.6),
+        reason: '${entry.key} =',
+      );
     }
   });
 }

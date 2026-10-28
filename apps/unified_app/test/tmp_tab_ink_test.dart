@@ -40,25 +40,45 @@ void main() {
     final TextSpan span = TextSpan(
       style: base,
       children: <InlineSpan>[
-        TextSpan(text: '\t', style: TextStyle(letterSpacing: lead)),
+        TextSpan(
+          text: '\t',
+          style: TextStyle(letterSpacing: lead),
+        ),
         const TextSpan(text: 'x\n'),
-        TextSpan(text: '\t', style: TextStyle(letterSpacing: lead)),
+        TextSpan(
+          text: '\t',
+          style: TextStyle(letterSpacing: lead),
+        ),
         const TextSpan(text: 'y\nab'),
-        TextSpan(text: '\t', style: TextStyle(letterSpacing: mid)),
+        TextSpan(
+          text: '\t',
+          style: TextStyle(letterSpacing: mid),
+        ),
         const TextSpan(text: 'z\n'),
-        TextSpan(text: '\t', style: TextStyle(letterSpacing: lead)),
-        TextSpan(text: '\t', style: TextStyle(letterSpacing: mid)),
+        TextSpan(
+          text: '\t',
+          style: TextStyle(letterSpacing: lead),
+        ),
+        TextSpan(
+          text: '\t',
+          style: TextStyle(letterSpacing: mid),
+        ),
         const TextSpan(text: 'w'),
       ],
     );
     final String plain = span.toPlainText();
-    out.writeln('text=${plain.replaceAll('\t', '<T>').replaceAll('\n', '<N>')}');
+    out.writeln(
+      'text=${plain.replaceAll('\t', '<T>').replaceAll('\n', '<N>')}',
+    );
     final TextPainter p = TextPainter(
       text: span,
       textDirection: TextDirection.ltr,
     )..layout();
     for (int i = 0; i <= plain.length; i++) {
-      final Offset caret = p.getOffsetForCaret(TextPosition(offset: i), Rect.zero);
+      final Offset caret = p.getOffsetForCaret(
+        TextPosition(offset: i),
+        Rect.zero,
+      );
       final String ch = i < plain.length
           ? plain[i].replaceAll('\t', '<T>').replaceAll('\n', '<N>')
           : '<end>';
@@ -68,7 +88,10 @@ void main() {
           TextSelection(baseOffset: i, extentOffset: i + 1),
         );
         boxText = boxes
-            .map((TextBox b) => '[${b.left.toStringAsFixed(1)}..${b.right.toStringAsFixed(1)}]')
+            .map(
+              (TextBox b) =>
+                  '[${b.left.toStringAsFixed(1)}..${b.right.toStringAsFixed(1)}]',
+            )
             .join(' ');
       }
       out.writeln(

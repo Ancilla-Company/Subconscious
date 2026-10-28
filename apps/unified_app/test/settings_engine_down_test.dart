@@ -65,7 +65,10 @@ void main() {
     expect(dashboard.settings.lightingMode, AppLightingMode.dark);
     expect(dashboard.settings.hasPendingGeneral, isTrue);
     expect(dashboard.settings.generalError, isNull);
-    expect(find.textContaining('will be saved when the engine'), findsOneWidget);
+    expect(
+      find.textContaining('will be saved when the engine'),
+      findsOneWidget,
+    );
     expect(find.text('Engine not connected.'), findsOneWidget);
 
     for (int i = 0; i < 10; i++) {

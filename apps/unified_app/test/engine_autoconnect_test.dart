@@ -81,16 +81,19 @@ void main() {
     expect(runtime.engineChoice.kind, EngineChoiceKind.pick);
   });
 
-  test('an offline preferred engine falls back to the only online one', () async {
-    final HiveRuntime runtime = await _runtime();
-    addTearDown(runtime.dispose);
-    int attempts = 0;
-    runtime.onEngineAvailable = () async => attempts++;
-    runtime.preferredEngineId = 'b';
-    runtime.nodes = <NodeView>[_engine('a'), _engine('b', online: false)];
-    await runtime.maybeAutoConnect();
-    expect(attempts, 1);
-  });
+  test(
+    'an offline preferred engine falls back to the only online one',
+    () async {
+      final HiveRuntime runtime = await _runtime();
+      addTearDown(runtime.dispose);
+      int attempts = 0;
+      runtime.onEngineAvailable = () async => attempts++;
+      runtime.preferredEngineId = 'b';
+      runtime.nodes = <NodeView>[_engine('a'), _engine('b', online: false)];
+      await runtime.maybeAutoConnect();
+      expect(attempts, 1);
+    },
+  );
 
   test('preferred engine coming online triggers a connection', () async {
     final HiveRuntime runtime = await _runtime();
@@ -98,7 +101,11 @@ void main() {
     int attempts = 0;
     runtime.onEngineAvailable = () async => attempts++;
     runtime.preferredEngineId = 'b';
-    runtime.nodes = <NodeView>[_engine('a'), _engine('c'), _engine('b', online: false)];
+    runtime.nodes = <NodeView>[
+      _engine('a'),
+      _engine('c'),
+      _engine('b', online: false),
+    ];
     await runtime.maybeAutoConnect();
     expect(attempts, 0);
     runtime.nodes = <NodeView>[_engine('a'), _engine('c'), _engine('b')];

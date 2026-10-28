@@ -289,7 +289,10 @@ void main() {
       expect(result?.ok, isTrue);
       expect(settings.testingToolUuids, isEmpty);
       expect(settings.toolTestResults['t1']?.tools, hasLength(2));
-      expect(engine.lastWhere('POST', '/api/v1/tool-registry/t1/test'), isNotNull);
+      expect(
+        engine.lastWhere('POST', '/api/v1/tool-registry/t1/test'),
+        isNotNull,
+      );
     });
 
     test('a failing test request sets toolsError and returns null', () async {
@@ -355,7 +358,9 @@ void main() {
       await tester.tap(find.text('New skill'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey<String>('Source Type:Folder')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('Source Type:Folder')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Text').last);
       await tester.pumpAndSettle();
@@ -434,7 +439,10 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await tester.pumpAndSettle();
       expect(find.text('Folder path is required.'), findsOneWidget);
-      expect(engine.requests.where((http.Request r) => r.method == 'POST'), isEmpty);
+      expect(
+        engine.requests.where((http.Request r) => r.method == 'POST'),
+        isEmpty,
+      );
     });
 
     testWidgets('an engine rejection is shown in the editor', (
@@ -473,8 +481,12 @@ void main() {
       expect(find.text('MCP server · npx'), findsOneWidget);
       expect(find.text('MCP server · https://x.test/mcp'), findsOneWidget);
       expect(find.text('Command line tool · git'), findsOneWidget);
-      expect(find.textContaining('Register MCP servers and command line tools'),
-          findsOneWidget);
+      expect(
+        find.textContaining(
+          'Register MCP servers, command line tools and external ACP agents',
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('creating an MCP stdio tool posts parsed command fields', (
@@ -482,8 +494,12 @@ void main() {
     ) async {
       final _FakeEngine engine = _FakeEngine();
       await _pumpPanel(tester, engine.controller(), SettingsPage.tools);
-      expect(find.text('No configured tools yet. Add one to make it available in policies.'),
-          findsOneWidget);
+      expect(
+        find.text(
+          'No configured tools yet. Add one to make it available in policies.',
+        ),
+        findsOneWidget,
+      );
       await tester.tap(find.text('New tool'));
       await tester.pumpAndSettle();
 
@@ -503,16 +519,17 @@ void main() {
         find.widgetWithText(TextField, 'KEY=value, one per line'),
         'DEBUG=1\nURL=a=b',
       );
-      expect(find.text('Not encrypted - do not put secrets here.'), findsOneWidget);
+      expect(
+        find.text('Not encrypted - do not put secrets here.'),
+        findsOneWidget,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await _settle(tester);
 
-      final Map<String, dynamic> body =
-          jsonDecode(
-                engine.lastWhere('POST', '/api/v1/tool-registry').body,
-              )
-              as Map<String, dynamic>;
+      final Map<String, dynamic> body = jsonDecode(
+        engine.lastWhere('POST', '/api/v1/tool-registry').body,
+      ) as Map<String, dynamic>;
       expect(body['alias'], 'files');
       expect(body['toolType'], 'mcp');
       expect(body['command'], 'npx');
@@ -533,11 +550,16 @@ void main() {
       await _pumpPanel(tester, engine.controller(), SettingsPage.tools);
       await tester.tap(find.text('New tool'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey<String>('Connection:Command (stdio)')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('Connection:Command (stdio)')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('HTTP URL').last);
       await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextField, 'Tool name'), 'remote');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tool name'),
+        'remote',
+      );
       await tester.enterText(
         find.widgetWithText(TextField, 'https://'),
         'https://x.test/mcp',
@@ -545,11 +567,9 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await _settle(tester);
 
-      final Map<String, dynamic> body =
-          jsonDecode(
-                engine.lastWhere('POST', '/api/v1/tool-registry').body,
-              )
-              as Map<String, dynamic>;
+      final Map<String, dynamic> body = jsonDecode(
+        engine.lastWhere('POST', '/api/v1/tool-registry').body,
+      ) as Map<String, dynamic>;
       expect(body['endpointUrl'], 'https://x.test/mcp');
       expect(body['toolType'], 'mcp');
       expect(body.containsKey('command'), isFalse);
@@ -581,18 +601,27 @@ void main() {
       );
       await tester.tap(save);
       await tester.pumpAndSettle();
-      expect(find.text('Environment lines must look like KEY=value.'),
-          findsOneWidget);
+      expect(
+        find.text('Environment lines must look like KEY=value.'),
+        findsOneWidget,
+      );
 
-      await tester.tap(find.byKey(const ValueKey<String>('Tool Type:MCP server')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('Tool Type:MCP server')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Command line tool').last);
       await tester.pumpAndSettle();
       await tester.tap(save);
       await tester.pumpAndSettle();
-      expect(find.text('Description is required for command line tools.'),
-          findsOneWidget);
-      expect(engine.requests.where((http.Request r) => r.method == 'POST'), isEmpty);
+      expect(
+        find.text('Description is required for command line tools.'),
+        findsOneWidget,
+      );
+      expect(
+        engine.requests.where((http.Request r) => r.method == 'POST'),
+        isEmpty,
+      );
     });
 
     testWidgets('a CLI tool posts command, args and description', (
@@ -602,11 +631,16 @@ void main() {
       await _pumpPanel(tester, engine.controller(), SettingsPage.tools);
       await tester.tap(find.text('New tool'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey<String>('Tool Type:MCP server')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('Tool Type:MCP server')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Command line tool').last);
       await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextField, 'Tool name'), 'git');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Tool name'),
+        'git',
+      );
       await tester.enterText(
         find.widgetWithText(TextField, 'Executable, e.g. npx'),
         'git',
@@ -622,15 +656,16 @@ void main() {
         ),
         'Shows repo status',
       );
-      expect(find.text('Not encrypted - do not put secrets here.'), findsNothing);
+      expect(
+        find.text('Not encrypted - do not put secrets here.'),
+        findsNothing,
+      );
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
       await _settle(tester);
 
-      final Map<String, dynamic> body =
-          jsonDecode(
-                engine.lastWhere('POST', '/api/v1/tool-registry').body,
-              )
-              as Map<String, dynamic>;
+      final Map<String, dynamic> body = jsonDecode(
+        engine.lastWhere('POST', '/api/v1/tool-registry').body,
+      ) as Map<String, dynamic>;
       expect(body['toolType'], 'cli');
       expect(body['command'], 'git');
       expect(body['args'], <String>['status']);
@@ -684,8 +719,10 @@ void main() {
       expect(find.text('Script (legacy) · C:/s.py'), findsOneWidget);
       await tester.tap(find.text('old'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey<String>('Tool Type:Script (legacy)')),
-          findsOneWidget);
+      expect(
+        find.byKey(const ValueKey<String>('Tool Type:Script (legacy)')),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(TextField, 'C:/s.py'), findsOneWidget);
     });
   });

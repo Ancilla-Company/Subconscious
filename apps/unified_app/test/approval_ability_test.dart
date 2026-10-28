@@ -29,8 +29,9 @@ const Map<String, dynamic> _loginBody = <String, dynamic>{
 final class _NoTransport implements PeerTransportFactory {
   const _NoTransport();
   @override
-  Future<PeerTransport> create({required List<Map<String, dynamic>> iceServers}) =>
-      throw UnimplementedError();
+  Future<PeerTransport> create({
+    required List<Map<String, dynamic>> iceServers,
+  }) => throw UnimplementedError();
 }
 
 Future<SignalSocket> _neverConnects(Uri _) => Completer<SignalSocket>().future;
@@ -193,70 +194,73 @@ void main() {
         runtime.debugApprovalAbility = state;
         expect(
           runtime.canApprove,
-          state == ApprovalAbility.allowed || state == ApprovalAbility.viaLocalEngine,
+          state == ApprovalAbility.allowed ||
+              state == ApprovalAbility.viaLocalEngine,
           reason: state.name,
         );
       }
     });
 
-    test('with a local engine, approve goes to the engine route with its code', () async {
-      final HiveRuntime runtime = await _plainRuntime();
-      addTearDown(runtime.dispose);
-      final List<http.Request> engine = <http.Request>[];
-      runtime.hasLocalFullNode = true;
-      runtime.localEngineClient = () async => RestEngineClient(
-        baseUri: Uri.parse('http://127.0.0.1:1/api/v1/'),
-        token: 't',
-        client: MockClient((http.Request r) async {
-          engine.add(r);
-          return http.Response(
-            jsonEncode(<String, dynamic>{
-              'state': 'running',
-              'nodes': <Map<String, dynamic>>[
-                <String, dynamic>{
-                  'id': 'n_pc',
-                  'kind': 'engine',
-                  'trusted': true,
-                  'local': true,
-                  'online': true,
-                  'status': 'active',
-                },
-                <String, dynamic>{
-                  'id': 'n_new',
-                  'kind': 'thin',
-                  'trusted': false,
-                  'online': true,
-                  'status': 'pending',
-                  'sas': '123456',
-                },
-              ],
-            }),
-            200,
-          );
-        }),
-      );
-      await runtime.refresh();
-      final NodeView pending = runtime.nodes.firstWhere(
-        (NodeView v) => v.node.id == 'n_new',
-      );
-      expect(await runtime.codeFor(pending.node), '123456');
-      await runtime.approve(pending.node);
-      final http.Request approve = engine.firstWhere((http.Request r) => r.method == 'POST');
-      expect(approve.url.path, '/api/v1/hive/nodes/n_new/approve');
-      expect(jsonDecode(approve.body), <String, dynamic>{'sas': '123456'});
-      expect(
-        runtime.approvalNote,
-        'Approval did not change this device. Remove it and sign in on that device again.',
-        reason: 'the row is still pending after the refresh',
-      );
-    });
+    test(
+      'with a local engine, approve goes to the engine route with its code',
+      () async {
+        final HiveRuntime runtime = await _plainRuntime();
+        addTearDown(runtime.dispose);
+        final List<http.Request> engine = <http.Request>[];
+        runtime.hasLocalFullNode = true;
+        runtime.localEngineClient = () async => RestEngineClient(
+          baseUri: Uri.parse('http://127.0.0.1:1/api/v1/'),
+          token: 't',
+          client: MockClient((http.Request r) async {
+            engine.add(r);
+            return http.Response(
+              jsonEncode(<String, dynamic>{
+                'state': 'running',
+                'nodes': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'id': 'n_pc',
+                    'kind': 'engine',
+                    'trusted': true,
+                    'local': true,
+                    'online': true,
+                    'status': 'active',
+                  },
+                  <String, dynamic>{
+                    'id': 'n_new',
+                    'kind': 'thin',
+                    'trusted': false,
+                    'online': true,
+                    'status': 'pending',
+                    'sas': '123456',
+                  },
+                ],
+              }),
+              200,
+            );
+          }),
+        );
+        await runtime.refresh();
+        final NodeView pending = runtime.nodes.firstWhere(
+          (NodeView v) => v.node.id == 'n_new',
+        );
+        expect(await runtime.codeFor(pending.node), '123456');
+        await runtime.approve(pending.node);
+        final http.Request approve = engine.firstWhere(
+          (http.Request r) => r.method == 'POST',
+        );
+        expect(approve.url.path, '/api/v1/hive/nodes/n_new/approve');
+        expect(jsonDecode(approve.body), <String, dynamic>{'sas': '123456'});
+        expect(
+          runtime.approvalNote,
+          'Approval did not change this device. Remove it and sign in on that device again.',
+          reason: 'the row is still pending after the refresh',
+        );
+      },
+    );
   });
 
   group('approval notices', () {
-    Future<void> pump(
-      WidgetTester tester,
-      HiveRuntime runtime,
-    ) async {
+    Future<void> pump(WidgetTester tester, HiveRuntime runtime) async {
       final AccountController account = AccountController(
         session: runtime,
         clientProvider: () => null,
@@ -267,7 +271,9 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(child: DevicesSection(account: account)),
+            body: SingleChildScrollView(
+              child: DevicesSection(account: account),
+            ),
           ),
         ),
       );
@@ -288,7 +294,9 @@ void main() {
       return runtime;
     }
 
-    final Finder cannot = find.byKey(const ValueKey<String>('cannot-approve-notice'));
+    final Finder cannot = find.byKey(
+      const ValueKey<String>('cannot-approve-notice'),
+    );
     final Finder engineNotTrusted = find.byKey(
       const ValueKey<String>('engine-not-trusted-notice'),
     );
@@ -332,7 +340,10 @@ void main() {
       final HiveRuntime runtime = await runtimeWith(
         tester,
         ability: ApprovalAbility.notTrusted,
-        nodes: <NodeView>[_view('n_me', local: true), _view('n_pc', kind: 'engine')],
+        nodes: <NodeView>[
+          _view('n_me', local: true),
+          _view('n_pc', kind: 'engine'),
+        ],
       );
       await pump(tester, runtime);
       expect(cannot, findsNothing);
@@ -351,63 +362,82 @@ void main() {
       );
       await pump(tester, runtime);
       expect(cannot, findsOneWidget);
-      expect(find.text('Approve new devices from the Subconscious desktop app.'), findsOneWidget);
-      expect(find.text('Approve'), findsNothing, reason: 'no Approve button when blocked');
-    });
-
-    testWidgets('not trusted with a pending device shows the other-device text', (
-      WidgetTester tester,
-    ) async {
-      final HiveRuntime runtime = await runtimeWith(
-        tester,
-        ability: ApprovalAbility.notTrusted,
-        nodes: <NodeView>[
-          _view('n_me', local: true),
-          _view('n_new', status: 'pending', trusted: false),
-        ],
-      );
-      await pump(tester, runtime);
       expect(
-        find.text('This device is not approved yet. Approve it from another signed-in device.'),
+        find.text('Approve new devices from the Subconscious desktop app.'),
         findsOneWidget,
       );
+      expect(
+        find.text('Approve'),
+        findsNothing,
+        reason: 'no Approve button when blocked',
+      );
     });
 
-    testWidgets('engineNotTrusted shows its own wording and hides the other text', (
+    testWidgets(
+      'not trusted with a pending device shows the other-device text',
+      (WidgetTester tester) async {
+        final HiveRuntime runtime = await runtimeWith(
+          tester,
+          ability: ApprovalAbility.notTrusted,
+          nodes: <NodeView>[
+            _view('n_me', local: true),
+            _view('n_new', status: 'pending', trusted: false),
+          ],
+        );
+        await pump(tester, runtime);
+        expect(
+          find.text(
+            'This device is not approved yet. Approve it from another signed-in device.',
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'engineNotTrusted shows its own wording and hides the other text',
+      (WidgetTester tester) async {
+        final HiveRuntime runtime = await runtimeWith(
+          tester,
+          localEngine: true,
+          ability: ApprovalAbility.engineNotTrusted,
+          nodes: <NodeView>[
+            _view('n_pc', kind: 'engine', local: true, trusted: false),
+            _view('n_new', status: 'pending', trusted: false),
+          ],
+        );
+        await pump(tester, runtime);
+        expect(engineNotTrusted, findsOneWidget);
+        expect(
+          find.text(
+            'The local engine is not approved. Sign the engine in again.',
+          ),
+          findsOneWidget,
+        );
+        expect(cannot, findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Approve button and message agree: allowed shows the button only',
+      (WidgetTester tester) async {
+        final HiveRuntime runtime = await runtimeWith(
+          tester,
+          ability: ApprovalAbility.allowed,
+          nodes: <NodeView>[
+            _view('n_me', local: true),
+            _view('n_new', status: 'pending', trusted: false),
+          ],
+        );
+        await pump(tester, runtime);
+        expect(find.text('Approve'), findsOneWidget);
+        expect(cannot, findsNothing);
+      },
+    );
+
+    testWidgets('a pending device always offers Remove', (
       WidgetTester tester,
     ) async {
-      final HiveRuntime runtime = await runtimeWith(
-        tester,
-        localEngine: true,
-        ability: ApprovalAbility.engineNotTrusted,
-        nodes: <NodeView>[
-          _view('n_pc', kind: 'engine', local: true, trusted: false),
-          _view('n_new', status: 'pending', trusted: false),
-        ],
-      );
-      await pump(tester, runtime);
-      expect(engineNotTrusted, findsOneWidget);
-      expect(find.text('The local engine is not approved. Sign the engine in again.'), findsOneWidget);
-      expect(cannot, findsNothing);
-    });
-
-    testWidgets('Approve button and message agree: allowed shows the button only', (
-      WidgetTester tester,
-    ) async {
-      final HiveRuntime runtime = await runtimeWith(
-        tester,
-        ability: ApprovalAbility.allowed,
-        nodes: <NodeView>[
-          _view('n_me', local: true),
-          _view('n_new', status: 'pending', trusted: false),
-        ],
-      );
-      await pump(tester, runtime);
-      expect(find.text('Approve'), findsOneWidget);
-      expect(cannot, findsNothing);
-    });
-
-    testWidgets('a pending device always offers Remove', (WidgetTester tester) async {
       final HiveRuntime runtime = await runtimeWith(
         tester,
         ability: ApprovalAbility.notTrusted,

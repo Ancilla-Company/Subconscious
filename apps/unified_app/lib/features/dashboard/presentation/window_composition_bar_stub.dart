@@ -9,9 +9,16 @@ Future<void> initializeDesktopWindow() async {}
 /// status, panel toggles, workspace picker) without window buttons, because
 /// the browser owns the window.
 final class EngineCompositionBar extends StatelessWidget {
-  const EngineCompositionBar({required this.controller, super.key});
+  const EngineCompositionBar({
+    required this.controller,
+    this.onToggleFlyout,
+    super.key,
+  });
 
   final DashboardController controller;
+
+  /// Unused on the web, which has no chat-only window.
+  final VoidCallback? onToggleFlyout;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(

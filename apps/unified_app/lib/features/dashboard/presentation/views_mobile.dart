@@ -15,29 +15,15 @@ import '../../hive/hive_runtime.dart';
 import '../controller/dashboard_controller.dart';
 import 'dashboard_main_panel.dart';
 
-/// Minimum height and width of anything tappable on a touch screen.
-const double _touchTarget = 48;
-
-/// The kit's compact control size, used when a pointer drives the mobile
-/// layout (the browser extension) so buttons match the desktop's 32 dp.
-const double _compactTarget = 32;
-
 final class MobileDashboardView extends StatelessWidget {
   const MobileDashboardView({
     required this.controller,
     required this.accountController,
-    this.compactControls = false,
     super.key,
   });
 
   final DashboardController controller;
   final AccountController accountController;
-
-  /// Uses the kit's 32 dp controls instead of 48 dp touch targets (a pointer
-  /// drives the layout, as in the browser extension popup and side panel).
-  final bool compactControls;
-
-  double get _target => compactControls ? _compactTarget : _touchTarget;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -46,11 +32,16 @@ final class MobileDashboardView extends StatelessWidget {
       // The app bar, drawer and every panel share the form template, as on the
       // wide layout.
       data: appFormTheme(context),
-      child: _scaffold(context),
+      child: Builder(
+        // Under the form theme, so the size is read from the display the app
+        // is on, never from the platform or the window width.
+        builder: (BuildContext context) =>
+            _scaffold(context, AppDensity.controlSize(context)),
+      ),
     ),
   );
 
-  Widget _scaffold(BuildContext context) {
+  Widget _scaffold(BuildContext context, double target) {
     return Scaffold(
       drawer: Drawer(
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
@@ -58,23 +49,21 @@ final class MobileDashboardView extends StatelessWidget {
           child: _MobileFlyout(
             controller: controller,
             accountController: accountController,
-            target: _target,
+            target: target,
           ),
         ),
       ),
       appBar: AppBar(
-        leadingWidth: _target + 8,
+        leadingWidth: target + 8,
         leading: Builder(
           builder: (BuildContext context) => Align(
             child: AppIconButton(
               tooltip: 'Open navigation menu',
               onPressed: Scaffold.of(context).openDrawer,
               icon: FluentIcons.navigation_24_regular,
-              size: compactControls
-                  ? AppIconButtonSize.compact
-                  : AppIconButtonSize.regular,
-              minTouchTarget: _target,
-              iconSize: compactControls ? 20 : 24,
+              size: AppIconButtonSize.compact,
+              minTouchTarget: target,
+              iconSize: target > AppDensity.control ? 24 : 20,
             ),
           ),
         ),
@@ -94,11 +83,11 @@ final class MobileDashboardView extends StatelessWidget {
       ),
       // Keeps the composer clear of the iOS home indicator and landscape
       // notch; Scaffold already shrinks the inset while the keyboard is up.
-      body: SafeArea(top: false, child: _body()),
+      body: SafeArea(top: false, child: _body(target)),
     );
   }
 
-  Widget _body() {
+  Widget _body(double target) {
     // The chat only has room under Threads on mobile, so show it while a tool
     // approval or tool sign-in is waiting, without changing the selected
     // section.
@@ -140,7 +129,7 @@ final class MobileDashboardView extends StatelessWidget {
                             'Select a workspace to start chatting.'),
         borderlessComposer: true,
         greetingName: accountController.greetingName,
-        minTouchTarget: _target,
+        minTouchTarget: target,
         onOpenDevices: controller.openAccountShortcut,
         workspace: controller.threadsWorkspace,
         activeFile: controller.activeFileReference == null

@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'dart:async';
-
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -46,8 +44,12 @@ final class CaptionTitleContent extends StatelessWidget {
   const CaptionTitleContent({
     required this.controller,
     this.runtime,
+    this.compact = false,
     super.key,
   });
+
+  /// Logo and status only, for a very narrow title bar (the chat-only window).
+  final bool compact;
 
   final DashboardController controller;
 
@@ -72,7 +74,7 @@ final class CaptionTitleContent extends StatelessWidget {
     return Row(
       children: <Widget>[
         SizedBox.square(
-          dimension: 40,
+          dimension: compact ? 32 : 40,
           child: Center(
             child: SvgPicture.asset(
               'windows/runner/resources/icon_title.svg',
@@ -86,8 +88,10 @@ final class CaptionTitleContent extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 3),
-        Text('Subconscious', style: theme.textTheme.labelLarge),
+        if (!compact) ...<Widget>[
+          const SizedBox(width: 3),
+          Text('Subconscious', style: theme.textTheme.labelLarge),
+        ],
         const Spacer(),
         Transform.translate(
           offset: const Offset(0, 1),
@@ -333,6 +337,56 @@ final class ThreadWorkspaceCaptionPicker extends StatelessWidget {
                 color: foreground,
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The title bar's button that opens the threads flyout in the chat-only
+/// window, drawn like the panel toggles.
+///
+/// It sits beside the draggable title area, not inside it: a press in that
+/// area starts a window drag, which would swallow the click.
+final class CaptionFlyoutButton extends StatelessWidget {
+  const CaptionFlyoutButton({
+    required this.brightness,
+    required this.onPressed,
+    super.key,
+  });
+
+  static const String tooltip = 'Threads';
+  static const IconData icon = FluentIcons.navigation_20_regular;
+
+  final Brightness brightness;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color foreground = brightness == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    final Color hover = brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            hoverColor: hover,
+            focusColor: hover,
+            highlightColor: hover,
+            child: SizedBox(
+              width: 42,
+              height: kCaptionBarHeight,
+              child: Icon(icon, size: 18, color: foreground),
+            ),
           ),
         ),
       ),

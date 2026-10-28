@@ -28,9 +28,7 @@ void main() {
       TargetPlatform.linux,
     ]) {
       testWidgets('settings controls use the kit form theme on '
-          '${platform.name} (${brightness.name})', (
-        WidgetTester tester,
-      ) async {
+          '${platform.name} (${brightness.name})', (WidgetTester tester) async {
         final DashboardController dashboard = DashboardController(_noEngine)
           ..connectionStatus = EngineConnectionStatus.disconnected;
         addTearDown(dashboard.dispose);

@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
@@ -40,6 +41,8 @@ final class _DesktopWebDashboardViewState
   static const double _minimumMainPanelWidth = 300;
   static const double _sidebarAndDividerWidth = 41;
   static const double _resizeDividerWidth = AppPanelDivider.width;
+
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   void _selectPanel(DashboardSection section) {
     widget.controller.updateLayoutState(contextPanelVisible: true);
@@ -184,14 +187,32 @@ final class _DesktopWebDashboardViewState
         ),
       ],
     ];
+    // Chat-only has no sidebar: the window is just the chat.
+    final bool chatOnly = widget.controller.chatOnly;
     final bool sidebarOnRight =
         widget.controller.settings.sidebarPosition ==
         DashboardSidebarPosition.right;
 
     return Scaffold(
+      key: _scaffoldKey,
+      // Chat-only has no sidebar, so its threads live in a flyout opened from
+      // the title bar.
+      drawer: chatOnly
+          ? Drawer(
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.zero,
+              ),
+              child: _ChatOnlyFlyout(controller: widget.controller),
+            )
+          : null,
       body: Column(
         children: <Widget>[
-          EngineCompositionBar(controller: widget.controller),
+          EngineCompositionBar(
+            controller: widget.controller,
+            onToggleFlyout: chatOnly
+                ? () => _scaffoldKey.currentState?.openDrawer()
+                : null,
+          ),
           Expanded(
             child: DecoratedBox(
               position: DecorationPosition.foreground,
@@ -204,7 +225,10 @@ final class _DesktopWebDashboardViewState
               ),
               child: Row(
                 children: <Widget>[
-                  if (!sidebarOnRight) ...<Widget>[sidebar, sidebarDivider],
+                  if (!sidebarOnRight && !chatOnly) ...<Widget>[
+                    sidebar,
+                    sidebarDivider,
+                  ],
                   Expanded(
                     child: panelOrder.isEmpty
                         ? Center(
@@ -227,7 +251,10 @@ final class _DesktopWebDashboardViewState
                             children: configuredPanels,
                           ),
                   ),
-                  if (sidebarOnRight) ...<Widget>[sidebarDivider, sidebar],
+                  if (sidebarOnRight && !chatOnly) ...<Widget>[
+                    sidebarDivider,
+                    sidebar,
+                  ],
                 ],
               ),
             ),
@@ -264,6 +291,8 @@ final class _DesktopWebDashboardViewState
                 key: ValueKey<int>(widget.controller.chatSessionVersion),
                 provider: provider ?? widget.controller.fallbackChatProvider,
                 greetingName: widget.accountController.greetingName,
+                // Read from the display, not the platform or window width.
+                minTouchTarget: AppDensity.minTouchTarget(context),
                 isComposerEnabled:
                     provider != null && widget.controller.isConnected,
                 errorMessage: loading && provider == null
@@ -331,6 +360,7 @@ final class _DesktopWebDashboardViewState
       DashboardPanel.context => ContextPanel(
         screen: widget.controller.selectedSection,
         controller: widget.controller,
+        minTouchTarget: AppDensity.minTouchTarget(context),
       ),
     };
     if (expandsToFill) return Expanded(key: key, child: child);
@@ -514,4 +544,88 @@ final class _Sidebar extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// The threads flyout of the chat-only window: pick a workspace and a thread
+/// without leaving the small chat window.
+final class _ChatOnlyFlyout extends StatelessWidget {
+  const _ChatOnlyFlyout({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    // Elsewhere the threads list carries its own workspace picker; on Windows
+    // that picker lives in the title bar, which the chat-only window has no
+    // room for.
+    final bool needsPicker =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    return AppFormTheme(
+      child: ColoredBox(
+        color: colors.surface,
+        child: SafeArea(
+          child: ListenableBuilder(
+            listenable: controller,
+            builder: (BuildContext context, Widget? child) => Column(
+              children: <Widget>[
+                AppFlyoutHeader(
+                  title: 'Threads',
+                  logo: SvgPicture.asset(
+                    'windows/runner/resources/icon_title.svg',
+                    colorFilter: ColorFilter.mode(
+                      colors.onSurface,
+                      BlendMode.srcIn,
+                    ),
+                    semanticsLabel: 'Subconscious logo',
+                  ),
+                ),
+                if (needsPicker)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: AppDropdownField<String>(
+                      value: controller.threadsWorkspace?.uuid ?? '',
+                      items: <DropdownMenuItem<String>>[
+                        const DropdownMenuItem<String>(
+                          value: '',
+                          child: Text(
+                            'All workspaces',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        for (final Workspace workspace in controller.workspaces)
+                          DropdownMenuItem<String>(
+                            value: workspace.uuid,
+                            child: Text(
+                              workspace.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (String? uuid) {
+                        Workspace? chosen;
+                        for (final Workspace candidate
+                            in controller.workspaces) {
+                          if (candidate.uuid == uuid) chosen = candidate;
+                        }
+                        unawaited(controller.selectThreadWorkspace(chosen));
+                      },
+                    ),
+                  ),
+                Divider(height: 1, thickness: 1, color: colors.outlineVariant),
+                Expanded(
+                  child: ContextPanel(
+                    screen: DashboardSection.threads,
+                    controller: controller,
+                    minTouchTarget: AppDensity.minTouchTarget(context),
+                    onSelection: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
