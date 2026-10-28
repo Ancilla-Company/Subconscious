@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../themes/app_button_theme.dart';
+import '../tokens/app_radii.dart';
 
 /// The app's one template for form fields, buttons and popups: flat, compact
 /// controls with 3px corners. It is identical on every platform (Android, iOS,
@@ -96,12 +97,15 @@ ThemeData appFormTheme(BuildContext context) {
       pressElevation: 0,
       surfaceTintColor: Colors.transparent,
     ),
+    // Same surface as the editor find bar, so menus stand out from the page.
     popupMenuTheme: PopupMenuThemeData(
-      color: colors.surfaceContainerLowest,
+      color: colors.surfaceContainerHigh,
       surfaceTintColor: Colors.transparent,
-      elevation: 2,
+      elevation: 4,
+      // 6px gap to the edge on every side once the 2px row spacing is added.
+      menuPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       shape: RoundedRectangleBorder(
-        borderRadius: radius,
+        borderRadius: AppRadii.lg,
         side: BorderSide(color: colors.outlineVariant),
       ),
     ),

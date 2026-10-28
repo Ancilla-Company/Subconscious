@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+
+import '../tokens/app_radii.dart';
+
 import 'package:flutter/services.dart';
 
 import '../tokens/app_spacing.dart';
+import '../widgets/chiclet_menu.dart';
 
 /// The bold label shown above a form field.
 final class AppFieldLabel extends StatelessWidget {
@@ -165,11 +169,8 @@ final class AppDropdown extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       AppFieldLabel(label),
-      DropdownButtonFormField<String>(
-        key: ValueKey<String>('$label:$value'),
-        initialValue: options.contains(value) ? value : options.first,
-        style: Theme.of(context).textTheme.bodyMedium
-            ?.copyWith(fontWeight: FontWeight.normal),
+      _SelectField<String>(
+        value: options.contains(value) ? value : options.first,
         items: <DropdownMenuItem<String>>[
           for (final String option in options)
             DropdownMenuItem<String>(value: option, child: Text(option)),
@@ -204,11 +205,9 @@ final class AppDropdownField<T> extends StatelessWidget {
   final ValueChanged<T?>? onChanged;
 
   @override
-  Widget build(BuildContext context) => DropdownButtonFormField<T>(
-    initialValue: value,
+  Widget build(BuildContext context) => _SelectField<T>(
+    value: value,
     hint: hint,
-    style: Theme.of(context).textTheme.bodyMedium
-        ?.copyWith(fontWeight: FontWeight.normal),
     items: items,
     onChanged: onChanged,
   );
@@ -222,23 +221,27 @@ final class AppCompactDropdown<T> extends StatelessWidget {
     required this.value,
     required this.items,
     required this.onChanged,
+    this.hint,
+    this.padding,
     super.key,
   });
 
   final T? value;
+  final Widget? hint;
+  final EdgeInsetsGeometry? padding;
   final List<DropdownMenuItem<T>> items;
 
   /// Null disables the dropdown.
   final ValueChanged<T?>? onChanged;
 
   @override
-  Widget build(BuildContext context) => DropdownButtonHideUnderline(
-    child: DropdownButton<T>(
-      isExpanded: true,
-      value: value,
-      items: items,
-      onChanged: onChanged,
-    ),
+  Widget build(BuildContext context) => _SelectField<T>(
+    value: value,
+    hint: hint,
+    items: items,
+    onChanged: onChanged,
+    compact: true,
+    padding: padding,
   );
 }
 
@@ -368,4 +371,87 @@ final class AppFieldRow extends StatelessWidget {
       ],
     ],
   );
+}
+
+/// The one implementation behind every dropdown. The closed field is drawn
+/// here (an outlined field, or bare when [compact]); the open list is the same
+/// chiclet popup menu used by `AppPopupMenu`, as wide as the field, so
+/// dropdowns and popups look and size identically.
+final class _SelectField<T> extends StatelessWidget {
+  const _SelectField({
+    required this.items,
+    required this.onChanged,
+    this.value,
+    this.hint,
+    this.compact = false,
+    this.padding,
+  });
+
+  final T? value;
+  final Widget? hint;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final bool compact;
+  final EdgeInsetsGeometry? padding;
+
+  Future<void> _open(BuildContext anchor) async {
+    final T? chosen = await showChicletMenuBelow<T>(
+      anchor: anchor,
+      items: <PopupMenuEntry<T>>[
+        for (final DropdownMenuItem<T> item in items)
+          ChicletMenuItem<T>(
+            value: item.value,
+            enabled: item.enabled,
+            selected: item.value == value,
+            child: item.child,
+          ),
+      ],
+    );
+    if (chosen != null) onChanged?.call(chosen);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool enabled = onChanged != null && items.isNotEmpty;
+    Widget? selected;
+    for (final DropdownMenuItem<T> item in items) {
+      if (item.value == value) selected = item.child;
+    }
+    final Color arrow = enabled
+        ? theme.colorScheme.onSurfaceVariant
+        : theme.disabledColor;
+    final Widget content = DefaultTextStyle.merge(
+      style: theme.textTheme.bodyMedium?.copyWith(
+        fontWeight: FontWeight.normal,
+        color: enabled ? null : theme.disabledColor,
+      ),
+      child: Row(
+        children: <Widget>[
+          Expanded(child: selected ?? hint ?? const SizedBox.shrink()),
+          Icon(Icons.arrow_drop_down, color: arrow),
+        ],
+      ),
+    );
+    return Builder(
+      builder: (BuildContext anchor) => Semantics(
+        button: true,
+        enabled: enabled,
+        child: InkWell(
+          borderRadius: AppRadii.xs,
+          onTap: enabled ? () => _open(anchor) : null,
+          child: compact
+              ? Padding(
+                  padding: padding ?? EdgeInsets.zero,
+                  child: Align(alignment: Alignment.centerLeft, child: content),
+                )
+              : InputDecorator(
+                  isEmpty: false,
+                  decoration: InputDecoration(enabled: enabled),
+                  child: content,
+                ),
+        ),
+      ),
+    );
+  }
 }

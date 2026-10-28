@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../forms/app_form_theme.dart';
+import 'chiclet_menu.dart';
 import 'app_bottom_sheet.dart';
 import 'app_icon_button.dart';
 import 'app_list_row.dart';
@@ -16,6 +17,7 @@ final class AppMenuItem<T> {
     this.icon,
     this.subtitle,
     this.checked,
+    this.selected = false,
     this.enabled = true,
     this.key,
   });
@@ -25,11 +27,14 @@ final class AppMenuItem<T> {
   final IconData? icon;
   final String? subtitle;
   final bool? checked;
+
+  /// Highlights the row as the current choice (like a selected dropdown option).
+  final bool selected;
   final bool enabled;
   final Key? key;
 }
 
-/// A popup menu in the kit style (flat, 3px corners, bordered).
+/// A popup menu in the kit style (rounded, raised surface, chiclet rows).
 ///
 /// Provide a [child] to use any widget as the trigger, or leave it null for an
 /// icon trigger drawn like an `AppIconButton` ([icon], default "more").
@@ -87,7 +92,7 @@ final class AppPopupMenu<T> extends StatelessWidget {
               title: item.label,
               subtitle: item.subtitle,
               minHeight: 48,
-              selected: item.checked ?? false,
+              selected: item.selected || (item.checked ?? false),
               leading: item.icon == null ? null : Icon(item.icon),
               trailing: item.checked ?? false ? const Icon(Icons.check) : null,
               onTap: item.enabled
@@ -132,6 +137,7 @@ final class AppPopupMenu<T> extends StatelessWidget {
       shape: menu.shape,
       onSelected: onSelected,
       padding: EdgeInsets.zero,
+      menuPadding: menu.menuPadding,
       style: child == null
           ? appIconButtonStyle(
               context,
@@ -143,11 +149,12 @@ final class AppPopupMenu<T> extends StatelessWidget {
       child: child,
       itemBuilder: (BuildContext context) => <PopupMenuEntry<T>>[
         for (final AppMenuItem<T> item in items)
-          PopupMenuItem<T>(
+          ChicletMenuItem<T>(
             key: item.key,
             value: item.value,
             enabled: item.enabled,
-            height: item.subtitle == null ? 36 : 44,
+            selected: item.selected || (item.checked ?? false),
+            height: item.subtitle == null ? 32 : 44,
             child: Row(
               children: <Widget>[
                 if (item.checked != null) ...<Widget>[
@@ -208,13 +215,15 @@ Future<T?> showAppContextMenu<T>({
     surfaceTintColor: menu.surfaceTintColor,
     elevation: menu.elevation,
     shape: menu.shape,
+    menuPadding: menu.menuPadding,
     items: <PopupMenuEntry<T>>[
       for (final AppMenuItem<T> item in items)
-        PopupMenuItem<T>(
+        ChicletMenuItem<T>(
           key: item.key,
           value: item.value,
           enabled: item.enabled,
-          height: 36,
+          selected: item.selected || (item.checked ?? false),
+          height: 32,
           child: Row(
             children: <Widget>[
               if (item.icon != null) ...<Widget>[

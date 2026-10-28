@@ -95,12 +95,15 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
   /// bar on a screen that is still connected. A minimized window reports
   /// (-32000, -32000); saving that, or a monitor that was unplugged, starts the
   /// next launch invisible, with the app running and no window to see.
-  Future<bool> _isUsableBounds(Rect bounds) async {
+  Future<bool> _isUsableBounds(
+    Rect bounds, {
+    Size minSize = const Size(400, 300),
+  }) async {
     final bool sane =
         bounds.left.isFinite &&
         bounds.top.isFinite &&
-        bounds.width >= 400 &&
-        bounds.height >= 300 &&
+        bounds.width >= minSize.width &&
+        bounds.height >= minSize.height &&
         bounds.width < 20000 &&
         bounds.height < 20000;
     if (!sane) return false;
@@ -183,29 +186,90 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
   Rect? _boundsBeforeChatOnly;
   bool _maximizedBeforeChatOnly = false;
 
+  /// True while the window is the small chat window. The chat-only position
+  /// and size are saved separately from the normal window's.
+  bool _chatWindowActive = false;
+
+  /// True while the window is being switched between the two sizes, so the
+  /// resize events of the switch are not saved as either window's position.
+  bool _isSwitchingChatOnly = false;
+
+  static const Size _chatMinSize = Size(360, 360);
+
   /// The small, always-on-top chat window and the way back from it.
   Future<void> _applyChatOnly(bool enabled) async {
-    if (enabled) {
-      _maximizedBeforeChatOnly = await windowManager.isMaximized();
-      if (_maximizedBeforeChatOnly) await windowManager.unmaximize();
-      _boundsBeforeChatOnly = await windowManager.getBounds();
-      await windowManager.setMinimumSize(const Size(360, 360));
-      await windowManager.setSize(const Size(420, 720));
-      await windowManager.setAlwaysOnTop(true);
+    _isSwitchingChatOnly = true;
+    try {
+      if (enabled) {
+        _maximizedBeforeChatOnly = await windowManager.isMaximized();
+        if (_maximizedBeforeChatOnly) await windowManager.unmaximize();
+        _boundsBeforeChatOnly = await windowManager.getBounds();
+        await windowManager.setMinimumSize(_chatMinSize);
+        final DashboardController controller = widget.controller;
+        final Rect? saved = controller.hasChatWindowBounds
+            ? Rect.fromLTWH(
+                controller.chatWindowX!,
+                controller.chatWindowY!,
+                controller.chatWindowWidth!,
+                controller.chatWindowHeight!,
+              )
+            : null;
+        if (saved != null &&
+            await _isUsableBounds(saved, minSize: _chatMinSize)) {
+          guiLog('Restoring chat-only window bounds $saved');
+          await windowManager.setBounds(saved);
+        } else {
+          await windowManager.setSize(const Size(420, 720));
+        }
+        await windowManager.setAlwaysOnTop(true);
+        _chatWindowActive = true;
+        return;
+      }
+      if (_chatWindowActive) await _captureChatWindowBounds();
+      _chatWindowActive = false;
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setMinimumSize(const Size(800, 560));
+      final Rect? bounds = _boundsBeforeChatOnly;
+      _boundsBeforeChatOnly = null;
+      if (bounds != null) await windowManager.setBounds(bounds);
+      if (_maximizedBeforeChatOnly) await windowManager.maximize();
+    } finally {
+      _isSwitchingChatOnly = false;
+    }
+    // A first-time chat window has no saved position yet; keep this one.
+    if (enabled) await _captureWindowState();
+  }
+
+  Future<void> _captureChatWindowBounds() async {
+    if (await windowManager.isMinimized() ||
+        await windowManager.isMaximized()) {
       return;
     }
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setMinimumSize(const Size(800, 560));
-    final Rect? bounds = _boundsBeforeChatOnly;
-    _boundsBeforeChatOnly = null;
-    if (bounds != null) await windowManager.setBounds(bounds);
-    if (_maximizedBeforeChatOnly) await windowManager.maximize();
+    final Rect bounds = await windowManager.getBounds();
+    if (!await _isUsableBounds(bounds, minSize: _chatMinSize)) {
+      guiLog(
+        'Not saving unusable chat-only window bounds $bounds',
+        level: 'WARNING',
+      );
+      return;
+    }
+    widget.controller.updateChatWindowState(
+      x: bounds.left,
+      y: bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+    );
   }
 
   Future<void> _captureWindowState() async {
-    // The small chat window is temporary; keep the real size for next time.
-    if (widget.controller.chatOnly) return;
-    if (!_hasRestoredWindowState || _isRestoringWindowState || _isClosing) {
+    if (!_hasRestoredWindowState ||
+        _isRestoringWindowState ||
+        _isClosing ||
+        _isSwitchingChatOnly) {
+      return;
+    }
+    if (_chatWindowActive) {
+      await _captureChatWindowBounds();
       return;
     }
     // A minimized window reports a position far off screen; keep the last good one.
@@ -346,7 +410,8 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
     if (mounted) setState(() => _isMaximized = true);
     if (_hasRestoredWindowState &&
         !_isRestoringWindowState &&
-        !widget.controller.chatOnly) {
+        !_chatWindowActive &&
+        !_isSwitchingChatOnly) {
       widget.controller.updateWindowState(windowMaximized: true);
     }
   }

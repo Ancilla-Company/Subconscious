@@ -93,7 +93,11 @@ void main() {
         expect(form.popupMenuTheme.surfaceTintColor, Colors.transparent);
         expect(
           (form.popupMenuTheme.shape! as RoundedRectangleBorder).borderRadius,
-          radius,
+          const BorderRadius.all(Radius.circular(8)),
+        );
+        expect(
+          form.popupMenuTheme.color,
+          base.colorScheme.surfaceContainerHigh,
         );
         final MenuStyle menu = form.menuTheme.style!;
         expect(

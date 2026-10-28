@@ -303,14 +303,14 @@ final class ThreadWorkspaceCaptionPicker extends StatelessWidget {
           value: '',
           label: 'All workspaces',
           icon: FluentIcons.apps_20_regular,
-          enabled: activeUuid.isNotEmpty,
+          selected: activeUuid.isEmpty,
         ),
         for (final workspace in controller.workspaces)
           AppMenuItem<String>(
             value: workspace.uuid,
             label: workspace.name,
             icon: FluentIcons.folder_20_regular,
-            enabled: activeUuid != workspace.uuid,
+            selected: activeUuid == workspace.uuid,
           ),
       ],
       child: SizedBox(

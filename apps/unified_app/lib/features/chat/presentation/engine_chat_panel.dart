@@ -1629,58 +1629,51 @@ final class _Composer extends StatelessWidget {
                       color: Colors.transparent,
                       borderRadius: AppRadii.sm,
                       clipBehavior: Clip.antiAlias,
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          isExpanded: true,
-                          borderRadius: AppRadii.sm,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.normal),
-                          focusColor: colors.secondaryContainer,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          value: effectiveModelId,
-                          hint: Text(
-                            models.isEmpty
-                                ? 'No models available'
-                                : 'Select a model',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          items: <DropdownMenuItem<String>>[
-                            if (effectiveModelId != null && !hasSelectedModel)
-                              DropdownMenuItem<String>(
-                                value: effectiveModelId,
-                                child: _modelDropdownLabel(
-                                  context,
-                                  effectiveModelId,
-                                  isDefault: effectiveModelId == defaultModelId,
-                                ),
-                              ),
-                            if (defaultModelId != null &&
-                                defaultModelId != effectiveModelId &&
-                                !hasWorkspaceDefaultModel)
-                              DropdownMenuItem<String>(
-                                value: defaultModelId,
-                                child: _modelDropdownLabel(
-                                  context,
-                                  defaultModelId,
-                                  isDefault: true,
-                                ),
-                              ),
-                            for (final ModelInfo model in models)
-                              DropdownMenuItem<String>(
-                                value: model.id,
-                                child: _modelDropdownLabel(
-                                  context,
-                                  model.name,
-                                  isDefault: model.id == defaultModelId,
-                                ),
-                              ),
-                          ],
-                          onChanged: modelInteractive
-                              ? (String? value) {
-                                  if (value != null) onModelSelected(value);
-                                }
-                              : null,
+                      child: AppCompactDropdown<String>(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        value: effectiveModelId,
+                        hint: Text(
+                          models.isEmpty
+                              ? 'No models available'
+                              : 'Select a model',
+                          overflow: TextOverflow.ellipsis,
                         ),
+                        items: <DropdownMenuItem<String>>[
+                          if (effectiveModelId != null && !hasSelectedModel)
+                            DropdownMenuItem<String>(
+                              value: effectiveModelId,
+                              child: _modelDropdownLabel(
+                                context,
+                                effectiveModelId,
+                                isDefault: effectiveModelId == defaultModelId,
+                              ),
+                            ),
+                          if (defaultModelId != null &&
+                              defaultModelId != effectiveModelId &&
+                              !hasWorkspaceDefaultModel)
+                            DropdownMenuItem<String>(
+                              value: defaultModelId,
+                              child: _modelDropdownLabel(
+                                context,
+                                defaultModelId,
+                                isDefault: true,
+                              ),
+                            ),
+                          for (final ModelInfo model in models)
+                            DropdownMenuItem<String>(
+                              value: model.id,
+                              child: _modelDropdownLabel(
+                                context,
+                                model.name,
+                                isDefault: model.id == defaultModelId,
+                              ),
+                            ),
+                        ],
+                        onChanged: modelInteractive
+                            ? (String? value) {
+                                if (value != null) onModelSelected(value);
+                              }
+                            : null,
                       ),
                     ),
                   ),

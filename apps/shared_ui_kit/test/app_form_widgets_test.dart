@@ -190,7 +190,7 @@ void main() {
       ),
     );
     expect(find.text('Mode'), findsOneWidget);
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byType(InputDecorator));
     await tester.pumpAndSettle();
     await tester.tap(find.text('B').last);
     await tester.pumpAndSettle();
@@ -214,7 +214,7 @@ void main() {
       ),
     );
     expect(find.text('Pick'), findsOneWidget);
-    await tester.tap(find.byType(DropdownButtonFormField<int>));
+    await tester.tap(find.byType(AppDropdownField<int>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Two').last);
     await tester.pumpAndSettle();
@@ -240,7 +240,7 @@ void main() {
         ),
       ),
     );
-    expect(find.byType(DropdownButtonHideUnderline), findsOneWidget);
+    expect(find.byType(InputDecorator), findsNothing);
     expect(find.byType(TextFormField), findsNothing);
     await tester.tap(find.text('All'));
     await tester.pumpAndSettle();

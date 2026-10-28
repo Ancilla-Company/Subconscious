@@ -355,6 +355,13 @@ final class DashboardController extends ChangeNotifier {
   double? windowHeight;
   bool windowMaximized = false;
 
+  /// Position and size of the chat-only window, kept apart from the normal
+  /// window above so resizing one never moves the other.
+  double? chatWindowX;
+  double? chatWindowY;
+  double? chatWindowWidth;
+  double? chatWindowHeight;
+
   String? _workspacesWorkspaceUuid;
   String? _threadsWorkspaceUuid;
   String? _threadsThreadUuid;
@@ -395,6 +402,12 @@ final class DashboardController extends ChangeNotifier {
       );
 
   String? get rememberedActiveFileKey => _currentViewerState?.activeFileKey;
+
+  bool get hasChatWindowBounds =>
+      _isFinite(chatWindowX) &&
+      _isFinite(chatWindowY) &&
+      _isPositiveFinite(chatWindowWidth) &&
+      _isPositiveFinite(chatWindowHeight);
 
   bool get hasWindowBounds =>
       _isFinite(windowX) &&
@@ -531,6 +544,33 @@ final class DashboardController extends ChangeNotifier {
       changed = true;
     }
     if (!changed) return;
+    _markAppStateChanged();
+    notifyListeners();
+  }
+
+  /// Remembers where the chat-only window sits (see [chatWindowX]).
+  void updateChatWindowState({
+    required double x,
+    required double y,
+    required double width,
+    required double height,
+  }) {
+    if (!_isFinite(x) ||
+        !_isFinite(y) ||
+        !_isPositiveFinite(width) ||
+        !_isPositiveFinite(height)) {
+      return;
+    }
+    if (x == chatWindowX &&
+        y == chatWindowY &&
+        width == chatWindowWidth &&
+        height == chatWindowHeight) {
+      return;
+    }
+    chatWindowX = x;
+    chatWindowY = y;
+    chatWindowWidth = width;
+    chatWindowHeight = height;
     _markAppStateChanged();
     notifyListeners();
   }
@@ -729,6 +769,12 @@ final class DashboardController extends ChangeNotifier {
     windowWidth = _positiveDoubleValue(window['width']);
     windowHeight = _positiveDoubleValue(window['height']);
     windowMaximized = _boolValue(window['maximized']) ?? false;
+
+    final Map<String, dynamic> chatWindow = _objectValue(root['chatWindow']);
+    chatWindowX = _doubleValue(chatWindow['x']);
+    chatWindowY = _doubleValue(chatWindow['y']);
+    chatWindowWidth = _positiveDoubleValue(chatWindow['width']);
+    chatWindowHeight = _positiveDoubleValue(chatWindow['height']);
   }
 
   void _restoreNavigation(Map<String, dynamic> root) {
@@ -895,6 +941,13 @@ final class DashboardController extends ChangeNotifier {
       if (_isPositiveFinite(windowHeight)) 'height': windowHeight,
       'maximized': windowMaximized,
     },
+    if (hasChatWindowBounds)
+      'chatWindow': <String, dynamic>{
+        'x': chatWindowX,
+        'y': chatWindowY,
+        'width': chatWindowWidth,
+        'height': chatWindowHeight,
+      },
   });
 
   void _markNavigationChanged() => _markAppStateChanged();

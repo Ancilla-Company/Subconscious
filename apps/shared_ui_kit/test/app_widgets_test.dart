@@ -566,7 +566,7 @@ void main() {
       );
       expect(
         (button.shape! as RoundedRectangleBorder).borderRadius,
-        const BorderRadius.all(Radius.circular(3)),
+        const BorderRadius.all(Radius.circular(8)),
       );
       expect(button.surfaceTintColor, Colors.transparent);
     });

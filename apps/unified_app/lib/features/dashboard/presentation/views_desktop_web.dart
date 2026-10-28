@@ -583,33 +583,44 @@ final class _ChatOnlyFlyout extends StatelessWidget {
                 if (needsPicker)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                    child: AppDropdownField<String>(
-                      value: controller.threadsWorkspace?.uuid ?? '',
-                      items: <DropdownMenuItem<String>>[
-                        const DropdownMenuItem<String>(
-                          value: '',
-                          child: Text(
-                            'All workspaces',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        for (final Workspace workspace in controller.workspaces)
-                          DropdownMenuItem<String>(
-                            value: workspace.uuid,
-                            child: Text(
-                              workspace.name,
-                              overflow: TextOverflow.ellipsis,
+                    // Same picker as the composer's model menu.
+                    child: SizedBox(
+                      height: 32,
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: AppRadii.sm,
+                        clipBehavior: Clip.antiAlias,
+                        child: AppCompactDropdown<String>(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          value: controller.threadsWorkspace?.uuid ?? '',
+                          items: <DropdownMenuItem<String>>[
+                            const DropdownMenuItem<String>(
+                              value: '',
+                              child: Text(
+                                'All workspaces',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
-                      ],
-                      onChanged: (String? uuid) {
-                        Workspace? chosen;
-                        for (final Workspace candidate
-                            in controller.workspaces) {
-                          if (candidate.uuid == uuid) chosen = candidate;
-                        }
-                        unawaited(controller.selectThreadWorkspace(chosen));
-                      },
+                            for (final Workspace workspace
+                                in controller.workspaces)
+                              DropdownMenuItem<String>(
+                                value: workspace.uuid,
+                                child: Text(
+                                  workspace.name,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (String? uuid) {
+                            Workspace? chosen;
+                            for (final Workspace candidate
+                                in controller.workspaces) {
+                              if (candidate.uuid == uuid) chosen = candidate;
+                            }
+                            unawaited(controller.selectThreadWorkspace(chosen));
+                          },
+                        ),
+                      ),
                     ),
                   ),
                 Divider(height: 1, thickness: 1, color: colors.outlineVariant),
