@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from typing import Any
 
 from subconscious_engine.approval import CREATE, DELETE, READ, UPDATE, classify_operation
@@ -105,6 +107,33 @@ def bounded(value: Any, limit: int = MAX_PAYLOAD_CHARS) -> tuple[Any, bool]:
     if len(text) <= limit:
         return value, False
     return text[:limit], True
+
+
+PROGRESS_EVENT_TYPE = "tool.progress"
+
+# Set by the transport for the running turn. A tool that does long work on its own (an ACP
+# sub-agent) calls it to report what it is doing; the turn forwards those events to the chat
+# and records them with the tool call.
+ProgressSink = Callable[[dict[str, Any]], Awaitable[None]]
+progress_sink: ContextVar[ProgressSink | None] = ContextVar("tool_progress_sink", default=None)
+
+# Bounds so a chatty sub-agent cannot grow a stored message without limit.
+MAX_STEP_TEXT = 4000
+MAX_STEPS = 200
+
+
+def tool_progress_event(tool_call_id: str, step: dict[str, Any]) -> dict[str, Any]:
+    """One ``tool.progress`` event: a step a running tool reports about itself.
+
+    ``step`` has ``id`` (a repeat of an id replaces the earlier step), ``kind`` (``message``
+    or ``tool``), and optionally ``text``, ``title``, ``tool_kind`` and ``status``.
+    """
+    clean = {key: value for key, value in step.items() if value is not None}
+    text = clean.get("text")
+    if isinstance(text, str) and len(text) > MAX_STEP_TEXT:
+        clean["text"] = text[:MAX_STEP_TEXT]
+        clean["truncated"] = True
+    return {"type": PROGRESS_EVENT_TYPE, "tool_call_id": tool_call_id, "step": clean}
 
 
 def tool_call_event(

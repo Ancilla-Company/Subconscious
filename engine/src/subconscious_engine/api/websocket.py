@@ -33,6 +33,8 @@ from subconscious_engine.configuration.models import ModelConfig
 from subconscious_engine.hive.authz import THIN_CLIENT
 from subconscious_engine.locality import is_local_peer
 from subconscious_engine.tool_events import EVENT_TYPE as TOOL_CALL_EVENT
+from subconscious_engine.tool_events import PROGRESS_EVENT_TYPE, progress_sink
+from subconscious_engine.turn_log import TurnLog
 from subconscious_engine.services.configured_tools import NAME_SEPARATOR, unique_name
 from subconscious_engine.services.skills import (
     NONE_INDEX as NO_SKILLS_INDEX, SkillService, build_skills_index, read_skill_tool, select_skills,
@@ -1195,8 +1197,16 @@ class WebSocketSession:
                     history_query = history_query.where(Message.uuid != client_msg_uuid)
                 prior = (await session.scalars(history_query.order_by(
                     Message.hlc, func.coalesce(Message.origin_node_id, ""), Message.uuid))).all()
-                history = [(message.role, message.content) for message in prior
-                           if message.role in {"user", "assistant", "system"}]
+                history: list[tuple[str, str]] = []
+                for message in prior:
+                    if message.role not in {"user", "assistant", "system"}:
+                        continue
+                    if message.role == "assistant" and history and history[-1][0] == "assistant":
+                        # A turn that used tools is stored as several assistant messages (text said
+                        # between tool calls); the model sees them as one reply.
+                        history[-1] = ("assistant", f"{history[-1][1]}\n\n{message.content}")
+                    else:
+                        history.append((message.role, message.content))
                 thread.default_model_id = config.id
                 if not thread.title:
                     thread.title = self._title(content)
@@ -1294,61 +1304,76 @@ class WebSocketSession:
                         streamed.append(delta)
                         await self._send("chat.delta", {"thread_uuid": thread_uuid, "delta": delta}, turn_id)
 
-                graph_engine = getattr(self.app.state, "graph_engine", None)
-                if graph_engine is None:
-                    async def agent_event(event: dict[str, Any]) -> None:
-                        if event.get("type") == "model.delta":
-                            await stream_delta(event.get("delta"))
-                        else:
-                            await self._send_tool_call(turn_id, thread_uuid, event)
-
-                    extra: dict[str, Any] = {}
-                    if skills_index != NO_SKILLS_INDEX:
-                        extra["system_prompt"] = "\n\n".join(part for part in (
-                            config.system_prompt,
-                            f"Active skills (call read_skill with a name to load one):\n{skills_index}",
-                        ) if part)
-                    result = await self.app.state.agent_manager.execute(
-                        config, agent_content, history, tools,
-                        lambda call: self._request_approval(turn_id, thread_uuid, call),
-                        event_sink=agent_event,
-                        **extra,
-                    )
-                else:
-                    async def graph_event(event: dict[str, Any]) -> None:
-                        await self._send(
-                            "agui.event",
-                            {"thread_uuid": thread_uuid, **event},
-                            turn_id,
-                        )
-                        await self.app.state.event_bus.publish(
-                            "graph.execution", {"thread_uuid": thread_uuid, **event}
-                        )
-                        if event.get("type") == "model.delta":
-                            await stream_delta(event.get("delta"))
-                        else:
-                            await self._send_tool_call(turn_id, thread_uuid, event)
-
-                    result = await graph_engine.run_conscious(
-                        config,
-                        agent_content,
-                        history,
-                        tools,
-                        lambda call: self._request_approval(turn_id, thread_uuid, call),
-                        state={"active_skills": skills_index},
-                        event_sink=graph_event,
-                    )
-                for record in result.tool_records:
-                    message = Message(uuid=str(uuid4()), thread_id=thread.id, role="tool",
-                                      content=json.dumps(record, default=str, separators=(",", ":")))
-                    session.add(message)
+                async def store_turn_item(role: str, content: str) -> None:
+                    # Each finished part of the turn (text, tool call) is stored as it ends, so a
+                    # cancelled or failed turn keeps what happened and history shows it in order.
+                    item = Message(uuid=str(uuid4()), thread_id=thread.id, role=role, content=content)
+                    thread.updated_at = utc_now()
+                    session.add(item)
                     await session.commit()
-                    await self._publish_message(message, thread_uuid)
-                assistant = Message(uuid=str(uuid4()), thread_id=thread.id, role="assistant", content=result.text)
-                thread.updated_at = utc_now()
-                session.add(assistant)
-                await session.commit()
-                await self._publish_message(assistant, thread_uuid)
+                    await self._publish_message(item, thread_uuid)
+
+                turn_log = TurnLog(store_turn_item)
+
+                async def approve(call: ToolCallPart) -> bool:
+                    approved = await self._request_approval(turn_id, thread_uuid, call)
+                    turn_log.note_approval(call.tool_call_id, approved)
+                    return approved
+
+                async def agent_event(event: dict[str, Any]) -> None:
+                    await turn_log.record(event)
+                    if event.get("type") == "model.delta":
+                        await stream_delta(event.get("delta"))
+                    else:
+                        await self._send_tool_call(turn_id, thread_uuid, event)
+
+                graph_engine = getattr(self.app.state, "graph_engine", None)
+
+                async def graph_event(event: dict[str, Any]) -> None:
+                    await self._send(
+                        "agui.event",
+                        {"thread_uuid": thread_uuid, **event},
+                        turn_id,
+                    )
+                    await self.app.state.event_bus.publish(
+                        "graph.execution", {"thread_uuid": thread_uuid, **event}
+                    )
+                    await agent_event(event)
+
+                extra: dict[str, Any] = {}
+                if skills_index != NO_SKILLS_INDEX:
+                    extra["system_prompt"] = "\n\n".join(part for part in (
+                        config.system_prompt,
+                        f"Active skills (call read_skill with a name to load one):\n{skills_index}",
+                    ) if part)
+                # Tools that run long on their own (a sub-agent) report their steps through this.
+                sink_token = progress_sink.set(agent_event if graph_engine is None else graph_event)
+                try:
+                    if graph_engine is None:
+                        result = await self.app.state.agent_manager.execute(
+                            config, agent_content, history, tools, approve,
+                            event_sink=agent_event,
+                            **extra,
+                        )
+                    else:
+                        result = await graph_engine.run_conscious(
+                            config,
+                            agent_content,
+                            history,
+                            tools,
+                            approve,
+                            state={"active_skills": skills_index},
+                            event_sink=graph_event,
+                        )
+                except BaseException:
+                    try:
+                        await turn_log.interrupt()
+                    except Exception:
+                        _LOG.exception("api.websocket._run_turn: could not store the interrupted turn")
+                    raise
+                finally:
+                    progress_sink.reset(sink_token)
+                await turn_log.finish(result.text, result.tool_records)
             # Whatever streaming did not already deliver (nothing, or the tail) goes out
             # now so clients that accumulate chat.delta always end with the final text.
             already = "".join(streamed)
@@ -1395,11 +1420,13 @@ class WebSocketSession:
                         future.cancel()
 
     async def _send_tool_call(self, turn_id: str, thread_uuid: str, event: dict[str, Any]) -> None:
-        """Forward an agent ``tool.call`` event as a ``chat.tool_call`` frame; other events are ignored."""
-        if event.get("type") != TOOL_CALL_EVENT:
+        """Forward ``tool.call`` as ``chat.tool_call`` and ``tool.progress`` as ``chat.tool_progress``."""
+        frame = {TOOL_CALL_EVENT: "chat.tool_call", PROGRESS_EVENT_TYPE: "chat.tool_progress"}.get(
+            str(event.get("type")))
+        if frame is None:
             return
         payload = {key: value for key, value in event.items() if key != "type"}
-        await self._send("chat.tool_call", {"thread_uuid": thread_uuid, **payload}, turn_id)
+        await self._send(frame, {"thread_uuid": thread_uuid, **payload}, turn_id)
 
     async def _request_approval(self, turn_id: str, thread_uuid: str, call: ToolCallPart) -> bool:
         approval_id = uuid4().hex

@@ -182,7 +182,7 @@ def test_read_skill_returns_text_or_disk_content_and_lists_unknown_names(tmp_pat
     assert read_skill_tool([], ApprovalConfig()) is None
     tool = read_skill_tool([text_skill, folder_skill], ApprovalConfig())
     assert tool.name == "read_skill" and "Active skills" in tool.description
-    assert tool.requires_approval is True and read_skill_tool([text_skill], ApprovalConfig(read=False)).requires_approval is False
+    assert tool.requires_approval is False  # reading a skill is a platform read: it never asks
     assert tool.function(name="notes") == "Remember this."
     body = tool.function(name="PDF")
     assert body.startswith("# PDF tools") and "description:" not in body and "name: pdf-tools" not in body

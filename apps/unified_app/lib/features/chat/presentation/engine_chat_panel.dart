@@ -15,6 +15,7 @@ import '../../tools/presentation/tool_policy_list.dart';
 import '../../voice/voice_controller.dart';
 import '../engine_llm_provider.dart';
 import 'executor_widgets.dart';
+import 'tool_activity_tile.dart';
 
 typedef MaterializeThreadDraftCallback = Future<EngineLlmProvider> Function(
   String firstMessage,
@@ -732,30 +733,38 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                               10,
                             ),
                             itemCount: messages.length,
-                            itemBuilder: (BuildContext context, int index) =>
-                                _MessageBubble(
-                                  message: messages[index],
-                                  timestamp: widget.provider.timestampFor(
-                                    messages[index],
-                                  ),
-                                  minTouchTarget: widget.minTouchTarget,
-                                  onSpeak:
-                                      _voice.canSpeak &&
-                                          messages[index].origin ==
-                                              EngineChatMessageOrigin.assistant
-                                      ? () => unawaited(
-                                          _voice.toggleSpeak(
-                                            messages[index],
-                                            messages[index].text,
-                                          ),
-                                        )
-                                      : null,
-                                  isSpeaking:
-                                      _voice.speakingKey == messages[index],
-                                  streaming: widget.provider.isStreaming(
-                                    messages[index],
-                                  ),
+                            itemBuilder: (BuildContext context, int index) {
+                              final EngineChatMessage message = messages[index];
+                              final ToolCallInfo? toolCall = message.toolCall;
+                              if (toolCall != null) {
+                                // Tool calls, approvals and sub-agent work are
+                                // records, not replies: a collapsed card.
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: ToolActivityTile(call: toolCall),
+                                );
+                              }
+                              return _MessageBubble(
+                                message: message,
+                                timestamp: widget.provider.timestampFor(
+                                  message,
                                 ),
+                                minTouchTarget: widget.minTouchTarget,
+                                onSpeak:
+                                    _voice.canSpeak &&
+                                        message.origin ==
+                                            EngineChatMessageOrigin.assistant
+                                    ? () => unawaited(
+                                        _voice.toggleSpeak(
+                                          message,
+                                          message.text,
+                                        ),
+                                      )
+                                    : null,
+                                isSpeaking: _voice.speakingKey == message,
+                                streaming: widget.provider.isStreaming(message),
+                              );
+                            },
                           ),
                         ),
                       ),

@@ -19,11 +19,13 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from subconscious_engine.logging_setup import spawn_logged
+from subconscious_engine.services.process_tree import descendants, stop_tree
 
 _LOG = logging.getLogger(__name__)
 
@@ -77,8 +79,12 @@ class AcpRunResult:
         return data
 
 
-class _Connection:
-    """One agent process and its JSON-RPC plumbing."""
+class AcpConnection:
+    """One agent process and its JSON-RPC plumbing.
+
+    A connection serves one prompt at a time. :meth:`begin_prompt` clears what the previous
+    prompt collected, so a long-lived connection can run many prompts one after another.
+    """
 
     def __init__(self, command: Sequence[str], cwd: str, env: Mapping[str, str] | None,
                  permissions: str, on_update: UpdateCallback | None) -> None:
@@ -97,6 +103,20 @@ class _Connection:
         self._chunks: list[str] = []
         self._size = 0
         self._calls: dict[str, dict[str, Any]] = {}
+        self.exited = asyncio.Event()  # set when the agent's output ends (it exited or closed it)
+        self.supports_close = False  # the agent advertised sessionCapabilities.close
+
+    @property
+    def alive(self) -> bool:
+        return self._proc is not None and self._proc.returncode is None and not self.exited.is_set()
+
+    def begin_prompt(self, on_update: UpdateCallback | None) -> None:
+        """Forget the previous prompt's reply and tool calls; ``on_update`` receives this prompt's updates."""
+        self.result = AcpRunResult(agent=self.result.agent)
+        self._chunks.clear()
+        self._size = 0
+        self._calls.clear()
+        self._on_update = on_update
 
     @property
     def stderr_tail(self) -> str:
@@ -104,9 +124,11 @@ class _Connection:
 
     async def start(self) -> None:
         try:
+            # Its own session on POSIX, so a Ctrl+C aimed at the engine does not reach the agent.
+            extra: dict[str, Any] = {} if sys.platform == "win32" else {"start_new_session": True}
             self._proc = await asyncio.create_subprocess_exec(
                 *self._command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, cwd=self._cwd, env=self._env, limit=STREAM_LIMIT)
+                stderr=asyncio.subprocess.PIPE, cwd=self._cwd, env=self._env, limit=STREAM_LIMIT, **extra)
         except (OSError, ValueError) as error:
             raise AcpError(f"Could not start '{self._command[0]}': {error}") from error
         for coroutine in (self._read_stdout(), self._read_stderr()):
@@ -156,6 +178,7 @@ class _Connection:
                     break
                 await self._dispatch(line)
         finally:
+            self.exited.set()
             code = proc.returncode
             reason = f"The agent exited unexpectedly (code {code}). {self.stderr_tail}".strip()
             for future in list(self._pending.values()):
@@ -264,27 +287,37 @@ class _Connection:
             {key: call.get(key) for key in ("title", "kind", "status")} for call in self._calls.values()]
         return self.result
 
-    async def close(self) -> None:
+    async def close(self, session_id: str | None = None) -> None:
+        """Stop the agent and everything it started.
+
+        A well-behaved agent is asked first (``session/close`` when it supports it, then end of
+        input) and given a moment to leave. Whatever is still running afterwards, including
+        helper processes that detached from the agent, is then stopped.
+        """
         proc = self._proc
         if proc is not None and proc.returncode is None:
+            # List the helpers now, while their parent links still exist.
+            known = await asyncio.to_thread(descendants, proc.pid)
+            if session_id and self.supports_close and self.alive:
+                try:
+                    await self.request("session/close", {"sessionId": session_id}, 3.0)
+                except AcpError:
+                    _LOG.debug("services.acp_client: session/close failed; stopping the agent", exc_info=True)
             try:
                 if proc.stdin is not None:
                     proc.stdin.close()
-                proc.terminate()
-                try:
-                    await asyncio.wait_for(proc.wait(), 5)
-                except asyncio.TimeoutError:
-                    _LOG.warning("services.acp_client: the agent ignored terminate; killing it", exc_info=True)
-                    proc.kill()
-                    await proc.wait()
-            except ProcessLookupError:
-                _LOG.debug("services.acp_client: the agent had already exited", exc_info=True)
+                await asyncio.wait_for(proc.wait(), 2.0)
+            except (asyncio.TimeoutError, OSError):
+                _LOG.debug("services.acp_client: the agent did not leave on its own", exc_info=True)
+            await stop_tree(proc, known)
+        elif proc is not None:
+            await stop_tree(proc)
         for task in list(self._tasks):
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
 
 
-async def _open(connection: _Connection, cwd: str) -> tuple[str, dict[str, Any]]:
+async def open_session(connection: AcpConnection, cwd: str) -> tuple[str, dict[str, Any]]:
     """Start the process, negotiate the protocol and open a session. Returns (session id, agent info)."""
     await connection.start()
     init = await connection.request("initialize", {
@@ -293,15 +326,51 @@ async def _open(connection: _Connection, cwd: str) -> tuple[str, dict[str, Any]]
         "clientInfo": {"name": "subconscious", "title": "Subconscious", "version": "0.1.0"},
     }, INIT_TIMEOUT_SECONDS)
     info = init.get("agentInfo") if isinstance(init, dict) and isinstance(init.get("agentInfo"), dict) else {}
+    capabilities = init.get("agentCapabilities") if isinstance(init, dict) else None
+    session_capabilities = capabilities.get("sessionCapabilities") if isinstance(capabilities, dict) else None
+    connection.supports_close = isinstance(session_capabilities, dict) and "close" in session_capabilities
     session = await connection.request("session/new", {"cwd": cwd, "mcpServers": []}, SESSION_TIMEOUT_SECONDS)
     session_id = session.get("sessionId") if isinstance(session, dict) else None
     if not isinstance(session_id, str):
         raise AcpError("The agent did not return a session id.")
+    connection.result.agent = dict(info)
     return session_id, dict(info)
 
 
-def _absolute(cwd: str | None) -> str:
+def absolute_path(cwd: str | None) -> str:
     return os.path.abspath(os.path.expanduser(cwd)) if cwd else os.getcwd()
+
+
+async def prompt_session(connection: AcpConnection, session_id: str, prompt: str, *,
+                         timeout: float, on_update: UpdateCallback | None = None) -> AcpRunResult:
+    """Send one prompt on an open session and return what the agent said and did.
+
+    A prompt that fails or times out is reported in the result (``stop_reason == "failed"``) after
+    asking the agent to cancel it; the connection itself is left for the caller to judge.
+    """
+    connection.begin_prompt(on_update)
+    try:
+        reply = await connection.request(
+            "session/prompt", {"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]},
+            timeout)
+    except AcpError as error:
+        _LOG.warning("services.acp_client.prompt_session: the prompt failed: %s", error, exc_info=True)
+        await cancel_prompt(connection, session_id)
+        connection.result.stop_reason = "failed"
+        connection.result.error = str(error)
+        return connection.finish()
+    except asyncio.CancelledError:
+        await cancel_prompt(connection, session_id)  # the turn was cancelled: stop the agent's work too
+        raise
+    connection.result.stop_reason = reply.get("stopReason") if isinstance(reply, dict) else None
+    return connection.finish()
+
+
+async def cancel_prompt(connection: AcpConnection, session_id: str) -> None:
+    try:
+        await connection.notify("session/cancel", {"sessionId": session_id})
+    except AcpError:
+        _LOG.debug("services.acp_client: agent already gone before session/cancel", exc_info=True)
 
 
 async def run_acp_agent(
@@ -309,38 +378,26 @@ async def run_acp_agent(
     permissions: str = "read_only", timeout: float = 600.0, on_update: UpdateCallback | None = None,
 ) -> AcpRunResult:
     """Run ``prompt`` once in a fresh agent process and return what it said and did."""
-    directory = _absolute(cwd)
-    connection = _Connection(command, directory, env, permissions, on_update)
+    directory = absolute_path(cwd)
+    connection = AcpConnection(command, directory, env, permissions, on_update)
+    session_id: str | None = None
     try:
-        session_id, info = await _open(connection, directory)
-        connection.result.agent = info
-        try:
-            reply = await connection.request(
-                "session/prompt", {"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]},
-                timeout)
-        except AcpError as error:
-            try:
-                await connection.notify("session/cancel", {"sessionId": session_id})
-            except AcpError:
-                _LOG.debug("services.acp_client: agent already gone before session/cancel", exc_info=True)
-            connection.result.stop_reason = "failed"
-            connection.result.error = str(error)
-            return connection.finish()
-        connection.result.stop_reason = reply.get("stopReason") if isinstance(reply, dict) else None
-        return connection.finish()
+        session_id, _ = await open_session(connection, directory)
+        return await prompt_session(connection, session_id, prompt, timeout=timeout, on_update=on_update)
     finally:
-        await connection.close()
+        await connection.close(session_id)
 
 
 async def probe_acp_agent(
     command: Sequence[str], *, cwd: str | None = None, env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Start the agent, complete the handshake and open a session, without prompting it."""
-    directory = _absolute(cwd)
-    connection = _Connection(command, directory, env, "read_only", None)
+    directory = absolute_path(cwd)
+    connection = AcpConnection(command, directory, env, "read_only", None)
+    session_id: str | None = None
     try:
-        _, info = await _open(connection, directory)
+        session_id, info = await open_session(connection, directory)
         return info
     finally:
-        await connection.close()
+        await connection.close(session_id)
 

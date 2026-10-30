@@ -3,6 +3,7 @@ export 'src/forms/app_form_widgets.dart';
 export 'src/themes/app_button_theme.dart';
 export 'src/themes/app_theme.dart';
 export 'src/tokens/app_colors.dart';
+export 'src/widgets/app_activity_card.dart';
 export 'src/widgets/app_badge.dart';
 export 'src/widgets/app_banner.dart';
 export 'src/widgets/app_bottom_sheet.dart';

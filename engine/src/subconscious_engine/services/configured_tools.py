@@ -40,7 +40,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared.exceptions import McpError
-from pydantic_ai import Tool
+from pydantic_ai import RunContext, Tool
 from sqlalchemy import select
 
 from subconscious_engine.approval import UPDATE, READ, ApprovalConfig, classify_operation
@@ -53,8 +53,12 @@ from subconscious_engine.services.oauth import (
     build_provider,
 )
 from subconscious_engine.services.acp_client import AcpError, probe_acp_agent, run_acp_agent
+from subconscious_engine.services.acp_session_tools import AcpSessionTools
+from subconscious_engine.services.acp_sessions import AcpSessionManager
+from subconscious_engine.services.subagent_progress import SubAgentProgress
 from subconscious_engine.services.tool_registry import parse_tool_config
 from subconscious_engine.storage.models import ToolRegistryRecord
+from subconscious_engine.tool_events import progress_sink
 
 _LOG = logging.getLogger(__name__)
 
@@ -403,6 +407,9 @@ class ConfiguredToolRuntime:
         self.mcp_call_timeout = mcp_call_timeout
         self._connections: dict[str, _McpConnection] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # Persistent sessions with ACP agents (start/send/end_agent_session).
+        self.acp_sessions = AcpSessionManager(prompt_timeout=acp_timeout)
+        self._session_tools = AcpSessionTools(self, self.acp_sessions)
 
     # --- public API --------------------------------------------------------------------------
     async def tools_for_turn(self, approval: ApprovalConfig, *,
@@ -415,6 +422,7 @@ class ConfiguredToolRuntime:
         for entries in results:
             for entry in entries or []:
                 tools.append(entry.build(unique_name(entry.base_name, used), approval))
+        tools.extend(await self._session_tools.tools(approval, reserved=frozenset(used)))
         return tools
 
     async def test(self, uuid: str, *, interactive: bool = False) -> dict[str, Any] | None:
@@ -459,6 +467,7 @@ class ConfiguredToolRuntime:
         if self.oauth_broker is not None:
             # A sign-in in flight holds the row lock for minutes; cancelling it frees the lock.
             await self.oauth_broker.cancel_for_tool(uuid)
+        await self.acp_sessions.end_for_row(uuid, "the agent's configuration changed")
         async with self._lock(uuid):
             connection = self._connections.pop(uuid, None)
             if connection is not None:
@@ -549,6 +558,7 @@ class ConfiguredToolRuntime:
         await self.credentials.clear_tool_oauth(uuid, keep_client_secret=True)
 
     async def close(self) -> None:
+        await self.acp_sessions.close_all()
         for uuid in list(self._connections):
             await self.invalidate(uuid)
 
@@ -609,28 +619,53 @@ class ConfiguredToolRuntime:
             description += " The agent may only read; anything that changes files or runs commands is refused."
 
         def build(name: str, approval: ApprovalConfig) -> Tool[Any]:
-            async def ask(prompt: str, cwd: str = "") -> dict[str, Any]:
-                return await self._run_acp(row, prompt, cwd)
+            # takes_ctx gives the call id, so the sub-agent's steps attach to this exact call.
+            # The model never sees `ctx`; a caller outside an agent run may pass None.
+            async def ask(ctx: RunContext[Any], prompt: str, cwd: str = "") -> dict[str, Any]:
+                return await self._run_acp(row, prompt, cwd, getattr(ctx, "tool_call_id", None))
 
-            return Tool(ask, name=name, description=description,
+            return Tool(ask, name=name, description=description, takes_ctx=True,
                         requires_approval=approval.requires_operation(UPDATE))
 
         return _Entry(f"ask_{row.slug}", description, UPDATE, build)
 
-    async def _run_acp(self, row: ConfiguredRow, prompt: str, cwd: str) -> dict[str, Any]:
-        if not prompt.strip():
-            raise ValueError("prompt is required.")
+    async def acp_rows(self) -> list[ConfiguredRow]:
+        """Active ACP agent rows whose command can be found."""
+        usable: list[ConfiguredRow] = []
+        for row in await self._rows(active_only=True):
+            if row.tool_type == "acp":
+                try:
+                    self._acp_command(row)
+                except ValueError:
+                    _LOG.info("services.configured_tools.acp_rows: %s skipped, command not found", row.label)
+                    continue
+                usable.append(row)
+        return usable
+
+    def acp_launch(self, row: ConfiguredRow, cwd: str = "") -> tuple[list[str], str | None, dict[str, str] | None, str]:
+        """``(command, folder, env, permissions)`` to launch an ACP agent row; ValueError when it cannot be."""
         folder = cwd.strip() or row.config.get("cwd") or None
         if folder is not None and not Path(folder).expanduser().is_dir():
             raise ValueError(f"The folder '{folder}' does not exist.")
         env = row.config.get("env")
+        return (self._acp_command(row), folder, env if isinstance(env, dict) else None,
+                str(row.config.get("permissions") or "read_only"))
+
+    async def _run_acp(self, row: ConfiguredRow, prompt: str, cwd: str,
+                       tool_call_id: str | None = None) -> dict[str, Any]:
+        if not prompt.strip():
+            raise ValueError("prompt is required.")
+        command, folder, env, permissions = self.acp_launch(row, cwd)
+        progress = SubAgentProgress(progress_sink.get(), tool_call_id)
         try:
             result = await run_acp_agent(
-                self._acp_command(row), prompt, cwd=folder, env=env if isinstance(env, dict) else None,
-                permissions=str(row.config.get("permissions") or "read_only"), timeout=self.acp_timeout)
+                command, prompt, cwd=folder, env=env, permissions=permissions, timeout=self.acp_timeout,
+                on_update=progress.on_update if progress.active else None)
         except AcpError as error:
             log_tool_problem("acp.tool.failed", uuid=row.uuid, alias=row.label, error=describe_error(error))
             raise RuntimeError(f"The agent '{row.label}' failed: {describe_error(error)}") from error
+        finally:
+            await progress.finish()
         return result.as_dict()
 
     async def _test_acp(self, row: ConfiguredRow) -> dict[str, Any]:

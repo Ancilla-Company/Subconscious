@@ -99,12 +99,12 @@ def test_runtime_offers_an_approval_gated_tool_and_runs_it(tmp_path):
             tool = tools["ask_helper_agent"]
             assert tool.requires_approval is True
             assert "fresh" in tool.description
-            result = await tool.function(prompt="hi")
+            result = await tool.function(None, prompt="hi")  # no run context outside an agent run
             assert result["output"] == "echo: hi" and result["stopReason"] == "end_turn"
             with pytest.raises(ValueError):
-                await tool.function(prompt="  ")
+                await tool.function(None, prompt="  ")
             with pytest.raises(ValueError):
-                await tool.function(prompt="hi", cwd=str(tmp_path / "missing"))
+                await tool.function(None, prompt="hi", cwd=str(tmp_path / "missing"))
             assert "ask_helper_agent" not in by_name(await runtime.tools_for_turn(ApprovalConfig(update=False))) \
                 or by_name(await runtime.tools_for_turn(ApprovalConfig(update=False)))[
                     "ask_helper_agent"].requires_approval is False
@@ -123,5 +123,64 @@ def test_runtime_skips_a_missing_command_and_tests_the_handshake(tmp_path):
             passed = await runtime.test(good)
             assert passed["ok"] is True and passed["tools"][0]["name"] == "ask_good"
             assert "Fake Agent 9.9" in passed["tools"][0]["description"]
+
+    run(scenario())
+
+
+def test_subagent_steps_reach_the_turn_progress_sink_and_the_result_is_unchanged(tmp_path):
+    from types import SimpleNamespace
+    from subconscious_engine.tool_events import progress_sink
+
+    async def scenario():
+        events = []
+
+        async def sink(event):
+            events.append(event)
+
+        async with Runtime(tmp_path, acp_timeout=30) as (database, runtime):
+            await add_row(database, "Helper Agent", "acp", acp_config(permissions="allow_all"))
+            tool = by_name(await runtime.tools_for_turn(ApprovalConfig()))["ask_helper_agent"]
+            token = progress_sink.set(sink)
+            try:
+                result = await tool.function(SimpleNamespace(tool_call_id="call-7"), prompt="read")
+            finally:
+                progress_sink.reset(token)
+        assert '"optionId": "a"' in result["output"]
+        assert events and all(e["type"] == "tool.progress" and e["tool_call_id"] == "call-7" for e in events)
+        steps = [e["step"] for e in events]
+        tool_step = next(s for s in steps if s["kind"] == "tool")
+        assert tool_step["id"] == "tool-c1" and tool_step["title"] == "read file" and tool_step["tool_kind"] == "read"
+        message = [s for s in steps if s["kind"] == "message"][-1]
+        assert "outcome=" in message["text"]  # the final message step carries the whole reply
+
+    run(scenario())
+
+
+def test_subagent_progress_throttles_chunks_but_always_sends_the_last_one():
+    from subconscious_engine.services.subagent_progress import SubAgentProgress
+
+    async def scenario():
+        sent = []
+
+        async def sink(event):
+            sent.append(event["step"])
+
+        now = [0.0]
+        progress = SubAgentProgress(sink, "c", clock=lambda: now[0])
+        chunk = lambda text: {"sessionUpdate": "agent_message_chunk", "content": {"text": text}}
+        await progress.on_update(chunk("a"))      # first chunk goes out at once
+        await progress.on_update(chunk("b"))      # 0s later: held back
+        now[0] = 0.1
+        await progress.on_update(chunk("c"))      # still inside the interval
+        assert [s["text"] for s in sent] == ["a"]
+        await progress.finish()
+        assert [s["text"] for s in sent] == ["a", "abc"]
+        # a tool call closes the message; the next text is a new step
+        await progress.on_update({"sessionUpdate": "tool_call", "toolCallId": "t", "title": "x", "kind": "read"})
+        now[0] = 5.0
+        await progress.on_update(chunk("d"))
+        assert sent[-1] == {"id": "message-1", "kind": "message", "text": "d"}
+        # no sink or no call id: inert
+        assert SubAgentProgress(None, "c").active is False and SubAgentProgress(sink, None).active is False
 
     run(scenario())

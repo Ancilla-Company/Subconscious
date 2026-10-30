@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger("uvicorn.error")
 INBOX_LIMIT = 256
 _CLOSED = object()
 # Streaming-style frames use the low latency channel; the rest use control.
-_EVENT_FRAMES = frozenset({"chat.delta", "chat.tool_call", "agui.event", "message.created", "thread.created"})
+_EVENT_FRAMES = frozenset({"chat.delta", "chat.tool_call", "chat.tool_progress", "agui.event", "message.created", "thread.created"})
 
 
 class PeerSocket:

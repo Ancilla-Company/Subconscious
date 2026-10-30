@@ -1,3 +1,4 @@
+import 'chat_activity.dart';
 import 'engine_models.dart';
 
 /// Task lifecycle (webrtc.md 7.4): monotonic, written only by the executor.
@@ -152,6 +153,13 @@ final class TaskChatCancelled extends TaskEvent {
   final String taskId;
 }
 
+/// chat.tool_call / chat.tool_progress: a tool the task's turn is using.
+final class TaskActivity extends TaskEvent {
+  const TaskActivity({required this.taskId, required this.activity});
+  final String taskId;
+  final ChatActivity activity;
+}
+
 final class ThreadSubscribed extends TaskEvent {
   const ThreadSubscribed(this.threadUuid);
   final String threadUuid;
@@ -239,6 +247,13 @@ TaskEvent? parseTaskEvent(WireFrame frame) {
             ? data['thread_uuid'] as String
             : null,
       );
+    case 'chat.tool_call':
+    case 'chat.tool_progress':
+      final String? id = frame.id;
+      final ChatActivity? activity = ChatActivity.tryParseFrame(frame);
+      return id == null || activity == null
+          ? null
+          : TaskActivity(taskId: id, activity: activity);
     case 'chat.error':
       final String? id = frame.id;
       if (id == null) return null;

@@ -613,7 +613,9 @@ class RemoteToolset:
             json_schema=advertised["parameters_schema"],
         )
         # Our own approval settings still apply on top of whatever the owner requires.
-        proxy.requires_approval = approval.requires(tool_name)
+        # Not `approval.requires`: the platform-read exemption covers this device's own tools, and a
+        # peer's tool runs on another machine, so it follows the user's plain per-operation policy.
+        proxy.requires_approval = approval.requires_operation(classify_operation(tool_name))
         return proxy
 
     async def _advertised(self, node_id: str) -> list[dict[str, Any]]:

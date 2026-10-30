@@ -955,109 +955,125 @@ Future<({int rootIndex, String path})?> _showCreatePathDialog(
   List<WorkspaceDirectoryRoot> roots, {
   ({int rootIndex, String path})? initialLocation,
   bool isFile = false,
-}) async {
-  final TextEditingController pathController = TextEditingController(
-    text: initialLocation?.path.isNotEmpty == true
-        ? '${initialLocation!.path}/'
+}) {
+  return showAppDialog<({int rootIndex, String path})>(
+    context: context,
+    builder: (BuildContext context) => CreatePathDialog(
+      roots: roots,
+      initialLocation: initialLocation,
+      isFile: isFile,
+    ),
+  );
+}
+
+/// The body of the new file / folder dialog. It owns its text controller, so
+/// the controller is disposed only when the dialog is removed from the tree.
+/// Disposing it when the dialog's future completes is too early: the dialog
+/// is still animating out and rebuilding its field.
+@visibleForTesting
+final class CreatePathDialog extends StatefulWidget {
+  const CreatePathDialog({
+    required this.roots,
+    required this.initialLocation,
+    required this.isFile,
+  });
+
+  final List<WorkspaceDirectoryRoot> roots;
+  final ({int rootIndex, String path})? initialLocation;
+  final bool isFile;
+
+  @override
+  State<CreatePathDialog> createState() => _CreatePathDialogState();
+}
+
+final class _CreatePathDialogState extends State<CreatePathDialog> {
+  late final TextEditingController _path = TextEditingController(
+    text: widget.initialLocation?.path.isNotEmpty == true
+        ? '${widget.initialLocation!.path}/'
         : '',
   );
-  WorkspaceDirectoryRoot selectedRoot = roots.first;
-  for (final WorkspaceDirectoryRoot root in roots) {
-    if (root.index == initialLocation?.rootIndex) {
-      selectedRoot = root;
-      break;
-    }
+  late WorkspaceDirectoryRoot _root = widget.roots.firstWhere(
+    (WorkspaceDirectoryRoot root) =>
+        root.index == widget.initialLocation?.rootIndex,
+    orElse: () => widget.roots.first,
+  );
+  String? _validationError;
+
+  @override
+  void dispose() {
+    _path.dispose();
+    super.dispose();
   }
-  String? validationError;
-  try {
-    return await showAppDialog<({int rootIndex, String path})>(
-      context: context,
-      builder: (BuildContext context) => StatefulBuilder(
-        builder: (BuildContext context, StateSetter setState) => AppDialog(
-          title: isFile ? 'New file' : 'New folder',
-          width: 360,
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              AppDropdown(
-                label: 'Location',
-                value: selectedRoot.name,
-                options: <String>[
-                  for (final WorkspaceDirectoryRoot root in roots) root.name,
-                ],
-                onChanged: (String name) {
-                  setState(() {
-                    selectedRoot = roots.firstWhere(
-                      (WorkspaceDirectoryRoot root) => root.name == name,
-                    );
-                    pathController.clear();
-                    validationError = null;
-                  });
-                },
-              ),
-              const SizedBox(height: 16),
-              AppTextField(
-                label: isFile ? 'File name' : 'Folder name',
-                controller: pathController,
-                autofocus: true,
-                textInputAction: TextInputAction.done,
-                hintText: isFile
-                    ? 'e.g. notes.md or docs/readme.md'
-                    : 'e.g. notes or src/components',
-                errorText: validationError,
-                onChanged: (_) {
-                  if (validationError != null) {
-                    setState(() => validationError = null);
-                  }
-                },
-                onSubmitted: (_) {
-                  final String? path = _workspaceRelativeFolderPath(
-                    pathController.text,
-                  );
-                  if (path == null) {
-                    setState(
-                      () => validationError = isFile
-                          ? 'Enter a relative file name without . or .. segments.'
-                          : 'Enter a relative folder name without . or .. segments.',
-                    );
-                    return;
-                  }
-                  Navigator.of(context)
-                      .pop((rootIndex: selectedRoot.index, path: path));
-                },
-              ),
+
+  void _submit() {
+    final String? path = _workspaceRelativeFolderPath(_path.text);
+    if (path == null) {
+      setState(
+        () => _validationError = widget.isFile
+            ? 'Enter a relative file name without . or .. segments.'
+            : 'Enter a relative folder name without . or .. segments.',
+      );
+      return;
+    }
+    Navigator.of(context).pop((rootIndex: _root.index, path: path));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isFile = widget.isFile;
+    return AppDialog(
+      title: isFile ? 'New file' : 'New folder',
+      width: 360,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          AppDropdown(
+            label: 'Location',
+            value: _root.name,
+            options: <String>[
+              for (final WorkspaceDirectoryRoot root in widget.roots) root.name,
             ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final String? path = _workspaceRelativeFolderPath(
-                  pathController.text,
+            onChanged: (String name) {
+              setState(() {
+                _root = widget.roots.firstWhere(
+                  (WorkspaceDirectoryRoot root) => root.name == name,
                 );
-                if (path == null) {
-                  setState(
-                    () => validationError = isFile
-                        ? 'Enter a relative file name without . or .. segments.'
-                        : 'Enter a relative folder name without . or .. segments.',
-                  );
-                  return;
-                }
-                Navigator.of(context)
-                    .pop((rootIndex: selectedRoot.index, path: path));
-              },
-              child: Text(isFile ? 'Create file' : 'Create'),
-            ),
-          ],
-        ),
+                _path.clear();
+                _validationError = null;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          AppTextField(
+            label: isFile ? 'File name' : 'Folder name',
+            controller: _path,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            hintText: isFile
+                ? 'e.g. notes.md or docs/readme.md'
+                : 'e.g. notes or src/components',
+            errorText: _validationError,
+            onChanged: (_) {
+              if (_validationError != null) {
+                setState(() => _validationError = null);
+              }
+            },
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
       ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(isFile ? 'Create file' : 'Create'),
+        ),
+      ],
     );
-  } finally {
-    pathController.dispose();
   }
 }
 
@@ -1212,18 +1228,50 @@ Future<String?> _showRenameDialog(
   BuildContext context, {
   required String name,
   required bool isDirectory,
-}) async {
-  final TextEditingController nameController = TextEditingController(
-    text: name,
+}) {
+  return showAppDialog<String>(
+    context: context,
+    builder: (BuildContext context) =>
+        RenameDialog(name: name, isDirectory: isDirectory),
   );
-  // Select the name without its extension, as file managers do.
-  final int dot = name.lastIndexOf('.');
-  nameController.selection = TextSelection(
-    baseOffset: 0,
-    extentOffset: !isDirectory && dot > 0 ? dot : name.length,
+}
+
+/// The body of the rename dialog; owns its controller (see [CreatePathDialog]).
+@visibleForTesting
+final class RenameDialog extends StatefulWidget {
+  const RenameDialog({required this.name, required this.isDirectory});
+
+  final String name;
+  final bool isDirectory;
+
+  @override
+  State<RenameDialog> createState() => _RenameDialogState();
+}
+
+final class _RenameDialogState extends State<RenameDialog> {
+  late final TextEditingController _name = TextEditingController(
+    text: widget.name,
   );
-  String? validationError;
-  String? validate(String value) {
+  String? _validationError;
+
+  @override
+  void initState() {
+    super.initState();
+    // Select the name without its extension, as file managers do.
+    final int dot = widget.name.lastIndexOf('.');
+    _name.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: !widget.isDirectory && dot > 0 ? dot : widget.name.length,
+    );
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  static String? _validate(String value) {
     final String trimmed = value.trim();
     if (trimmed.isEmpty ||
         trimmed == '.' ||
@@ -1234,49 +1282,41 @@ Future<String?> _showRenameDialog(
     return null;
   }
 
-  try {
-    return await showAppDialog<String>(
-      context: context,
-      builder: (BuildContext context) => StatefulBuilder(
-        builder: (BuildContext context, StateSetter setState) {
-          void submit() {
-            final String? problem = validate(nameController.text);
-            if (problem != null) {
-              setState(() => validationError = problem);
-              return;
-            }
-            Navigator.of(context).pop(nameController.text.trim());
-          }
+  void _submit() {
+    final String? problem = _validate(_name.text);
+    if (problem != null) {
+      setState(() => _validationError = problem);
+      return;
+    }
+    Navigator.of(context).pop(_name.text.trim());
+  }
 
-          return AppDialog(
-            title: isDirectory ? 'Rename folder' : 'Rename file',
-            width: 360,
-            content: AppTextField(
-              label: 'Name',
-              controller: nameController,
-              autofocus: true,
-              textInputAction: TextInputAction.done,
-              errorText: validationError,
-              onChanged: (_) {
-                if (validationError != null) {
-                  setState(() => validationError = null);
-                }
-              },
-              onSubmitted: (_) => submit(),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(onPressed: submit, child: const Text('Rename')),
-            ],
-          );
+  @override
+  Widget build(BuildContext context) {
+    return AppDialog(
+      title: widget.isDirectory ? 'Rename folder' : 'Rename file',
+      width: 360,
+      content: AppTextField(
+        label: 'Name',
+        controller: _name,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        errorText: _validationError,
+        onChanged: (_) {
+          if (_validationError != null) {
+            setState(() => _validationError = null);
+          }
         },
+        onSubmitted: (_) => _submit(),
       ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Rename')),
+      ],
     );
-  } finally {
-    nameController.dispose();
   }
 }
 

@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:core_business_logic/core_business_logic.dart' as core;
 import 'package:flutter/foundation.dart';
 
-enum EngineChatMessageOrigin { user, assistant, system }
+/// What a timeline entry is. [tool] entries are not model replies: they record
+/// a tool call (with its approval and any sub-agent steps) and are shown as
+/// collapsed activity cards.
+enum EngineChatMessageOrigin { user, assistant, system, tool }
 
 final class EngineChatMessage {
   EngineChatMessage.user(String text)
@@ -18,8 +21,20 @@ final class EngineChatMessage {
     : origin = EngineChatMessageOrigin.system,
       _text = text;
 
+  EngineChatMessage.tool(core.ToolCallInfo call)
+    : origin = EngineChatMessageOrigin.tool,
+      toolCall = call,
+      _text = '';
+
   final EngineChatMessageOrigin origin;
   String _text;
+
+  /// The tool call of a [EngineChatMessageOrigin.tool] entry.
+  core.ToolCallInfo? toolCall;
+
+  /// Uuid of the stored message this entry shows; null while it only exists
+  /// on this device (a reply still streaming, or one not yet reloaded).
+  String? serverId;
 
   /// Name of the hive node that produced this message, when known (shown as
   /// a badge on assistant messages).
@@ -153,28 +168,50 @@ final class EngineLlmProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Replaces the timeline with the stored thread.
+  ///
+  /// While a turn runs here, the engine is already storing its text and tool
+  /// calls piece by piece, and the same pieces are on screen as live entries.
+  /// Stored messages this timeline has not shown before therefore belong to
+  /// that turn and are skipped; the live entries stay, so nothing is shown
+  /// twice and nothing disappears mid-turn. Once the turn ends, the next
+  /// refresh swaps everything for the stored copy.
   void replaceEngineHistory(Iterable<core.ChatMessage> messages) {
-    // Responses still streaming are not stored yet; keep them across a refresh.
-    final Map<EngineChatMessage, DateTime?> live =
+    final bool running = _activeTurns > 0;
+    final Set<String> known = <String>{
+      for (final EngineChatMessage message in _history)
+        if (message.serverId != null) message.serverId!,
+    };
+    final Map<EngineChatMessage, DateTime?> local =
         <EngineChatMessage, DateTime?>{
-          for (final EngineChatMessage message in _live)
-            message: _timestamps[message],
+          if (running)
+            for (final EngineChatMessage message in _history)
+              if (message.serverId == null) message: _timestamps[message],
         };
     _history.clear();
     _timestamps.clear();
     for (final core.ChatMessage message in messages) {
+      if (running && !known.contains(message.uuid)) continue;
       final EngineChatMessage? converted = switch (message.role.toLowerCase()) {
         'user' => EngineChatMessage.user(message.content),
         'assistant' => EngineChatMessage.assistant(message.content),
         'system' => EngineChatMessage.system(message.content),
+        'tool' => switch (core.ToolCallInfo.tryParseRecord(
+          message.content,
+          id: message.uuid,
+        )) {
+          final core.ToolCallInfo call => EngineChatMessage.tool(call),
+          null => null,
+        },
         _ => null,
       };
       if (converted != null) {
+        converted.serverId = message.uuid;
         _history.add(converted);
         _timestamps[converted] = message.createdAt;
       }
     }
-    for (final MapEntry<EngineChatMessage, DateTime?> entry in live.entries) {
+    for (final MapEntry<EngineChatMessage, DateTime?> entry in local.entries) {
       _history.add(entry.key);
       _timestamps[entry.key] = entry.value;
     }
@@ -183,6 +220,73 @@ final class EngineLlmProvider extends ChangeNotifier {
 
   /// True while [message] is still being written by a running turn.
   bool isStreaming(EngineChatMessage message) => _live.contains(message);
+
+  // --- the turn being shown live -------------------------------------------
+
+  /// Turns currently streaming into this timeline.
+  int _activeTurns = 0;
+
+  /// The reply bubble text is being appended to; null between bubbles (after
+  /// a tool call, until the model says something new).
+  EngineChatMessage? _openBubble;
+
+  /// The last reply bubble of the turn; it gets the timing and token counts.
+  EngineChatMessage? _lastBubble;
+  final Map<String, EngineChatMessage> _toolCards = <String, EngineChatMessage>{};
+
+  EngineChatMessage _startBubble() {
+    final EngineChatMessage bubble = EngineChatMessage.assistant()
+      ..ranOn = executorLabel;
+    _history.add(bubble);
+    _timestamps[bubble] = DateTime.now();
+    _live.add(bubble);
+    _openBubble = bubble;
+    return bubble;
+  }
+
+  /// Ends the current reply bubble. One that never got any text is dropped.
+  void _closeBubble() {
+    final EngineChatMessage? bubble = _openBubble;
+    if (bubble == null) return;
+    _openBubble = null;
+    _live.remove(bubble);
+    if (bubble.text.isEmpty) {
+      _history.remove(bubble);
+      _timestamps.remove(bubble);
+    } else {
+      _lastBubble = bubble;
+    }
+  }
+
+  /// Shows a tool event in order: text said so far stays in its bubble, the
+  /// call gets its own card, and later text starts a new bubble below it.
+  void _applyActivity(core.ChatActivity activity) {
+    switch (activity) {
+      case core.ChatToolCall(:final call):
+        final EngineChatMessage? card = _toolCards[call.toolCallId];
+        if (card == null) {
+          _closeBubble();
+          final EngineChatMessage created = EngineChatMessage.tool(call);
+          _toolCards[call.toolCallId] = created;
+          _history.add(created);
+          _timestamps[created] = DateTime.now();
+        } else {
+          card.toolCall = card.toolCall!.copyWith(
+            title: call.title,
+            kind: call.kind,
+            status: call.status,
+            arguments: call.arguments,
+            output: call.output,
+            error: call.error,
+          );
+        }
+      case core.ChatToolProgress(:final toolCallId, :final step):
+        final EngineChatMessage? card = _toolCards[toolCallId];
+        if (card == null) return;
+        card.toolCall = card.toolCall!.withStep(step);
+    }
+    notifyListeners();
+  }
 
   Iterable<EngineChatMessage> get history =>
       List<EngineChatMessage>.unmodifiable(_history);
@@ -206,11 +310,10 @@ final class EngineLlmProvider extends ChangeNotifier {
     final EngineChatMessage user = EngineChatMessage.user(prompt);
     _history.add(user);
     _timestamps[user] = DateTime.now();
-    final EngineChatMessage response = EngineChatMessage.assistant();
-    response.ranOn = executorLabel;
-    _history.add(response);
-    _timestamps[response] = DateTime.now();
-    _live.add(response);
+    _activeTurns++;
+    _lastBubble = null;
+    _toolCards.clear();
+    _startBubble(); // shows the "typing" state until the first text or tool call
     notifyListeners();
     try {
       final Stopwatch watch = Stopwatch()..start();
@@ -219,28 +322,36 @@ final class EngineLlmProvider extends ChangeNotifier {
         prompt,
         fileContext: fileContext,
         onDone: (Map<String, dynamic> data) => doneData = data,
+        onActivity: _applyActivity,
       )) {
-        response.append(delta);
+        (_openBubble ?? _startBubble()).append(delta);
         notifyListeners();
         yield delta;
       }
       watch.stop();
-      final Object? elapsedMs = doneData?['elapsed_ms'];
-      response.elapsed = elapsedMs is num
-          ? Duration(milliseconds: elapsedMs.toInt())
-          : watch.elapsed;
-      final int? total = _totalTokens(doneData);
-      final bool reported = total != null && total > 0;
-      response.tokens = reported ? total : (response.text.length / 4).ceil();
-      response.tokensEstimated = !reported;
+      _closeBubble();
+      final EngineChatMessage? response = _lastBubble;
+      if (response != null) {
+        final Object? elapsedMs = doneData?['elapsed_ms'];
+        response.elapsed = elapsedMs is num
+            ? Duration(milliseconds: elapsedMs.toInt())
+            : watch.elapsed;
+        final int? total = _totalTokens(doneData);
+        final bool reported = total != null && total > 0;
+        response.tokens = reported ? total : (response.text.length / 4).ceil();
+        response.tokensEstimated = !reported;
+      }
       notifyListeners();
     } on Object {
-      _history.remove(response);
-      _timestamps.remove(response);
+      // What was said and done before the failure stays on screen (the engine
+      // stores it too); only a bubble that never got any text is dropped.
+      _closeBubble();
       notifyListeners();
       rethrow;
     } finally {
-      _live.remove(response);
+      _closeBubble();
+      _activeTurns--;
+      _toolCards.clear();
     }
   }
 
@@ -339,6 +450,7 @@ final class EngineLlmProvider extends ChangeNotifier {
     String prompt, {
     core.ChatFileContext? fileContext,
     void Function(Map<String, dynamic>)? onDone,
+    void Function(core.ChatActivity)? onActivity,
   }) {
     final String? executor = executorNodeId;
     if (executor == null) {
@@ -348,15 +460,17 @@ final class EngineLlmProvider extends ChangeNotifier {
         workspaceUuid: workspaceUuid,
         modelId: modelId,
         fileContext: fileContext,
+        onActivity: onActivity,
       );
     }
-    return _runTask(prompt, executor, fileContext);
+    return _runTask(prompt, executor, fileContext, onActivity);
   }
 
   Stream<String> _runTask(
     String prompt,
     String executor,
     core.ChatFileContext? fileContext,
+    void Function(core.ChatActivity)? onActivity,
   ) async* {
     taskStatus = core.TaskStatus.queued;
     activeTaskId = null;
@@ -385,6 +499,8 @@ final class EngineLlmProvider extends ChangeNotifier {
             notifyListeners();
           case core.TaskDelta():
             yield event.delta;
+          case core.TaskActivity():
+            onActivity?.call(event.activity);
           case core.TaskChatError():
             taskError = event.error;
             notifyListeners();

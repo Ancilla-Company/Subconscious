@@ -33,8 +33,10 @@ def test_mutating_tools_always_require_approval_even_when_the_user_disabled_it(t
                 assert tools[name].requires_approval is True, name
             for name in READ_ONLY:
                 assert tools[name].requires_approval is False, name
-            asking = tools_by_name(app, ApprovalConfig())  # read tools follow the user's policy
-            assert all(asking[name].requires_approval is True for name in READ_ONLY)
+            # Listing tools are platform reads: they never ask, even under the strict default.
+            asking = tools_by_name(app, ApprovalConfig())
+            assert all(asking[name].requires_approval is False for name in READ_ONLY)
+            assert all(asking[name].requires_approval is True for name in FORCED_APPROVAL)
             assert "add_mcp_server" not in tools_by_name(app, reserved={"add_mcp_server"})
             # The approval card classifies them sensibly.
             from subconscious_engine.approval import classify_operation

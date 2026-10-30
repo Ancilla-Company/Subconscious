@@ -28,6 +28,7 @@ export 'hive/relay.dart';
 export 'hive/server_account_client.dart';
 export 'hive/signaling_client.dart';
 export 'hive/switchable_link.dart';
+export 'models/chat_activity.dart';
 export 'models/client_tool_models.dart';
 export 'models/task_models.dart';
 export 'models/dashboard_summary.dart';

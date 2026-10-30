@@ -3,6 +3,7 @@ import 'dart:async';
 import '../api/rest_engine_client.dart';
 import '../api/engine_socket.dart';
 import '../api/task_socket_mixin.dart';
+import '../models/chat_activity.dart';
 import '../models/engine_models.dart';
 import '../models/task_models.dart';
 
@@ -118,6 +119,8 @@ final class EngineRepository {
               chatEnded = true;
               yield event;
             }
+          case TaskActivity():
+            if (taskId != null && event.taskId == taskId) yield event;
           case ToolApprovalRequested():
             if (taskId != null && event.taskId == taskId) yield event;
           case ToolApprovalResolved():
@@ -150,6 +153,7 @@ final class EngineRepository {
     String? workspaceUuid,
     String? modelId,
     ChatFileContext? fileContext,
+    void Function(ChatActivity activity)? onActivity,
   }) async* {
     final String turnId = socket.sendChat(
       content: content,
@@ -163,6 +167,7 @@ final class EngineRepository {
       'chat.done',
       'chat.error',
       'chat.cancelled',
+      ...chatActivityFrameTypes,
     };
     bool receivedTerminalFrame = false;
     try {
@@ -181,6 +186,9 @@ final class EngineRepository {
           case 'chat.delta':
             final String delta = data['delta'] as String? ?? '';
             if (delta.isNotEmpty) yield delta;
+          case 'chat.tool_call' || 'chat.tool_progress':
+            final ChatActivity? activity = ChatActivity.tryParseFrame(frame);
+            if (activity != null) onActivity?.call(activity);
           case 'chat.done':
             receivedTerminalFrame = true;
             return;
