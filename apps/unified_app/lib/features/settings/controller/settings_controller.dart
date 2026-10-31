@@ -4,7 +4,7 @@ import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-enum MainPanelDestination { utility, workspace, files, settings }
+enum MainPanelDestination { utility, workspace, agent, files, settings }
 
 enum SettingsPage { general, models, tools, skills, account, about }
 
@@ -189,6 +189,11 @@ final class DashboardSettingsController extends ChangeNotifier {
 
   void showWorkspace() {
     destination = MainPanelDestination.workspace;
+    notifyListeners();
+  }
+
+  void showAgent() {
+    destination = MainPanelDestination.agent;
     notifyListeners();
   }
 

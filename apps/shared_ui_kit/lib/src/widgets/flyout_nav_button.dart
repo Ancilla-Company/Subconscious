@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../tokens/app_radii.dart';
 
 /// A full-width flyout menu button with an icon followed by its label.
 ///
@@ -36,9 +37,9 @@ final class FlyoutNavButton extends StatelessWidget {
       onTap: onPressed,
       child: Material(
         color: selected ? colors.secondaryContainer : Colors.transparent,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: AppRadii.standard,
         child: InkWell(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: AppRadii.standard,
           onTap: onPressed,
           child: SizedBox(
             height: height,

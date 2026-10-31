@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../forms/app_form_theme.dart';
 import '../forms/app_form_widgets.dart';
+import '../tokens/app_radii.dart';
 
 /// The body of a bottom sheet: a drag handle, an optional [title], and the
 /// [child], inside the safe area and lifted above the on-screen keyboard.
@@ -36,7 +37,7 @@ final class AppBottomSheet extends StatelessWidget {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: colors.outlineVariant,
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: AppRadii.standard,
                     ),
                     child: const SizedBox(width: 32, height: 4),
                   ),

@@ -95,43 +95,6 @@ void main() {
     });
   });
 
-  group('SidebarButton badge', () {
-    testWidgets('shows the attention dot only when asked', (tester) async {
-      Future<void> pump({required bool badge}) => tester.pumpWidget(
-        _app(
-          SidebarButton(
-            icon: Icons.chat_bubble_outline,
-            selectedIcon: Icons.chat_bubble,
-            tooltip: 'Threads',
-            badge: badge,
-            onPressed: () {},
-          ),
-        ),
-      );
-      await pump(badge: false);
-      expect(find.bySemanticsLabel('Needs attention'), findsNothing);
-      await pump(badge: true);
-      expect(find.bySemanticsLabel('Needs attention'), findsOneWidget);
-    });
-
-    testWidgets('disabled when onPressed is null', (tester) async {
-      await tester.pumpWidget(
-        _app(
-          const SidebarButton(
-            icon: Icons.settings_outlined,
-            selectedIcon: Icons.settings,
-            tooltip: 'Settings',
-            onPressed: null,
-          ),
-        ),
-      );
-      expect(
-        tester.widget<IconButton>(find.byType(IconButton)).onPressed,
-        isNull,
-      );
-    });
-  });
-
   group('AppSwitch', () {
     testWidgets('toggles by tap and exposes its label', (tester) async {
       bool? value;
@@ -494,19 +457,9 @@ void main() {
   });
 
   group('AppRadii', () {
-    test('exposes the shared corner scale', () {
-      expect(AppRadii.xs, const BorderRadius.all(Radius.circular(3)));
-      expect(AppRadii.sm, const BorderRadius.all(Radius.circular(4)));
-      expect(AppRadii.md, const BorderRadius.all(Radius.circular(6)));
-      expect(AppRadii.lg, const BorderRadius.all(Radius.circular(8)));
-      expect(
-        AppRadii.surfaceFor(TargetPlatform.windows),
-        BorderRadius.circular(8),
-      );
-      expect(
-        AppRadii.surfaceFor(TargetPlatform.iOS),
-        BorderRadius.circular(12),
-      );
+    test('is one 3 px corner for every component', () {
+      expect(AppRadii.value, 3);
+      expect(AppRadii.standard, const BorderRadius.all(Radius.circular(3)));
     });
   });
 }

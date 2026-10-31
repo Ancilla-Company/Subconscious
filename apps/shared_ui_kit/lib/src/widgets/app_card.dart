@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import '../tokens/app_radii.dart';
 
 import '../forms/app_form_widgets.dart';
 
-/// The kit's card: no border, 6px corners and the `surfaceContainerLowest`
+/// The kit's card: no border, 3px corners and the `surfaceContainerLowest`
 /// fill (white in light mode), with a small vertical [margin] so stacked cards
 /// are spaced apart. Shape and spacing match the expansion panels of the
 /// models and tools settings. Tappable when [onTap] is set.
@@ -41,7 +42,7 @@ final class AppCard extends StatelessWidget {
       elevation: 0,
       clipBehavior: Clip.antiAlias,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(6)),
+        borderRadius: AppRadii.standard,
       ),
       child: onTap == null ? body : InkWell(onTap: onTap, child: body),
     );
@@ -130,9 +131,9 @@ final class _AppSectionCardState extends State<AppSectionCard> {
           ),
       ],
     );
-    // The trailing widget (often a switch) sits beside the tappable title, not
-    // inside it, so it keeps its own semantics and tap handling.
-    final Widget header = Row(
+    final EdgeInsets inset4 = widget.padding.resolve(TextDirection.ltr);
+    // The trailing widget (often a switch) keeps its own semantics and taps.
+    final Widget row = Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
         Expanded(
@@ -142,8 +143,9 @@ final class _AppSectionCardState extends State<AppSectionCard> {
                   expanded: _isOpen,
                   label: widget.title,
                   excludeSemantics: true,
-                  child: InkWell(
-                    onTap: _toggle,
+                  onTap: _toggle,
+                  // Taps fall through to the header's single button below.
+                  child: IgnorePointer(
                     child: Padding(padding: widget.padding, child: titles),
                   ),
                 )
@@ -151,33 +153,36 @@ final class _AppSectionCardState extends State<AppSectionCard> {
         ),
         if (widget.trailing != null)
           Padding(
-            padding: EdgeInsets.symmetric(
-              vertical: widget.padding.resolve(TextDirection.ltr).top,
-            ),
+            padding: EdgeInsets.symmetric(vertical: inset4.top),
             child: Center(child: widget.trailing),
           ),
         if (_isExpandable)
+          // Only a sign of the state: the whole header is the button.
           ExcludeSemantics(
-            child: InkWell(
-              onTap: _toggle,
+            child: IgnorePointer(
               child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: widget.padding.resolve(TextDirection.ltr).top,
-                ),
-                child: Center(
-                  child: Icon(
-                    _isOpen ? Icons.expand_less : Icons.expand_more,
-                    size: 20,
-                  ),
+                padding: EdgeInsets.only(left: 8, right: inset4.right),
+                child: Icon(
+                  _isOpen ? Icons.expand_less : Icons.expand_more,
+                  size: 20,
                 ),
               ),
             ),
           )
         else
-          SizedBox(width: widget.padding.resolve(TextDirection.ltr).right),
+          SizedBox(width: inset4.right),
       ],
     );
+    final Widget header = _isExpandable
+        ? Stack(
+            children: <Widget>[
+              Positioned.fill(
+                child: ExcludeSemantics(child: InkWell(onTap: _toggle)),
+              ),
+              row,
+            ],
+          )
+        : row;
     final bool bordered = widget.bordered ?? !_isExpandable;
     return Card(
       margin: widget.margin,
@@ -188,7 +193,7 @@ final class _AppSectionCardState extends State<AppSectionCard> {
       shape: bordered
           ? null
           : const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(6)),
+              borderRadius: AppRadii.standard,
             ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

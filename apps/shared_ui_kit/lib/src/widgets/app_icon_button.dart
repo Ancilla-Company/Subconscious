@@ -46,7 +46,7 @@ ButtonStyle appIconButtonStyle(
     fixedSize: Size.square(dimension),
     padding: EdgeInsets.zero,
     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    shape: const RoundedRectangleBorder(borderRadius: AppRadii.xs),
+    shape: const RoundedRectangleBorder(borderRadius: AppRadii.standard),
   );
 }
 
@@ -137,7 +137,7 @@ final class AppIconButton extends StatelessWidget {
           side: outlined ? BorderSide(color: colors.outlineVariant) : null,
           minimumSize: Size.square(dimension),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: const RoundedRectangleBorder(borderRadius: AppRadii.xs),
+          shape: const RoundedRectangleBorder(borderRadius: AppRadii.standard),
         ),
       ),
     );

@@ -89,12 +89,6 @@ final class AccountPanel extends StatelessWidget {
   );
 }
 
-/// Corner radius for larger surfaces (avatar, dialogs), following each
-/// platform's design language: Fluent uses 8 for cards and overlays, Material
-/// 3 and Apple platforms use a larger radius.
-BorderRadius platformSurfaceRadius(TargetPlatform platform) =>
-    AppRadii.surfaceFor(platform);
-
 final class _SignedInAccount extends StatelessWidget {
   const _SignedInAccount({required this.controller});
 
@@ -108,7 +102,7 @@ final class _SignedInAccount extends StatelessWidget {
     final Widget avatar = DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.secondaryContainer,
-        borderRadius: platformSurfaceRadius(theme.platform),
+        borderRadius: AppRadii.standard,
       ),
       child: SizedBox.square(
         dimension: 56,

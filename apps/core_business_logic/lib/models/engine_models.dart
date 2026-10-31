@@ -1099,6 +1099,90 @@ final class SkillRequest {
   };
 }
 
+/// An agent: a reusable assistant profile with its own instructions, model,
+/// tools and permissions. It belongs to one workspace, or to the whole account
+/// when [workspaceUuid] is null. A null [toolsConfig] or [approvalConfig] means
+/// "use the workspace's".
+final class AgentInfo {
+  const AgentInfo({
+    required this.uuid,
+    required this.name,
+    this.description,
+    this.instructions,
+    this.defaultModelId,
+    this.toolsConfig,
+    this.approvalConfig,
+    this.workspaceUuid,
+    this.enabled = true,
+    this.createdAt,
+    this.updatedAt,
+  });
+  final String uuid;
+  final String name;
+  final String? description;
+  final String? instructions;
+  final String? defaultModelId;
+  final String? toolsConfig;
+  final String? approvalConfig;
+  final String? workspaceUuid;
+  final bool enabled;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
+  bool get isAccountWide => workspaceUuid == null;
+
+  factory AgentInfo.fromJson(Map<String, dynamic> json) => AgentInfo(
+    uuid:
+        _stringValue(json, 'uuid', 'uuid') ??
+        (throw const FormatException('Agent uuid is required.')),
+    name: _stringValue(json, 'name', 'name') ?? '',
+    description: _stringValue(json, 'description', 'description'),
+    instructions: _stringValue(json, 'instructions', 'instructions'),
+    defaultModelId: _stringValue(json, 'defaultModelId', 'default_model_id'),
+    toolsConfig: _stringValue(json, 'toolsConfig', 'tools_config'),
+    approvalConfig: _stringValue(json, 'approvalConfig', 'approval_config'),
+    workspaceUuid: _stringValue(json, 'workspaceUuid', 'workspace_uuid'),
+    enabled: json['enabled'] as bool? ?? true,
+    createdAt: _dateTimeFromJson(_jsonValue(json, 'createdAt', 'created_at')),
+    updatedAt: _dateTimeFromJson(_jsonValue(json, 'updatedAt', 'updated_at')),
+  );
+}
+
+/// The whole editable state of an agent. Every field is sent, so a null
+/// clears the value on the engine (no description, workspace defaults for
+/// tools and approvals, account-wide scope).
+final class AgentRequest {
+  const AgentRequest({
+    required this.name,
+    this.description,
+    this.instructions,
+    this.defaultModelId,
+    this.toolsConfig,
+    this.approvalConfig,
+    this.workspaceUuid,
+    this.enabled = true,
+  });
+  final String name;
+  final String? description;
+  final String? instructions;
+  final String? defaultModelId;
+  final String? toolsConfig;
+  final String? approvalConfig;
+  final String? workspaceUuid;
+  final bool enabled;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'name': name,
+    'description': description,
+    'instructions': instructions,
+    'defaultModelId': defaultModelId,
+    'toolsConfig': toolsConfig,
+    'approvalConfig': approvalConfig,
+    'workspaceUuid': workspaceUuid,
+    'enabled': enabled,
+  };
+}
+
 final class ToolCatalog {
   const ToolCatalog({required this.builtin, required this.configured});
   final Map<String, List<BuiltinToolCatalogEntry>> builtin;

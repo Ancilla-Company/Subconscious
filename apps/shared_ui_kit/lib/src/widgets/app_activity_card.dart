@@ -164,10 +164,10 @@ final class _AppActivityCardState extends State<AppActivityCard> {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainerLow,
-        borderRadius: AppRadii.md,
+        borderRadius: AppRadii.standard,
       ),
       child: ClipRRect(
-        borderRadius: AppRadii.md,
+        borderRadius: AppRadii.standard,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -244,7 +244,7 @@ final class AppActivitySection extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: colors.surface.withValues(alpha: 0.6),
-                borderRadius: AppRadii.xs,
+                borderRadius: AppRadii.standard,
               ),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(8),

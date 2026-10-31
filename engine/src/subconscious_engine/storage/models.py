@@ -144,6 +144,29 @@ class SkillRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
+class AgentRecord(Base):
+    """A reusable assistant profile: instructions, model, tools and permissions.
+
+    ``workspace_id`` NULL means the agent is account-wide; otherwise it belongs to that
+    workspace. ``tools_config`` and ``approval_config`` use the thread/workspace formats and
+    NULL means "inherit the workspace's". Local to this engine (not hive-synced).
+    """
+
+    __tablename__ = "agents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uuid: Mapped[str] = mapped_column(String, unique=True, default=new_uuid)
+    workspace_id: Mapped[int | None] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text)
+    instructions: Mapped[str | None] = mapped_column(Text)
+    default_model_id: Mapped[str | None] = mapped_column(String)
+    tools_config: Mapped[str | None] = mapped_column(Text)
+    approval_config: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
 class TodoItem(Base):
     __tablename__ = "todo_items"
     id: Mapped[int] = mapped_column(primary_key=True)

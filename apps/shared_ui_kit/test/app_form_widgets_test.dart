@@ -289,9 +289,15 @@ void main() {
       ),
     );
     expect(find.text('Turns it on'), findsOneWidget);
-    await tester.tap(find.byType(Switch));
+    // The kit's rectangular switch, never the round Material one.
+    expect(find.byType(Switch), findsNothing);
+    expect(find.byType(AppSwitch), findsOneWidget);
+    await tester.tap(find.byType(AppSwitch));
     await tester.pump();
     expect(value, isTrue);
+    await tester.tap(find.text('Enabled'));
+    await tester.pump();
+    expect(value, isFalse);
   });
 
   testWidgets('error, heading and empty message render', (

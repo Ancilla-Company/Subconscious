@@ -103,6 +103,16 @@
       "console": "terminal"
     },
     {
+      "name": "UI Kit Gallery",
+      "type": "dart",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/ui_gallery/lib/main.dart",
+      "cwd": "${workspaceFolder}/apps/ui_gallery",
+      "deviceId": "windows",
+      "flutterMode": "debug",
+      "console": "terminal"
+    },
+    {
       "name": "Chromium Extension (Chrome)",
       "preLaunchTask": "Extension: Build (Dev)",
       "type": "chrome",

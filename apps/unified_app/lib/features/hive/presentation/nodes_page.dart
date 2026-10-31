@@ -414,44 +414,31 @@ final class _ExecutorSection extends StatelessWidget {
 }
 
 /// One device and the clients folded under it, always drawn the same way: a
-/// single card with the device first and its clients as indented rows inside it
-/// (wherever the group sits in the list).
+/// single kit [AppDeviceCard] with the device first and its clients as indented
+/// rows inside it (wherever the group sits in the list).
 final class _DeviceGroupCard extends StatelessWidget {
   const _DeviceGroupCard({required this.runtime, required this.group});
   final HiveRuntime runtime;
   final DeviceGroup group;
 
   @override
-  Widget build(BuildContext context) => AppCard(
-    padding: EdgeInsets.zero,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _NodeTile(runtime: runtime, view: group.root),
-        for (final NodeView child in group.children) ...<Widget>[
-          const Divider(height: 1),
-          _NodeTile(runtime: runtime, view: child, nested: true),
-        ],
-      ],
-    ),
+  Widget build(BuildContext context) => AppDeviceCard(
+    device: _NodeTile(runtime: runtime, view: group.root).tile(context),
+    clients: <AppDeviceTile>[
+      for (final NodeView child in group.children)
+        _NodeTile(runtime: runtime, view: child).tile(context),
+    ],
   );
 }
 
-final class _NodeTile extends StatelessWidget {
-  const _NodeTile({
-    required this.runtime,
-    required this.view,
-    this.nested = false,
-  });
+/// What one device or client shows and can do. The look is the kit's
+/// [AppDeviceTile]; this decides the text, the status badge and the actions.
+final class _NodeTile {
+  const _NodeTile({required this.runtime, required this.view});
   final HiveRuntime runtime;
   final NodeView view;
 
-  /// A client row inside its device's card: indented, with no card of its own.
-  final bool nested;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
+  AppDeviceTile tile(BuildContext context) {
     final DirectoryNode node = view.node;
     final String? home = runtime.homeEngineId;
     final String? preferred = runtime.preferredEngineId;
@@ -497,63 +484,20 @@ final class _NodeTile extends StatelessWidget {
             child: const Text('Remove'),
           )
         : null;
-    final List<Widget> actions = <Widget>[
-      if (approveButton != null) approveButton,
-      if (connectButton != null) connectButton,
-      if (removeButton != null) removeButton,
-    ];
-    return Padding(
-      padding: nested
-          ? const EdgeInsetsDirectional.only(
-              start: 36,
-              end: 16,
-              top: 8,
-              bottom: 8,
-            )
-          : const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      view.isLocal ? '${node.name} (this device)' : node.name,
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    if (node.isEngine && view.clients.isNotEmpty)
-                      Text(
-                        'Clients: ${view.clients.join(', ')}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (badge != null) ...<Widget>[const SizedBox(width: 8), badge],
-            ],
-          ),
-          if (actions.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 8),
-            AppButtonRow(children: actions),
-          ],
-        ],
-      ),
+    return AppDeviceTile(
+      title: view.isLocal ? '${node.name} (this device)' : node.name,
+      subtitle: subtitle,
+      detail: node.isEngine && view.clients.isNotEmpty
+          ? 'Clients: ${view.clients.join(', ')}'
+          : null,
+      badge: badge,
+      actions: <Widget>[
+        if (approveButton != null) approveButton,
+        if (connectButton != null) connectButton,
+        if (removeButton != null) removeButton,
+      ],
     );
   }
-
   Future<void> _confirmRemove(
     BuildContext context,
     HiveRuntime runtime,

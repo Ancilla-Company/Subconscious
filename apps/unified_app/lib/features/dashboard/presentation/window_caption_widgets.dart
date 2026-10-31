@@ -283,112 +283,43 @@ final class ThreadWorkspaceCaptionPicker extends StatelessWidget {
     String activeUuid,
     Color foreground,
   ) {
-    return AppPopupMenu<String>(
-      tooltip: 'Active Workspace: $label',
-      enabled: controller.isConnected && controller.workspaces.isNotEmpty,
-      onSelected: (String uuid) {
-        if (uuid.isEmpty) {
-          unawaited(controller.selectThreadWorkspace(null));
-          return;
-        }
-        for (final workspace in controller.workspaces) {
-          if (workspace.uuid == uuid) {
-            unawaited(controller.selectThreadWorkspace(workspace));
+    return SizedBox(
+      width: 180,
+      child: AppPickerButton<String>(
+        icon: FluentIcons.folder_20_regular,
+        label: label,
+        tooltip: 'Active Workspace: $label',
+        foreground: foreground,
+        height: kCaptionBarHeight,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        enabled: controller.isConnected && controller.workspaces.isNotEmpty,
+        onSelected: (String uuid) {
+          if (uuid.isEmpty) {
+            unawaited(controller.selectThreadWorkspace(null));
             return;
           }
-        }
-      },
-      items: <AppMenuItem<String>>[
-        AppMenuItem<String>(
-          value: '',
-          label: 'All workspaces',
-          icon: FluentIcons.apps_20_regular,
-          selected: activeUuid.isEmpty,
-        ),
-        for (final workspace in controller.workspaces)
+          for (final workspace in controller.workspaces) {
+            if (workspace.uuid == uuid) {
+              unawaited(controller.selectThreadWorkspace(workspace));
+              return;
+            }
+          }
+        },
+        items: <AppMenuItem<String>>[
           AppMenuItem<String>(
-            value: workspace.uuid,
-            label: workspace.name,
-            icon: FluentIcons.folder_20_regular,
-            selected: activeUuid == workspace.uuid,
+            value: '',
+            label: 'All workspaces',
+            icon: FluentIcons.apps_20_regular,
+            selected: activeUuid.isEmpty,
           ),
-      ],
-      child: SizedBox(
-        width: 180,
-        height: kCaptionBarHeight,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            children: <Widget>[
-              Icon(FluentIcons.folder_20_regular, size: 16, color: foreground),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium
-                      ?.copyWith(color: foreground),
-                ),
-              ),
-              Icon(
-                FluentIcons.chevron_down_16_regular,
-                size: 12,
-                color: foreground,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The title bar's button that opens the threads flyout in the chat-only
-/// window, drawn like the panel toggles.
-///
-/// It sits beside the draggable title area, not inside it: a press in that
-/// area starts a window drag, which would swallow the click.
-final class CaptionFlyoutButton extends StatelessWidget {
-  const CaptionFlyoutButton({
-    required this.brightness,
-    required this.onPressed,
-    super.key,
-  });
-
-  static const String tooltip = 'Threads';
-  static const IconData icon = FluentIcons.navigation_20_regular;
-
-  final Brightness brightness;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color foreground = brightness == Brightness.dark
-        ? Colors.white
-        : Colors.black;
-    final Color hover = brightness == Brightness.dark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
-    return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        label: tooltip,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onPressed,
-            hoverColor: hover,
-            focusColor: hover,
-            highlightColor: hover,
-            child: SizedBox(
-              width: 42,
-              height: kCaptionBarHeight,
-              child: Icon(icon, size: 18, color: foreground),
+          for (final workspace in controller.workspaces)
+            AppMenuItem<String>(
+              value: workspace.uuid,
+              label: workspace.name,
+              icon: FluentIcons.folder_20_regular,
+              selected: activeUuid == workspace.uuid,
             ),
-          ),
-        ),
+        ],
       ),
     );
   }

@@ -642,6 +642,27 @@ final class RestEngineClient {
   );
   Future<void> deleteSkill(String uuid) => _delete('skills/${_segment(uuid)}');
 
+  /// The agents of the account. With [workspaceUuid] only the account-wide
+  /// ones and that workspace's.
+  Future<List<AgentInfo>> listAgents({String? workspaceUuid}) async =>
+      _getList(
+        'agents',
+        AgentInfo.fromJson,
+        query: <String, String>{'workspaceUuid': ?workspaceUuid},
+      );
+  Future<AgentInfo> getAgent(String uuid) async => AgentInfo.fromJson(
+    await _getMap('agents/${_segment(uuid)}', authenticate: true),
+  );
+  Future<AgentInfo> createAgent(AgentRequest agent) async =>
+      AgentInfo.fromJson(await _sendMap('POST', 'agents', agent.toJson()));
+  Future<AgentInfo> updateAgent({
+    required String uuid,
+    required AgentRequest agent,
+  }) async => AgentInfo.fromJson(
+    await _sendMap('PUT', 'agents/${_segment(uuid)}', agent.toJson()),
+  );
+  Future<void> deleteAgent(String uuid) => _delete('agents/${_segment(uuid)}');
+
   Future<AppStateEntry?> getAppState(String key) async {
     try {
       return AppStateEntry.fromJson(

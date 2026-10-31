@@ -143,11 +143,17 @@ def _migration_4_tool_registry_config(connection: Connection) -> None:
         _add_column(connection, "tool_registry", "config_json", "TEXT")
 
 
+def _migration_5_agents(connection: Connection) -> None:
+    """``agents``: workspace-scoped or account-wide assistant profiles (local, never synced)."""
+    Base.metadata.tables["agents"].create(connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[tuple[int, str, Migration], ...] = (
     (1, "hive_sync", _migration_1_hive_sync),
     (2, "remote_tool_audit", _migration_2_remote_tool_audit),
     (3, "app_state_client_scope", _migration_3_app_state_client_scope),
     (4, "tool_registry_config", _migration_4_tool_registry_config),
+    (5, "agents", _migration_5_agents),
 )
 LATEST_VERSION = MIGRATIONS[-1][0]
 

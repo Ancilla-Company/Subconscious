@@ -1,4 +1,5 @@
 import 'package:core_business_logic/core_business_logic.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,14 +48,19 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('Workspaces'), findsWidgets);
-      expect(find.text('Threads'), findsWidgets);
+      expect(find.text('Chat'), findsWidgets);
+      expect(find.text('Agents'), findsWidgets);
       expect(find.text('Files'), findsWidgets);
-      expect(find.byType(FlyoutNavButton), findsNWidgets(4));
-      expect(find.byType(SidebarButton), findsOneWidget);
+      expect(find.byType(FlyoutNavButton), findsNWidgets(5));
+      final Finder settingsButton = find.widgetWithIcon(
+        AppIconButton,
+        FluentIcons.settings_24_regular,
+      );
+      expect(settingsButton, findsOneWidget);
 
-      final Size settings = tester.getSize(find.byType(SidebarButton));
+      final Size settings = tester.getSize(settingsButton);
       expect(settings.width, settings.height);
-      final Rect settingsRect = tester.getRect(find.byType(SidebarButton));
+      final Rect settingsRect = tester.getRect(settingsButton);
       final Rect accountRect = tester.getRect(
         find.byType(FlyoutNavButton).last,
       );
@@ -74,7 +80,7 @@ void main() {
                 .first,
           )
           .color;
-      // Threads is the default active section.
+      // Chat is the default active section.
       expect(fill(1), colors.secondaryContainer);
       expect(fill(0), Colors.transparent);
     });

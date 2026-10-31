@@ -53,10 +53,10 @@ final class _ChicletMenuItemState<T>
             color: widget.selected
                 ? theme.colorScheme.onSurface.withValues(alpha: 0.08)
                 : null,
-            borderRadius: AppRadii.md,
+            borderRadius: AppRadii.standard,
           ),
           child: InkWell(
-            borderRadius: AppRadii.md,
+            borderRadius: AppRadii.standard,
             onTap: widget.enabled ? handleTap : null,
             canRequestFocus: widget.enabled,
             child: ConstrainedBox(

@@ -5,6 +5,7 @@ import '../tokens/app_radii.dart';
 import 'package:flutter/services.dart';
 
 import '../tokens/app_spacing.dart';
+import '../widgets/app_switch.dart';
 import '../widgets/chiclet_menu.dart';
 
 /// The bold label shown above a form field.
@@ -58,6 +59,7 @@ final class AppTextField extends StatelessWidget {
     this.validator,
     this.onChanged,
     this.onSubmitted,
+    this.onEditingComplete,
     this.focusNode,
     this.initialValue,
     super.key,
@@ -92,6 +94,11 @@ final class AppTextField extends StatelessWidget {
   final FormFieldValidator<String>? validator;
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
+
+  /// Called when the user finishes editing (Enter). When set, the field keeps
+  /// focus instead of closing the keyboard; a find box uses it to step through
+  /// matches.
+  final VoidCallback? onEditingComplete;
   final FocusNode? focusNode;
 
   @override
@@ -122,6 +129,7 @@ final class AppTextField extends StatelessWidget {
       validator: validator,
       onChanged: onChanged,
       onFieldSubmitted: onSubmitted,
+      onEditingComplete: onEditingComplete,
       decoration: InputDecoration(
         hintText: hintText,
         helperText: helperText,
@@ -213,38 +221,47 @@ final class AppDropdownField<T> extends StatelessWidget {
   );
 }
 
-/// A borderless, expanded dropdown for toolbars and section headers (for
-/// example the workspace filter in the threads sidebar). It is not a form
-/// field: it has no fill or outline, so size it with the parent (a [SizedBox]).
+/// The kit's toolbar dropdown: a borderless, filled-on-hover button showing the
+/// current choice and an arrow, for toolbars, section headers and the chat
+/// composer's model picker. It is not a form field (no fill or outline at
+/// rest) and is self-contained: it brings its own [height], rounded ink and
+/// hover fill, so it needs no wrapper. Its width is the parent's (put it in a
+/// `SizedBox` or an `Expanded`); the open list is as wide as the button.
 final class AppCompactDropdown<T> extends StatelessWidget {
   const AppCompactDropdown({
     required this.value,
     required this.items,
     required this.onChanged,
     this.hint,
-    this.padding,
+    this.padding = const EdgeInsets.symmetric(horizontal: 8),
+    this.height = 32,
     super.key,
   });
 
   final T? value;
   final Widget? hint;
-  final EdgeInsetsGeometry? padding;
+  final EdgeInsetsGeometry padding;
+
+  /// Height of the button. Touch layouts pass their larger target (48).
+  final double height;
   final List<DropdownMenuItem<T>> items;
 
   /// Null disables the dropdown.
   final ValueChanged<T?>? onChanged;
 
   @override
-  Widget build(BuildContext context) => _SelectField<T>(
-    value: value,
-    hint: hint,
-    items: items,
-    onChanged: onChanged,
-    compact: true,
-    padding: padding,
+  Widget build(BuildContext context) => SizedBox(
+    height: height,
+    child: _SelectField<T>(
+      value: value,
+      hint: hint,
+      items: items,
+      onChanged: onChanged,
+      compact: true,
+      padding: padding,
+    ),
   );
 }
-
 /// An on/off row in the app's form style.
 final class AppSwitchTile extends StatelessWidget {
   const AppSwitchTile({
@@ -261,13 +278,45 @@ final class AppSwitchTile extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
 
   @override
-  Widget build(BuildContext context) => SwitchListTile(
-    contentPadding: EdgeInsets.zero,
-    title: Text(title),
-    subtitle: subtitle == null ? null : Text(subtitle!),
-    value: value,
-    onChanged: onChanged,
-  );
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool enabled = onChanged != null;
+    final Color? disabled = enabled ? null : theme.disabledColor;
+    // The kit's rectangular switch, never the round Material one. Tapping the
+    // text toggles it too.
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: enabled ? () => onChanged!(!value) : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: disabled,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: disabled ?? theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        AppSwitch(value: value, onChanged: onChanged, semanticLabel: title),
+      ],
+    );
+  }
 }
 
 /// Inline error text for a form (an engine, network or validation failure).
@@ -434,24 +483,38 @@ final class _SelectField<T> extends StatelessWidget {
       ),
     );
     return Builder(
-      builder: (BuildContext anchor) => Semantics(
-        button: true,
-        enabled: enabled,
-        child: InkWell(
-          borderRadius: AppRadii.xs,
-          onTap: enabled ? () => _open(anchor) : null,
-          child: compact
-              ? Padding(
-                  padding: padding ?? EdgeInsets.zero,
-                  child: Align(alignment: Alignment.centerLeft, child: content),
-                )
-              : InputDecorator(
-                  isEmpty: false,
-                  decoration: InputDecoration(enabled: enabled),
-                  child: content,
-                ),
-        ),
-      ),
+      builder: (BuildContext anchor) {
+        final Widget button = Semantics(
+          button: true,
+          enabled: enabled,
+          child: InkWell(
+            borderRadius: AppRadii.standard,
+            onTap: enabled ? () => _open(anchor) : null,
+            child: compact
+                ? Padding(
+                    padding: padding ?? EdgeInsets.zero,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: content,
+                    ),
+                  )
+                : InputDecorator(
+                    isEmpty: false,
+                    decoration: InputDecoration(enabled: enabled),
+                    child: content,
+                  ),
+          ),
+        );
+        // The toolbar dropdown paints its own ink, so it works on any surface.
+        return compact
+            ? Material(
+                type: MaterialType.transparency,
+                borderRadius: AppRadii.standard,
+                clipBehavior: Clip.antiAlias,
+                child: button,
+              )
+            : button;
+      },
     );
   }
 }

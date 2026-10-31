@@ -396,7 +396,7 @@ final class _Renderer {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: styles.colors.surfaceContainerLow,
-        borderRadius: AppRadii.md,
+        borderRadius: AppRadii.standard,
         border: Border.all(color: styles.colors.outlineVariant),
       ),
       child: Column(
@@ -775,7 +775,7 @@ final class _Renderer {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
             color: styles.colors.surfaceContainerHighest,
-            borderRadius: AppRadii.sm,
+            borderRadius: AppRadii.standard,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,

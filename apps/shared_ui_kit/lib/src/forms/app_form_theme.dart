@@ -14,7 +14,7 @@ import '../tokens/app_radii.dart';
 ThemeData appFormTheme(BuildContext context) {
   final ThemeData base = Theme.of(context);
   final ColorScheme colors = base.colorScheme;
-  const BorderRadius radius = BorderRadius.all(Radius.circular(3));
+  const BorderRadius radius = AppRadii.standard;
   return base.copyWith(
     visualDensity: VisualDensity.compact,
     inputDecorationTheme: InputDecorationTheme(
@@ -23,29 +23,29 @@ ThemeData appFormTheme(BuildContext context) {
       fillColor: colors.surfaceContainerLowest,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       border: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderRadius: AppRadii.standard,
         borderSide: BorderSide(color: colors.outlineVariant),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderRadius: AppRadii.standard,
         borderSide: BorderSide(color: colors.outlineVariant),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderRadius: AppRadii.standard,
         borderSide: BorderSide(color: colors.outlineVariant),
       ),
       disabledBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderRadius: AppRadii.standard,
         borderSide: BorderSide(
           color: colors.outlineVariant.withValues(alpha: 0.5),
         ),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderRadius: AppRadii.standard,
         borderSide: BorderSide(color: colors.outlineVariant),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderRadius: AppRadii.standard,
         borderSide: BorderSide(color: colors.outlineVariant),
       ),
       hintStyle: TextStyle(
@@ -105,7 +105,7 @@ ThemeData appFormTheme(BuildContext context) {
       // 6px gap to the edge on every side once the 2px row spacing is added.
       menuPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       shape: RoundedRectangleBorder(
-        borderRadius: AppRadii.lg,
+        borderRadius: AppRadii.standard,
         side: BorderSide(color: colors.outlineVariant),
       ),
     ),
@@ -134,7 +134,7 @@ ThemeData appFormTheme(BuildContext context) {
       modalElevation: 0,
       showDragHandle: false,
       shape: RoundedRectangleBorder(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadii.value)),
         side: BorderSide(color: colors.outlineVariant),
       ),
     ),

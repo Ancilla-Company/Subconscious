@@ -38,7 +38,7 @@ final class FileTabButton extends StatelessWidget {
           color: selected
               ? colors.secondaryContainer
               : colors.surfaceContainerLow,
-          borderRadius: AppRadii.xs,
+          borderRadius: AppRadii.standard,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onTap,

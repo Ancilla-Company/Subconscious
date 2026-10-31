@@ -10,6 +10,7 @@ import '../../account/account_controller.dart';
 import '../../chat/engine_llm_provider.dart';
 import '../../account/presentation/account_panel.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
+import '../../chat/presentation/threads_list.dart';
 import '../../context/presentation/context_panel.dart';
 import '../../hive/hive_runtime.dart';
 import '../controller/dashboard_controller.dart';
@@ -88,10 +89,10 @@ final class MobileDashboardView extends StatelessWidget {
   }
 
   Widget _body(double target) {
-    // The chat only has room under Threads on mobile, so show it while a tool
-    // approval or tool sign-in is waiting, without changing the selected
+    // The chat only has room on its own page on mobile, so show it while a
+    // tool approval or tool sign-in is waiting, without changing the selected
     // section.
-    if (controller.selectedSection != DashboardSection.threads &&
+    if (controller.selectedSection != DashboardSection.chat &&
         controller.pendingToolApproval == null &&
         controller.pendingOAuth == null) {
       return DashboardMainPanel(
@@ -171,6 +172,13 @@ final class MobileDashboardView extends StatelessWidget {
         title: controller.selectedThread?.title ?? controller.pendingDraftTitle,
         draftToolsConfig: controller.pendingDraftToolsConfig,
         executors: controller.executors,
+        threadsList: ThreadsList(
+          controller: controller,
+          minTouchTarget: target,
+        ),
+        threadsListVisible: controller.threadsListVisible,
+        onToggleThreadsList: () =>
+            controller.setThreadsListVisible(!controller.threadsListVisible),
       );
     }
   }
@@ -197,7 +205,8 @@ final class _MobileFlyout extends StatelessWidget {
     controller.openAccountShortcut();
   }
 
-  Widget _menuButton({
+  Widget _menuButton(
+    BuildContext context, {
     required IconData icon,
     required IconData selectedIcon,
     required String label,
@@ -210,7 +219,11 @@ final class _MobileFlyout extends StatelessWidget {
       label: label,
       height: target,
       selected: controller.selectedSection == section,
-      onPressed: () => _selectSection(section),
+      onPressed: () {
+        _selectSection(section);
+        // The chat page has no list to pick from: show it.
+        if (section == DashboardSection.chat) Navigator.of(context).pop();
+      },
     ),
   );
 
@@ -239,18 +252,28 @@ final class _MobileFlyout extends StatelessWidget {
             child: Column(
               children: <Widget>[
                 _menuButton(
+                  context,
                   icon: FluentIcons.apps_24_regular,
                   selectedIcon: FluentIcons.apps_24_filled,
                   label: 'Workspaces',
                   section: DashboardSection.workspaces,
                 ),
                 _menuButton(
+                  context,
                   icon: FluentIcons.chat_24_regular,
                   selectedIcon: FluentIcons.chat_24_filled,
-                  label: 'Threads',
-                  section: DashboardSection.threads,
+                  label: 'Chat',
+                  section: DashboardSection.chat,
                 ),
                 _menuButton(
+                  context,
+                  icon: FluentIcons.bot_24_regular,
+                  selectedIcon: FluentIcons.bot_24_filled,
+                  label: 'Agents',
+                  section: DashboardSection.agents,
+                ),
+                _menuButton(
+                  context,
                   icon: FluentIcons.document_copy_24_regular,
                   selectedIcon: FluentIcons.document_copy_24_filled,
                   label: 'Files',
@@ -273,7 +296,7 @@ final class _MobileFlyout extends StatelessWidget {
             padding: const EdgeInsets.all(8),
             child: Row(
               children: <Widget>[
-                SidebarButton(
+                AppIconButton(
                   icon: FluentIcons.settings_24_regular,
                   selectedIcon: FluentIcons.settings_24_filled,
                   tooltip: 'Settings',
@@ -281,8 +304,7 @@ final class _MobileFlyout extends StatelessWidget {
                       controller.selectedSection == DashboardSection.settings &&
                       !controller.accountShortcutSelected,
                   onPressed: () => _selectSection(DashboardSection.settings),
-                  dimension: target,
-                  borderRadius: 6,
+                  minTouchTarget: target,
                 ),
                 const SizedBox(width: 8),
                 Expanded(

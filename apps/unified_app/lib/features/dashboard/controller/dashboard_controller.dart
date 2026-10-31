@@ -19,7 +19,10 @@ import '../../settings/controller/settings_controller.dart';
 
 enum EngineConnectionStatus { disconnected, connecting, connected }
 
-enum DashboardSection { workspaces, threads, files, settings }
+/// The sections of the sidebar. [chat] is only the phone layout's chat page: the
+/// wide layouts always show the chat panel beside the sections, never select
+/// it, and keep showing [DashboardController.contextSection] when it is.
+enum DashboardSection { chat, workspaces, agents, files, settings }
 
 final class WorkspaceDirectoryRoot {
   const WorkspaceDirectoryRoot({required this.index, required this.path});
@@ -257,8 +260,38 @@ final class DashboardController extends ChangeNotifier {
   final Map<EngineLlmProvider, VoidCallback> _releaseListeners =
       <EngineLlmProvider, VoidCallback>{};
   EngineConnectionStatus connectionStatus = EngineConnectionStatus.connecting;
-  DashboardSection selectedSection = DashboardSection.threads;
+  DashboardSection _selectedSection = DashboardSection.chat;
+  DashboardSection _contextSection = DashboardSection.agents;
+
+  DashboardSection get selectedSection => _selectedSection;
+
+  set selectedSection(DashboardSection section) {
+    _selectedSection = section;
+    if (section != DashboardSection.chat) _contextSection = section;
+  }
+
+  /// The section the sidebar and context panel of the wide layouts show: the
+  /// selected one, or the last one that was open while the phone layout's chat
+  /// page is selected.
+  DashboardSection get contextSection =>
+      _selectedSection == DashboardSection.chat
+      ? _contextSection
+      : _selectedSection;
+
   bool accountShortcutSelected = false;
+
+  /// The agents of the account, from every workspace. The context panel shows
+  /// [visibleAgents].
+  List<AgentInfo> agents = const <AgentInfo>[];
+  AgentInfo? selectedAgent;
+  bool isCreatingAgent = false;
+  bool isLoadingAgents = false;
+  Object? agentsError;
+  String? _agentsAgentUuid;
+  int _agentRequestVersion = 0;
+
+  /// Whether the chat panel shows the list of threads instead of the chat.
+  bool threadsListVisible = false;
   List<Workspace> workspaces = const <Workspace>[];
   List<ThreadInfo> threads = const <ThreadInfo>[];
   Workspace? selectedWorkspace;
@@ -613,8 +646,11 @@ final class DashboardController extends ChangeNotifier {
         } else {
           settings.showWorkspace();
         }
-      case DashboardSection.threads:
+      case DashboardSection.chat:
+        // The chat page has no main panel of its own.
         settings.showUtility();
+      case DashboardSection.agents:
+        settings.showAgent();
       case DashboardSection.files:
         settings.showFiles();
       case DashboardSection.settings:
@@ -622,7 +658,7 @@ final class DashboardController extends ChangeNotifier {
     }
     notifyListeners();
 
-    if (section == DashboardSection.threads && selectedThread == null) {
+    if (section == DashboardSection.chat && selectedThread == null) {
       final ThreadInfo? thread = _threadByUuid(_threadsThreadUuid);
       if (thread != null) {
         await selectThread(thread, remember: false);
@@ -686,6 +722,135 @@ final class DashboardController extends ChangeNotifier {
     isCreatingWorkspace = false;
     notifyListeners();
   }
+
+  /// Shows or hides the thread list in the chat panel. Choosing a thread or
+  /// starting a draft hides it again.
+  void setThreadsListVisible(bool visible) {
+    if (threadsListVisible == visible) return;
+    threadsListVisible = visible;
+    notifyListeners();
+  }
+
+  /// The agents the context panel offers: the account-wide ones and those of
+  /// the workspace the chat is in (all of them while no workspace is chosen).
+  List<AgentInfo> get visibleAgents {
+    final String? workspaceUuid = activeWorkspace?.uuid;
+    if (workspaceUuid == null) return agents;
+    return <AgentInfo>[
+      for (final AgentInfo agent in agents)
+        if (agent.workspaceUuid == null || agent.workspaceUuid == workspaceUuid)
+          agent,
+    ];
+  }
+
+  Future<void> loadAgents() async {
+    final RestEngineClient? client = repository?.rest;
+    if (client == null || !isConnected) return;
+    final int requestVersion = ++_agentRequestVersion;
+    isLoadingAgents = true;
+    agentsError = null;
+    notifyListeners();
+    try {
+      final List<AgentInfo> loaded = await client.listAgents().timeout(
+        requestTimeout,
+      );
+      if (_disposed || requestVersion != _agentRequestVersion) return;
+      agents = loaded;
+      final String? wanted = selectedAgent?.uuid ?? _agentsAgentUuid;
+      selectedAgent = _agentByUuid(wanted);
+      // A creation form that was open stays open; otherwise follow the
+      // remembered selection.
+      if (selectedAgent != null &&
+          selectedSection == DashboardSection.agents &&
+          !isCreatingAgent) {
+        settings.showAgent();
+      }
+    } on Object catch (caughtError) {
+      if (requestVersion == _agentRequestVersion) agentsError = caughtError;
+    } finally {
+      if (!_disposed && requestVersion == _agentRequestVersion) {
+        isLoadingAgents = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  AgentInfo? _agentByUuid(String? uuid) {
+    if (uuid == null) return null;
+    for (final AgentInfo agent in agents) {
+      if (agent.uuid == uuid) return agent;
+    }
+    return null;
+  }
+
+  void selectAgent(AgentInfo agent) {
+    isCreatingAgent = false;
+    selectedAgent = agent;
+    _agentsAgentUuid = agent.uuid;
+    settings.showAgent();
+    _markNavigationChanged();
+    notifyListeners();
+  }
+
+  void beginAgentCreation() {
+    if (!isConnected || isCreatingAgent) return;
+    isCreatingAgent = true;
+    settings.showAgent();
+    notifyListeners();
+  }
+
+  void cancelAgentCreation() {
+    if (!isCreatingAgent) return;
+    isCreatingAgent = false;
+    notifyListeners();
+  }
+
+  RestEngineClient get _agentClient =>
+      repository?.rest ??
+      (throw StateError('The Subconscious engine is not connected.'));
+
+  Future<AgentInfo> createAgent(AgentRequest request) async {
+    final AgentInfo created = await _agentClient
+        .createAgent(request)
+        .timeout(requestTimeout);
+    agents = <AgentInfo>[
+      for (final AgentInfo agent in agents)
+        if (agent.uuid != created.uuid) agent,
+      created,
+    ]..sort(_compareAgents);
+    selectAgent(created);
+    return created;
+  }
+
+  Future<AgentInfo> updateAgent(AgentInfo agent, AgentRequest request) async {
+    final AgentInfo updated = await _agentClient
+        .updateAgent(uuid: agent.uuid, agent: request)
+        .timeout(requestTimeout);
+    agents = <AgentInfo>[
+      for (final AgentInfo item in agents)
+        if (item.uuid == updated.uuid) updated else item,
+    ]..sort(_compareAgents);
+    if (selectedAgent?.uuid == updated.uuid) selectedAgent = updated;
+    notifyListeners();
+    return updated;
+  }
+
+  Future<void> deleteAgent(AgentInfo agent) async {
+    await _agentClient.deleteAgent(agent.uuid).timeout(requestTimeout);
+    agents = <AgentInfo>[
+      for (final AgentInfo item in agents)
+        if (item.uuid != agent.uuid) item,
+    ];
+    if (selectedAgent?.uuid == agent.uuid) {
+      selectedAgent = null;
+      _agentsAgentUuid = null;
+      _markNavigationChanged();
+    }
+    notifyListeners();
+  }
+
+  static int _compareAgents(AgentInfo a, AgentInfo b) =>
+      a.name.toLowerCase().compareTo(b.name.toLowerCase());
 
   /// When a failed read of the saved state may be tried again, so a broken
   /// settings route is not hit on every connection check.
@@ -779,11 +944,15 @@ final class DashboardController extends ChangeNotifier {
 
   void _restoreNavigation(Map<String, dynamic> root) {
     final bool legacyAccountSection = root['activeSection'] == 'account';
+    // The Threads section no longer exists: the chat page took its place.
     selectedSection = legacyAccountSection
         ? DashboardSection.settings
         : _enumValue(DashboardSection.values, root['activeSection']) ??
-              DashboardSection.threads;
+              DashboardSection.chat;
     final Map<String, dynamic> sections = _objectValue(root['sections']);
+    _agentsAgentUuid = _stringValue(
+      _objectValue(sections['agents'])['agentUuid'],
+    );
     final Map<String, dynamic> workspaces = _objectValue(
       sections['workspaces'],
     );
@@ -890,6 +1059,9 @@ final class DashboardController extends ChangeNotifier {
       'workspaces': <String, dynamic>{
         if (_workspacesWorkspaceUuid != null)
           'workspaceUuid': _workspacesWorkspaceUuid,
+      },
+      'agents': <String, dynamic>{
+        if (_agentsAgentUuid != null) 'agentUuid': _agentsAgentUuid,
       },
       'threads': <String, dynamic>{
         if (_threadsWorkspaceUuid != null)
@@ -1410,6 +1582,13 @@ final class DashboardController extends ChangeNotifier {
           unawaited(_refreshSelectedThreadHistory(threadId));
         }
         return;
+      case 'agent.created':
+      case 'agent.updated':
+      case 'agent.deleted':
+        // Changed here, on another device, or by the assistant through its
+        // agent tools: reload the list.
+        unawaited(loadAgents());
+        return;
       case 'thread.created':
         final Object? workspaceId = data['workspaceId'];
         if (workspaceId is String && activeWorkspace?.uuid == workspaceId) {
@@ -1826,8 +2005,14 @@ final class DashboardController extends ChangeNotifier {
     switch (destination) {
       case 'workspaces':
         await activateSection(DashboardSection.workspaces);
+      case 'agents':
+        updateLayoutState(contextPanelVisible: true);
+        await activateSection(DashboardSection.agents);
       case 'threads':
-        await activateSection(DashboardSection.threads);
+        // Threads live in the chat panel now: show it with the list open.
+        updateLayoutState(chatPanelVisible: true);
+        await activateSection(DashboardSection.chat);
+        setThreadsListVisible(true);
       case 'files':
         await activateSection(DashboardSection.files);
       case 'settings':
@@ -2113,6 +2298,7 @@ final class DashboardController extends ChangeNotifier {
       isLoadingWorkspaces = false;
       notifyListeners();
     }
+    unawaited(loadAgents());
   }
 
   Future<void> selectWorkspace(
@@ -2229,7 +2415,11 @@ final class DashboardController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    await selectThread(rememberedThread, remember: false);
+    await selectThread(
+      rememberedThread,
+      remember: false,
+      keepThreadsList: true,
+    );
   }
 
   /// "All workspaces": the threads of every workspace in one list, newest
@@ -2284,10 +2474,17 @@ final class DashboardController extends ChangeNotifier {
   /// The name of a workspace, or null when it is not in the loaded list.
   String? workspaceName(String uuid) => _workspaceByUuid(uuid)?.name;
 
-  Future<void> selectThread(ThreadInfo thread, {bool remember = true}) async {
+  Future<void> selectThread(
+    ThreadInfo thread, {
+    bool remember = true,
+    bool keepThreadsList = false,
+  }) async {
     final EngineRepository? currentRepository = repository;
     final int requestVersion = ++_chatRequestVersion;
     selectedThread = thread;
+    // Choosing a thread returns to the chat; restoring the remembered thread
+    // of a workspace picked in the list does not.
+    if (!keepThreadsList) threadsListVisible = false;
     pendingDraftTitle = null;
     pendingDraftToolsConfig = null;
     chatSessionVersion++;
@@ -2370,6 +2567,7 @@ final class DashboardController extends ChangeNotifier {
     final Workspace? workspace = threadsWorkspace;
     if (workspace == null) return;
     selectedThread = null;
+    threadsListVisible = false;
     pendingDraftTitle = null;
     pendingDraftToolsConfig = null;
     _setRememberedThread(workspace.uuid, null);

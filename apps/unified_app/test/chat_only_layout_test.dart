@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 import 'package:unified_app/features/account/account_controller.dart';
+import 'package:unified_app/features/chat/presentation/threads_list.dart';
 import 'package:unified_app/features/dashboard/controller/dashboard_controller.dart';
 import 'package:unified_app/features/dashboard/presentation/dashboard_page.dart';
 import 'package:unified_app/features/dashboard/presentation/views_desktop_web.dart';
@@ -57,24 +57,19 @@ void main() {
     expect(find.byType(MobileDashboardView), findsNothing);
     expect(tester.takeException(), isNull);
 
-    // The title bar has a flyout toggle, before the logo, that opens the
-    // threads. (The desktop title bar is built on Windows only.)
-    if (Platform.isWindows) {
-      final Finder toggle = find.byTooltip('Threads');
-      expect(toggle, findsOneWidget);
-      final Finder logo = find.bySemanticsLabel('Subconscious logo');
-      expect(
-        tester.getTopLeft(toggle).dx,
-        lessThan(tester.getTopLeft(logo.first).dx),
-      );
-      await tester.tap(toggle);
-      await tester.pumpAndSettle();
-      expect(find.byType(AppFlyoutHeader), findsOneWidget);
-      await tester.tapAt(const Offset(410, 400));
-      await tester.pumpAndSettle();
-      expect(find.byType(AppFlyoutHeader), findsNothing);
-    }
-
+    // No flyout in the title bar any more: the chat's own header has the
+    // threads button, and the list it opens carries the workspace picker (the
+    // title bar has no room for it) beside a close button.
+    expect(find.byTooltip('Threads'), findsOneWidget);
+    expect(find.byType(AppFlyoutHeader), findsNothing);
+    await tester.tap(find.byTooltip('Threads'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ThreadsList), findsOneWidget);
+    expect(find.byType(AppPickerButton<String>), findsOneWidget);
+    expect(find.byTooltip('Close threads'), findsWidgets);
+    await tester.tap(find.byTooltip('Close threads').last);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ThreadsList), findsNothing);
     // And it can be left again. The desktop title bar has installed its own
     // window handler by now, which talks to the real window, so the call is not
     // awaited: the layout flips before the handler runs.

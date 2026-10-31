@@ -1,0 +1,19 @@
+name: ui_gallery
+description: Windows-only review page that shows every shared UI kit component.
+publish_to: none
+version: 0.1.0
+resolution: workspace
+environment:
+  sdk: '>=3.13.2 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  fluentui_system_icons: 1.1.273
+  flutter_svg: 2.3.0
+  shared_ui_kit:
+    path: ../shared_ui_kit
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  uses-material-design: true

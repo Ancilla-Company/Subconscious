@@ -147,12 +147,6 @@ final class _EditorFindBarState extends State<EditorFindBar> {
       summary =
           '${model.current + 1} of ${model.matches.length}${model.capped ? '+' : ''}';
     }
-    // Fields come from the kit's form theme (fill, border, 3px corners). A
-    // 32dp field has no vertical padding so its text centres and its edges
-    // line up with the 32dp buttons beside it.
-    const InputDecoration decoration = InputDecoration(
-      contentPadding: EdgeInsets.symmetric(horizontal: 10),
-    );
     return Theme(
       data: appFormTheme(context),
       child: CallbackShortcuts(
@@ -166,7 +160,7 @@ final class _EditorFindBarState extends State<EditorFindBar> {
         child: Material(
           elevation: 4,
           color: colors.surfaceContainerHigh,
-          borderRadius: AppRadii.lg,
+          borderRadius: AppRadii.standard,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 460),
             child: Padding(
@@ -189,21 +183,14 @@ final class _EditorFindBarState extends State<EditorFindBar> {
                       ),
                       const SizedBox(width: 4),
                       Expanded(
-                        child: SizedBox(
+                        child: AppTextField(
+                          controller: _query,
+                          focusNode: widget.queryFocus,
+                          hintText: 'Find',
                           height: 32,
-                          child: TextField(
-                            controller: _query,
-                            focusNode: widget.queryFocus,
-                            decoration: decoration.copyWith(
-                              hintText: 'Find',
-                              errorText: null,
-                            ),
-                            style: Theme.of(context).textTheme.bodyMedium,
-                            textAlignVertical: TextAlignVertical.center,
-                            onChanged: (String value) =>
-                                _configure(query: value),
-                            onEditingComplete: () {},
-                          ),
+                          onChanged: (String value) => _configure(query: value),
+                          // Enter steps to the next match; focus stays here.
+                          onEditingComplete: () {},
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -268,24 +255,18 @@ final class _EditorFindBarState extends State<EditorFindBar> {
                       child: Row(
                         children: <Widget>[
                           Expanded(
-                            child: SizedBox(
-                              height: 32,
-                              child: CallbackShortcuts(
-                                bindings: <ShortcutActivator, VoidCallback>{
-                                  const SingleActivator(
-                                    LogicalKeyboardKey.enter,
-                                  ): widget.onReplace,
-                                },
-                                child: TextField(
-                                  controller: _replacement,
-                                  decoration: decoration.copyWith(
-                                    hintText: 'Replace',
-                                  ),
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                  textAlignVertical: TextAlignVertical.center,
-                                  onChanged: widget.model.setReplacement,
-                                  onEditingComplete: () {},
-                                ),
+                            child: CallbackShortcuts(
+                              bindings: <ShortcutActivator, VoidCallback>{
+                                const SingleActivator(
+                                  LogicalKeyboardKey.enter,
+                                ): widget.onReplace,
+                              },
+                              child: AppTextField(
+                                controller: _replacement,
+                                hintText: 'Replace',
+                                height: 32,
+                                onChanged: widget.model.setReplacement,
+                                onEditingComplete: () {},
                               ),
                             ),
                           ),

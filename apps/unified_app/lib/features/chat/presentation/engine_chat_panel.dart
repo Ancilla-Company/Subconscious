@@ -68,8 +68,17 @@ final class EngineChatPanel extends StatefulWidget {
     this.draftToolsConfig,
     this.executors,
     this.greetingName,
+    this.threadsList,
+    this.threadsListVisible = false,
+    this.onToggleThreadsList,
     super.key,
   });
+
+  /// The thread list. While [threadsListVisible] it takes the place of the
+  /// conversation; null hides the header's threads button.
+  final Widget? threadsList;
+  final bool threadsListVisible;
+  final VoidCallback? onToggleThreadsList;
 
   /// Who the empty thread greets by name; null shows a plain prompt.
   final String? greetingName;
@@ -620,7 +629,18 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
   }
 
   void _toggleThreadSettings() {
+    // The thread list and the settings share the space of the conversation.
+    if (!_showThreadSettings && widget.threadsListVisible) {
+      widget.onToggleThreadsList?.call();
+    }
     setState(() => _showThreadSettings = !_showThreadSettings);
+  }
+
+  void _toggleThreadsList() {
+    if (!widget.threadsListVisible && _showThreadSettings) {
+      setState(() => _showThreadSettings = false);
+    }
+    widget.onToggleThreadsList?.call();
   }
 
   Future<void> _saveThreadSettings(_ThreadSettingsDraft draft) async {
@@ -677,6 +697,11 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
             padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
             child: child,
           );
+          final bool showThreads =
+              widget.threadsListVisible && widget.threadsList != null;
+          final bool showSettings = _showThreadSettings && !showThreads;
+          // Either one replaces the conversation and its composer.
+          final bool overlay = showThreads || showSettings;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
@@ -689,20 +714,25 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                   canCreateThread:
                       widget.isComposerEnabled && widget.onCreateThread != null,
                   canEditThread:
-                      (widget.isComposerEnabled || _showThreadSettings) &&
+                      (widget.isComposerEnabled || showSettings) &&
                       !_isSending &&
                       widget.workspace != null &&
                       (widget.thread == null
                           ? widget.onUpdateThreadDraft != null
                           : widget.onUpdateThread != null),
-                  settingsVisible: _showThreadSettings,
+                  settingsVisible: showSettings,
                   onCreateThread: _createThread,
                   onEditThread: _toggleThreadSettings,
+                  threadsVisible: showThreads,
+                  onToggleThreads: widget.threadsList == null
+                      ? null
+                      : _toggleThreadsList,
                 ),
               ),
               Expanded(
-                child:
-                    _showThreadSettings &&
+                child: showThreads
+                    ? gutter(widget.threadsList!)
+                    : showSettings &&
                         widget.workspace != null &&
                         widget.provider.repository != null
                     ? gutter(
@@ -769,7 +799,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                         ),
                       ),
               ),
-              if (!_showThreadSettings)
+              if (!overlay)
                 if (widget.oauth case final OAuthAuthorization authorization)
                   gutter(
                     _OAuthSignInCard(
@@ -780,7 +810,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                       error: widget.oauthError,
                     ),
                   ),
-              if (!_showThreadSettings)
+              if (!overlay)
                 if (widget.toolApproval case final ToolApprovalRequest request)
                   gutter(
                     _ToolApprovalCard(
@@ -788,7 +818,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                       onDecision: widget.onToolApproval,
                     ),
                   ),
-              if (!_showThreadSettings &&
+              if (!overlay &&
                   (widget.errorMessage != null ||
                       (!widget.isComposerEnabled &&
                           widget.onOpenDevices != null)))
@@ -802,11 +832,11 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                         : widget.onOpenDevices,
                   ),
                 ),
-              if (!_showThreadSettings && widget.executors != null)
+              if (!overlay && widget.executors != null)
                 gutter(TaskStatusBar(provider: widget.provider)),
-              if (!_showThreadSettings && _voice.realtime != RealtimeState.off)
+              if (!overlay && _voice.realtime != RealtimeState.off)
                 gutter(_VoiceBanner(voice: _voice, onEnd: _toggleRealtime)),
-              if (!_showThreadSettings)
+              if (!overlay)
                 gutter(
                   _Composer(
                     borderless: widget.borderlessComposer,
@@ -882,6 +912,8 @@ final class _ChatHeader extends StatelessWidget {
     required this.settingsVisible,
     required this.onCreateThread,
     required this.onEditThread,
+    this.threadsVisible = false,
+    this.onToggleThreads,
     this.minTouchTarget,
   });
 
@@ -891,40 +923,55 @@ final class _ChatHeader extends StatelessWidget {
   final bool settingsVisible;
   final VoidCallback onCreateThread;
   final VoidCallback onEditThread;
+
+  /// Whether the thread list is open, and the button that opens it (null hides
+  /// the button).
+  final bool threadsVisible;
+  final VoidCallback? onToggleThreads;
   final double? minTouchTarget;
 
   @override
   Widget build(BuildContext context) => SizedBox(
     height: 48,
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 8, 0),
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
       child: Row(
         children: <Widget>[
+          // The thread's name is a long button that opens its settings.
           Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w600),
+            child: Tooltip(
+              message: settingsVisible
+                  ? 'Close thread settings'
+                  : 'Thread settings',
+              child: AppListRow(
+                title: title,
+                titleBold: true,
+                dense: true,
+                minHeight: minTouchTarget,
+                selected: settingsVisible,
+                semanticLabel: 'Thread settings: $title',
+                trailing: const Icon(FluentIcons.settings_16_regular, size: 16),
+                onTap: canEditThread ? onEditThread : null,
+              ),
             ),
           ),
+          const SizedBox(width: 4),
           AppIconButton(
             tooltip: 'New thread',
             icon: FluentIcons.add_20_regular,
             minTouchTarget: minTouchTarget,
             onPressed: canCreateThread ? onCreateThread : null,
           ),
-          const SizedBox(width: 4),
-          AppIconButton(
-            tooltip: settingsVisible
-                ? 'Close thread settings'
-                : 'Thread settings',
-            icon: FluentIcons.more_horizontal_20_regular,
-            selected: settingsVisible,
-            minTouchTarget: minTouchTarget,
-            onPressed: canEditThread ? onEditThread : null,
-          ),
+          if (onToggleThreads != null) ...<Widget>[
+            const SizedBox(width: 4),
+            AppIconButton(
+              tooltip: threadsVisible ? 'Close threads' : 'Threads',
+              icon: FluentIcons.chat_multiple_20_regular,
+              selected: threadsVisible,
+              minTouchTarget: minTouchTarget,
+              onPressed: onToggleThreads,
+            ),
+          ],
         ],
       ),
     ),
@@ -1191,7 +1238,7 @@ final class _ToolApprovalCardState extends State<_ToolApprovalCard> {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: colors.surface.withValues(alpha: 0.55),
-                borderRadius: AppRadii.xs,
+                borderRadius: AppRadii.standard,
               ),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(8),
@@ -1474,7 +1521,7 @@ final class _Composer extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.surfaceContainerLowest,
         border: borderless ? null : Border.all(color: colors.outlineVariant),
-        borderRadius: AppRadii.md,
+        borderRadius: AppRadii.standard,
         boxShadow: const <BoxShadow>[
           BoxShadow(
             color: Color(0x12000000),
@@ -1492,7 +1539,7 @@ final class _Composer extends StatelessWidget {
               child: Material(
                 color: colors.surfaceContainerLow,
                 borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(6),
+                  top: Radius.circular(AppRadii.value),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: ListView.builder(
@@ -1630,61 +1677,53 @@ final class _Composer extends StatelessWidget {
                 ],
                 AppSpacing.controlGap,
                 Expanded(
-                  child: SizedBox(
+                  child: AppCompactDropdown<String>(
                     height: minTouchTarget == null || minTouchTarget! < 32
                         ? 32
-                        : minTouchTarget,
-                    child: Material(
-                      color: Colors.transparent,
-                      borderRadius: AppRadii.sm,
-                      clipBehavior: Clip.antiAlias,
-                      child: AppCompactDropdown<String>(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        value: effectiveModelId,
-                        hint: Text(
-                          models.isEmpty
-                              ? 'No models available'
-                              : 'Select a model',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        items: <DropdownMenuItem<String>>[
-                          if (effectiveModelId != null && !hasSelectedModel)
-                            DropdownMenuItem<String>(
-                              value: effectiveModelId,
-                              child: _modelDropdownLabel(
-                                context,
-                                effectiveModelId,
-                                isDefault: effectiveModelId == defaultModelId,
-                              ),
-                            ),
-                          if (defaultModelId != null &&
-                              defaultModelId != effectiveModelId &&
-                              !hasWorkspaceDefaultModel)
-                            DropdownMenuItem<String>(
-                              value: defaultModelId,
-                              child: _modelDropdownLabel(
-                                context,
-                                defaultModelId,
-                                isDefault: true,
-                              ),
-                            ),
-                          for (final ModelInfo model in models)
-                            DropdownMenuItem<String>(
-                              value: model.id,
-                              child: _modelDropdownLabel(
-                                context,
-                                model.name,
-                                isDefault: model.id == defaultModelId,
-                              ),
-                            ),
-                        ],
-                        onChanged: modelInteractive
-                            ? (String? value) {
-                                if (value != null) onModelSelected(value);
-                              }
-                            : null,
-                      ),
+                        : minTouchTarget!,
+                    value: effectiveModelId,
+                    hint: Text(
+                      models.isEmpty
+                          ? 'No models available'
+                          : 'Select a model',
+                      overflow: TextOverflow.ellipsis,
                     ),
+                    items: <DropdownMenuItem<String>>[
+                      if (effectiveModelId != null && !hasSelectedModel)
+                        DropdownMenuItem<String>(
+                          value: effectiveModelId,
+                          child: _modelDropdownLabel(
+                            context,
+                            effectiveModelId,
+                            isDefault: effectiveModelId == defaultModelId,
+                          ),
+                        ),
+                      if (defaultModelId != null &&
+                          defaultModelId != effectiveModelId &&
+                          !hasWorkspaceDefaultModel)
+                        DropdownMenuItem<String>(
+                          value: defaultModelId,
+                          child: _modelDropdownLabel(
+                            context,
+                            defaultModelId,
+                            isDefault: true,
+                          ),
+                        ),
+                      for (final ModelInfo model in models)
+                        DropdownMenuItem<String>(
+                          value: model.id,
+                          child: _modelDropdownLabel(
+                            context,
+                            model.name,
+                            isDefault: model.id == defaultModelId,
+                          ),
+                        ),
+                    ],
+                    onChanged: modelInteractive
+                        ? (String? value) {
+                            if (value != null) onModelSelected(value);
+                          }
+                        : null,
                   ),
                 ),
                 AppSpacing.controlGap,

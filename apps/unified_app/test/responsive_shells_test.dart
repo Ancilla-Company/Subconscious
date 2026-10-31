@@ -94,7 +94,9 @@ void main() {
               DesktopWebDashboardView(controller: d, accountController: a),
         );
         expect(tester.takeException(), isNull);
-        expect(find.byType(SidebarButton), findsNWidgets(5));
+        for (final String tooltip in <String>['Workspaces', 'Agents', 'Files', 'Settings']) {
+          expect(find.byTooltip(tooltip), findsOneWidget);
+        }
         expect(find.byType(AppVerticalRule), findsOneWidget);
       });
 

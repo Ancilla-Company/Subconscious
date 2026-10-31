@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../tokens/app_radii.dart';
 
 /// Tone of an [AppBadge].
 enum AppBadgeTone { neutral, accent, error }
@@ -57,7 +58,7 @@ final class AppBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: background,
-        borderRadius: const BorderRadius.all(Radius.circular(3)),
+        borderRadius: AppRadii.standard,
       ),
       child: Padding(
         padding: EdgeInsets.only(
@@ -84,7 +85,7 @@ final class AppBadge extends StatelessWidget {
                   onTap: onDeleted,
                   child: InkWell(
                     onTap: onDeleted,
-                    borderRadius: const BorderRadius.all(Radius.circular(3)),
+                    borderRadius: AppRadii.standard,
                     child: SizedBox.square(
                       dimension: 24,
                       child: Icon(Icons.close, size: 14, color: foreground),

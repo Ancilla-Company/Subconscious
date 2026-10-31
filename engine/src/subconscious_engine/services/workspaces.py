@@ -2,11 +2,11 @@
 
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import delete as sql_delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from subconscious_engine.api.schemas import CreateWorkspaceRequest, WorkspaceDto
-from subconscious_engine.storage.models import ConversationThread, Network, Workspace, utc_now
+from subconscious_engine.storage.models import AgentRecord, ConversationThread, Network, Workspace, utc_now
 
 
 class WorkspaceService:
@@ -50,6 +50,8 @@ class WorkspaceService:
             update(ConversationThread)
             .where(ConversationThread.workspace_id == row.id, ConversationThread.deleted_at.is_(None))
             .values(deleted_at=now))
+        # Agents are local (not synced), so those of this workspace are simply removed.
+        await self.session.execute(sql_delete(AgentRecord).where(AgentRecord.workspace_id == row.id))
         await self.session.commit()
 
     @staticmethod

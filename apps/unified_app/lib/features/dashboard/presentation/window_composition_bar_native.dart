@@ -34,17 +34,20 @@ Future<void> initializeDesktopWindow() async {
   );
 }
 
+/// Whether the title bar carries the workspace picker. On Windows it does,
+/// except in the small chat-only window, which has no room for it; elsewhere
+/// there is no title bar. The threads panel shows its own picker when this is
+/// false.
+bool titleBarShowsWorkspacePicker(DashboardController controller) =>
+    Platform.isWindows && !controller.chatOnly;
+
 final class EngineCompositionBar extends StatefulWidget {
   const EngineCompositionBar({
     required this.controller,
-    this.onToggleFlyout,
     super.key,
   });
 
   final DashboardController controller;
-
-  /// Adds a flyout button before the logo (the chat-only window).
-  final VoidCallback? onToggleFlyout;
 
   @override
   State<EngineCompositionBar> createState() => _EngineCompositionBarState();
@@ -454,12 +457,6 @@ final class _EngineCompositionBarState extends State<EngineCompositionBar>
             height: kWindowCaptionHeight,
             child: Row(
               children: <Widget>[
-                // Outside the drag area: a press there starts a window drag.
-                if (widget.onToggleFlyout case final VoidCallback toggle)
-                  CaptionFlyoutButton(
-                    brightness: brightness,
-                    onPressed: toggle,
-                  ),
                 Expanded(
                   child: DragToMoveArea(
                     child: CaptionTitleContent(

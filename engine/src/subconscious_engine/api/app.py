@@ -29,12 +29,14 @@ from subconscious_engine.graph_engine import GraphEngine
 from subconscious_engine.subconscious_loop import SubconsciousWorker
 from subconscious_engine.services.configured_tools import ConfiguredToolRuntime
 from subconscious_engine.services.oauth import OAuthBroker
+from subconscious_engine.services.agent_tools import AgentTools
 from subconscious_engine.services.tool_management import ToolManagement
 from subconscious_engine.services.rag_service import WorkspaceRagService
 from subconscious_engine.storage import Database
 from subconscious_engine.tools import ToolRegistry
 
 from .account_routes import account_routes
+from .agent_routes import agent_routes
 from .event_routes import event_routes
 from .file_routes import file_routes
 from subconscious_engine.config import RemoteToolsConfig
@@ -175,6 +177,7 @@ def create_app(
         *oauth_routes(),
         *pair_routes(),
         *skill_routes(),
+        *agent_routes(),
         *rag_routes(),
         *event_routes(),
         WebSocketRoute("/api/v1/events", websocket_endpoint),
@@ -183,6 +186,12 @@ def create_app(
     client_registry = ClientRegistry()
     oauth_broker = OAuthBroker(event_bus=bus, client_registry=client_registry)
     configured_tools = ConfiguredToolRuntime(database, store, oauth_broker=oauth_broker)
+
+    async def publish_agent_event(event_type: str, data: dict[str, object]) -> None:
+        """Agents change from the REST API and from chat tools; every client hears about both."""
+        await bus.publish(event_type, data)
+        await client_registry.broadcast(event_type, data)
+
     app = Starlette(
         routes=routes,
         middleware=[
@@ -208,6 +217,8 @@ def create_app(
             "oauth_broker": oauth_broker,
             "configured_tools": configured_tools,
             "tool_management": ToolManagement(database, store, configured_tools, oauth_broker),
+            "publish_agent_event": publish_agent_event,
+            "agent_tools": AgentTools(database, publish_agent_event),
             "rag_service": rag,
             "agent_manager": agents,
             "graph_engine": graph_engine,

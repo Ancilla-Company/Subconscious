@@ -329,7 +329,7 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
       return Padding(
         padding: const EdgeInsets.all(12),
         child: ClipRRect(
-          borderRadius: AppRadii.md,
+          borderRadius: AppRadii.standard,
           child: ColoredBox(
             color: colors.surfaceContainerLowest,
             child: WorkspaceImagePreview(bytes: tab.bytes, isSvg: tab.isSvg),

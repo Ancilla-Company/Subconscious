@@ -117,6 +117,36 @@ class UpsertSkillRequest(WireModel):
     enabled: bool = True
 
 
+class AgentDto(WireModel):
+    uuid: str
+    name: str
+    description: str | None = None
+    instructions: str | None = None
+    default_model_id: str | None = None
+    # JSON objects in the thread/workspace formats; null inherits the workspace's.
+    tools_config: str | None = None
+    approval_config: str | None = None
+    # Null: account-wide.
+    workspace_uuid: str | None = None
+    enabled: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+
+class UpsertAgentRequest(WireModel):
+    """Create or change an agent. On change only the fields present in the body are applied
+    (send ``null`` to clear one); ``name`` is required to create."""
+
+    name: str | None = None
+    description: str | None = None
+    instructions: str | None = None
+    default_model_id: str | None = None
+    tools_config: str | None = None
+    approval_config: str | None = None
+    workspace_uuid: str | None = None
+    enabled: bool | None = None
+
+
 class UpsertToolRegistryRequest(WireModel):
     name: str | None = None
     alias: str | None = None

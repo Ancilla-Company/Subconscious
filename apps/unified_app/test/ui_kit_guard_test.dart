@@ -13,8 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 const Map<String, String> _bespokeInputs = <String, String>{
   'features/chat/presentation/engine_chat_panel.dart':
       'the chat composer is a bespoke chat control, not a form field',
-  'features/editor/presentation/find_bar.dart':
-      'editor find/replace bar, an editor control',
   'features/editor/presentation/source_editor.dart':
       'the document editor surface',
 };
@@ -219,13 +217,19 @@ final List<_Ban> _bans = <_Ban>[
   _Ban(
     'IconButton',
     RegExp(r'(?<![A-Za-z])IconButton\s*\(|\bIconButton\.styleFrom\b'),
-    'Use AppIconButton (or SidebarButton) from shared_ui_kit.',
+    'Use AppIconButton from shared_ui_kit.',
+    const <String, String>{},
+  ),
+  _Ban(
+    'round Switch',
+    RegExp(r'(?<![A-Za-z])(Switch|CupertinoSwitch)(\.adaptive)?\s*\('),
+    'Use AppSwitch or AppSwitchTile (the rectangular kit switch).',
     const <String, String>{},
   ),
   _Ban(
     'BorderRadius.circular',
     RegExp(r'\bBorderRadius\.circular\s*\('),
-    'Use AppRadii.xs / sm / md / lg (or AppRadii.surfaceFor) from shared_ui_kit.',
+    'Use AppRadii.standard (the one 6 px radius) from shared_ui_kit.',
     const <String, String>{},
   ),
 ];

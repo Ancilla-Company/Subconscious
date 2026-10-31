@@ -24,6 +24,9 @@ _EXPLICIT: dict[str, str] = {
     "update_configured_tool": UPDATE, "update_skill": UPDATE,
     "remove_configured_tool": DELETE, "remove_skill": DELETE,
     "list_configured_tools": READ, "get_configured_tool": READ, "list_skills": READ, "get_skill_info": READ,
+    # Agent management (see services.agent_tools; approval is forced for the mutating ones).
+    "create_agent": CREATE, "update_agent": UPDATE, "delete_agent": DELETE,
+    "list_agents": READ, "get_agent": READ,
     # Persistent ACP agent sessions (services.acp_session_tools). Ending one never asks.
     "start_agent_session": UPDATE, "send_agent_session": UPDATE, "end_agent_session": UPDATE,
     "list_agent_sessions": READ,
@@ -36,7 +39,7 @@ _EXPLICIT: dict[str, str] = {
 PLATFORM_READ_TOOLS: frozenset[str] = frozenset({
     # tool and skill management (listing only; the mutating ones stay approval-gated)
     "list_configured_tools", "get_configured_tool", "list_skills", "get_skill_info", "read_skill",
-    "list_agent_sessions",
+    "list_agent_sessions", "list_agents", "get_agent",
     # workspace data
     "list_todos", "recall", "list_memories", "list_notes", "get_note", "list_contacts", "find_contact",
     "search_knowledge",

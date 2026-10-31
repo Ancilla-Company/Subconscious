@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../../account/account_controller.dart';
+import '../../agents/presentation/agent_panel.dart';
 import '../../editor/presentation/workspace_file_editor.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../../settings/presentation/settings_main_panel.dart';
@@ -41,6 +42,9 @@ final class DashboardMainPanel extends StatelessWidget {
                   controller: controller,
                   workspace: workspace,
                 ),
+        ),
+        MainPanelDestination.agent => AppFormTheme(
+          child: AgentMainPanel(controller: controller),
         ),
         MainPanelDestination.files => WorkspaceFileEditor(
           controller: controller,
@@ -415,7 +419,7 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
           builder: (BuildContext context) => AppDialog(
             title: 'Delete workspace?',
             content: Text(
-              'Delete “${widget.workspace.name}”? This also deletes its threads and cannot be undone.',
+              'Delete “${widget.workspace.name}”? This also deletes its threads and agents and cannot be undone.',
             ),
             actions: <Widget>[
               TextButton(

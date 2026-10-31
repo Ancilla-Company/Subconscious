@@ -90,7 +90,7 @@ _UI_TOOL_NAMES = {
 _UI_THEME_COLORS = {"device", "neutral", "blue", "purple", "green", "orange", "red"}
 _UI_LIGHTING_MODES = {"device", "light", "dark"}
 _UI_DESTINATIONS = {
-    "workspaces", "threads", "files", "settings", "account",
+    "workspaces", "agents", "threads", "files", "settings", "account",
     "show_chat", "hide_chat", "show_main", "hide_main",
     "show_context", "hide_context",
 }
@@ -1265,6 +1265,12 @@ class WebSocketSession:
                     if management is not None:
                         # The assistant can configure its own tools/skills; approval is forced on.
                         tools.extend(management.tools(approval, reserved={tool.name for tool in tools}))
+                    agent_tools = getattr(self.app.state, "agent_tools", None)
+                    if agent_tools is not None:
+                        # The assistant can create and manage agents; mutating them forces approval.
+                        tools.extend(agent_tools.tools(
+                            approval, workspace_uuid=workspace.uuid,
+                            reserved={tool.name for tool in tools}))
                     try:
                         selected_skills = select_skills(
                             await SkillService(session).snapshots(),

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import '../tokens/app_radii.dart';
 
 /// A selectable navigation row: optional [leading], a [title] with an
 /// optional [subtitle], and an optional [trailing]. It has the same visuals as
-/// `FlyoutNavButton` (6px corners, `secondaryContainer` while [selected]).
+/// `FlyoutNavButton` (3px corners, `secondaryContainer` while [selected]).
 ///
 /// [minHeight] raises the tappable height (mobile passes 48); null uses 32 for
-/// [dense] rows (the height of a desktop `SidebarButton`) and 40 otherwise.
+/// [dense] rows (the height of a desktop `AppIconButton`) and 40 otherwise.
 final class AppListRow extends StatelessWidget {
   const AppListRow({
     required this.title,
@@ -58,7 +59,7 @@ final class AppListRow extends StatelessWidget {
     final Color foreground = selected
         ? colors.onSecondaryContainer
         : colors.onSurface;
-    final BorderRadius radius = BorderRadius.circular(6);
+    final BorderRadius radius = AppRadii.standard;
     final double vertical = flush ? 0 : (dense ? 4 : 8);
     final Widget content = ConstrainedBox(
       constraints: BoxConstraints(minHeight: minHeight ?? (dense ? 32 : 40)),
@@ -202,7 +203,7 @@ final class AppTreeRow extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme colors = theme.colorScheme;
     final bool emphasized = selected || highlighted;
-    const BorderRadius radius = BorderRadius.all(Radius.circular(4));
+    const BorderRadius radius = AppRadii.standard;
     return Semantics(
       button: onTap != null,
       selected: selected,

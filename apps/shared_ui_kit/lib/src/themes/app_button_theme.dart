@@ -17,7 +17,7 @@ import '../tokens/app_radii.dart';
 abstract final class AppButtonStyles {
   /// Flat, 3px corners, on every button.
   static const RoundedRectangleBorder shape = RoundedRectangleBorder(
-    borderRadius: AppRadii.xs,
+    borderRadius: AppRadii.standard,
   );
 
   static FilledButtonThemeData filled() =>

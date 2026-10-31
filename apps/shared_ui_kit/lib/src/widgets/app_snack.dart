@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../tokens/app_radii.dart';
 
 /// Shows a snack bar in the kit style: floating, flat, 3px corners, with
 /// `secondaryContainer` colours (or `errorContainer` when [isError]). Replaces
@@ -43,7 +44,7 @@ void showAppSnack(
         closeIconColor: foreground,
         action: action,
         shape: RoundedRectangleBorder(
-          borderRadius: const BorderRadius.all(Radius.circular(3)),
+          borderRadius: AppRadii.standard,
           side: BorderSide(color: colors.outlineVariant),
         ),
       ),

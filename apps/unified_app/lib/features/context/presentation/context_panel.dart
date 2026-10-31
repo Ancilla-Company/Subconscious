@@ -69,9 +69,9 @@ final class _ContextPanelState extends State<ContextPanel> {
       _observedError = null;
     }
     final (Object?, String) errorInfo = switch (section) {
-      DashboardSection.threads => (
-        widget.controller.threadsError,
-        "Couldn't load threads",
+      DashboardSection.agents => (
+        widget.controller.agentsError,
+        "Couldn't load agents",
       ),
       DashboardSection.files => (
         widget.controller.filesError,
@@ -125,9 +125,12 @@ final class _ContextPanelState extends State<ContextPanel> {
         animation: widget.controller,
         builder: (BuildContext context, Widget? child) =>
             switch (widget.screen) {
-              DashboardSection.threads => _ThreadsSection(
+              DashboardSection.agents => _AgentsSection(
                 controller: widget.controller,
                 onSelection: widget.onSelection,
+              ),
+              DashboardSection.chat => const _PanelMessage(
+                'Open the thread list from the chat header.',
               ),
               DashboardSection.files => _FilesSection(
                 controller: widget.controller,
@@ -236,116 +239,173 @@ final class _PanelMessage extends StatelessWidget {
   );
 }
 
-final class _ThreadsSection extends StatelessWidget {
-  const _ThreadsSection({required this.controller, this.onSelection});
+/// The agents of the chat's workspace and the account, with a search box in
+/// the header.
+final class _AgentsSection extends StatefulWidget {
+  const _AgentsSection({required this.controller, this.onSelection});
 
   final DashboardController controller;
   final VoidCallback? onSelection;
 
   @override
+  State<_AgentsSection> createState() => _AgentsSectionState();
+}
+
+final class _AgentsSectionState extends State<_AgentsSection> {
+  final TextEditingController _search = TextEditingController();
+
+  DashboardController get _controller => widget.controller;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => Column(
     children: <Widget>[
       _SectionHeader(
-        title: 'Threads',
+        title: 'Agents',
         actions: <Widget>[
-          if (kIsWeb ||
-              defaultTargetPlatform != TargetPlatform.windows) ...<Widget>[
-            const Icon(FluentIcons.folder_20_regular, size: 16),
-            const SizedBox(width: 6),
-            SizedBox(
-              width: 142,
-              child: AppCompactDropdown<String>(
-                value: controller.threadsWorkspace?.uuid ?? '',
-                items: <DropdownMenuItem<String>>[
-                  const DropdownMenuItem<String>(
-                    value: '',
-                    child: Text(
-                      'All workspaces',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  for (final Workspace workspace in controller.workspaces)
-                    DropdownMenuItem<String>(
-                      value: workspace.uuid,
-                      child: Text(
-                        workspace.name,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                onChanged: (String? uuid) {
-                  Workspace? workspace;
-                  for (final Workspace candidate in controller.workspaces) {
-                    if (candidate.uuid == uuid) {
-                      workspace = candidate;
-                      break;
-                    }
-                  }
-                  // The sidebar stays open: switching the workspace only
-                  // changes which threads the list shows.
-                  controller.selectThreadWorkspace(workspace);
-                },
-              ),
-            ),
-          ],
+          _HeaderButton(
+            tooltip: 'New agent',
+            icon: FluentIcons.add_20_regular,
+            onPressed: _controller.isConnected
+                ? _controller.beginAgentCreation
+                : null,
+            onSelection: widget.onSelection,
+          ),
         ],
       ),
-      Expanded(child: _threadBody(context)),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        // The context panel sits outside the form theme; the field takes the
+        // bordered style of the settings fields from it.
+        child: AppFormTheme(
+          child: AppSearchField(
+            controller: _search,
+            hintText: 'Search agents',
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+      ),
+      Expanded(child: _body(context)),
     ],
   );
 
-  Widget _threadBody(BuildContext context) {
-    if (!controller.isConnected && controller.threads.isEmpty) {
+  List<AgentInfo> _matches() {
+    final String query = _search.text.trim().toLowerCase();
+    final List<AgentInfo> agents = _controller.visibleAgents;
+    if (query.isEmpty) return agents;
+    return <AgentInfo>[
+      for (final AgentInfo agent in agents)
+        if (agent.name.toLowerCase().contains(query) ||
+            (agent.description?.toLowerCase().contains(query) ?? false))
+          agent,
+    ];
+  }
+
+  Widget _body(BuildContext context) {
+    if (!_controller.isConnected && _controller.agents.isEmpty) {
       return const _PanelMessage(
-        'Threads are available when the engine is connected.',
+        'Agents are available when the engine is connected.',
       );
     }
-    if (controller.isLoadingThreads) {
+    if (_controller.isLoadingAgents && _controller.agents.isEmpty) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
-    if (controller.threadsError != null) {
+    if (_controller.agentsError != null && _controller.agents.isEmpty) {
       return _PanelMessage(
-        "Couldn't load threads.",
+        "Couldn't load agents.",
         action: OutlinedButton(
           onPressed: () {
-            controller.selectThreadWorkspace(
-              controller.threadsWorkspace,
-              remember: false,
-            );
-            onSelection?.call();
+            _controller.loadAgents();
+            widget.onSelection?.call();
           },
           child: const Text('Retry'),
         ),
       );
     }
-    if (controller.threads.isEmpty) {
-      return const _PanelMessage('No threads yet.');
+    final List<AgentInfo> matches = _matches();
+    if (matches.isEmpty) {
+      return _PanelMessage(
+        _search.text.trim().isEmpty
+            ? 'No agents yet.'
+            : 'No agents match “${_search.text.trim()}”.',
+      );
     }
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      itemCount: controller.threads.length,
+      itemCount: matches.length,
       separatorBuilder: (BuildContext context, int index) =>
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
       itemBuilder: (BuildContext context, int index) {
-        final ThreadInfo thread = controller.threads[index];
-        final bool selected = controller.selectedThread?.uuid == thread.uuid;
-        return _NavigationRow(
-          selected: selected,
-          label: thread.title?.trim().isNotEmpty ?? false
-              ? thread.title!
-              : 'Untitled thread',
-          // In the all-workspaces list each thread says where it belongs.
-          subtitle: controller.threadsWorkspace == null
-              ? controller.workspaceName(thread.workspaceUuid)
-              : null,
-          onTap: () => controller.selectThread(thread),
-          onSelection: onSelection,
+        final AgentInfo agent = matches[index];
+        return _AgentRow(
+          agent: agent,
+          selected:
+              !_controller.isCreatingAgent &&
+              _controller.selectedAgent?.uuid == agent.uuid,
+          onTap: () => _controller.selectAgent(agent),
+          onSelection: widget.onSelection,
         );
       },
     );
   }
 }
 
+/// One agent: bot icon, name and description, in the design of the workspace
+/// buttons. Account-wide agents carry a globe.
+final class _AgentRow extends StatelessWidget {
+  const _AgentRow({
+    required this.agent,
+    required this.selected,
+    required this.onTap,
+    this.onSelection,
+  });
+
+  final AgentInfo agent;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback? onSelection;
+
+  @override
+  Widget build(BuildContext context) {
+    final double? touch = _TouchTarget.of(context);
+    final String? description = agent.description?.trim();
+    return Opacity(
+      opacity: agent.enabled ? 1 : 0.55,
+      child: AppListRow(
+        selected: selected,
+        leading: const Icon(FluentIcons.bot_20_regular),
+        title: agent.name,
+        titleBold: true,
+        subtitle: description == null || description.isEmpty
+            ? null
+            : description,
+        trailing: agent.isAccountWide
+            ? Tooltip(
+                message: 'Available in every workspace',
+                child: Icon(
+                  FluentIcons.globe_16_regular,
+                  size: 16,
+                  color: selected
+                      ? Theme.of(context).colorScheme.onSecondaryContainer
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              )
+            : null,
+        dense: touch == null,
+        minHeight: touch,
+        onTap: () {
+          onTap();
+          onSelection?.call();
+        },
+      ),
+    );
+  }
+}
 final class _NavigationRow extends StatelessWidget {
   const _NavigationRow({
     required this.selected,
@@ -503,7 +563,7 @@ final class _FilesSection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
           child: Text(
             controller.activeWorkspace == null
-                ? 'Select a workspace in Threads to browse its added folders.'
+                ? 'Select a workspace in the chat\'s thread list to browse its added folders.'
                 : roots.isEmpty
                 ? 'This workspace has no added folders.'
                 : '${roots.length} added folder${roots.length == 1 ? '' : 's'}',
@@ -860,7 +920,7 @@ final class _FileTreeRow extends StatelessWidget {
     if (source != null) {
       final Widget feedback = Material(
         elevation: 6,
-        borderRadius: AppRadii.sm,
+        borderRadius: AppRadii.standard,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 180),
           child: Padding(

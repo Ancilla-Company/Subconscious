@@ -2,8 +2,7 @@ import 'dart:async';
 
 import 'package:core_business_logic/core_business_logic.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_ui_kit/shared_ui_kit.dart';
@@ -11,6 +10,7 @@ import 'package:shared_ui_kit/shared_ui_kit.dart';
 import '../../account/account_controller.dart';
 import '../../chat/engine_llm_provider.dart';
 import '../../chat/presentation/engine_chat_panel.dart';
+import '../../chat/presentation/threads_list.dart';
 import '../../context/presentation/context_panel.dart';
 import '../../settings/controller/settings_controller.dart';
 import '../controller/dashboard_controller.dart';
@@ -41,8 +41,6 @@ final class _DesktopWebDashboardViewState
   static const double _minimumMainPanelWidth = 300;
   static const double _sidebarAndDividerWidth = 41;
   static const double _resizeDividerWidth = AppPanelDivider.width;
-
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   void _selectPanel(DashboardSection section) {
     widget.controller.updateLayoutState(contextPanelVisible: true);
@@ -143,7 +141,7 @@ final class _DesktopWebDashboardViewState
         .clamp(_minimumChatPanelWidth, maximumChatPanelWidth)
         .toDouble();
     final Widget sidebar = _Sidebar(
-      selectedPanel: widget.controller.selectedSection,
+      selectedPanel: widget.controller.contextSection,
       accountShortcutSelected: widget.controller.accountShortcutSelected,
       accountController: widget.accountController,
       onPanelSelected: _selectPanel,
@@ -194,25 +192,9 @@ final class _DesktopWebDashboardViewState
         DashboardSidebarPosition.right;
 
     return Scaffold(
-      key: _scaffoldKey,
-      // Chat-only has no sidebar, so its threads live in a flyout opened from
-      // the title bar.
-      drawer: chatOnly
-          ? Drawer(
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.zero,
-              ),
-              child: _ChatOnlyFlyout(controller: widget.controller),
-            )
-          : null,
       body: Column(
         children: <Widget>[
-          EngineCompositionBar(
-            controller: widget.controller,
-            onToggleFlyout: chatOnly
-                ? () => _scaffoldKey.currentState?.openDrawer()
-                : null,
-          ),
+          EngineCompositionBar(controller: widget.controller),
           Expanded(
             child: DecoratedBox(
               position: DecorationPosition.foreground,
@@ -348,6 +330,20 @@ final class _DesktopWebDashboardViewState
                     widget.controller.pendingDraftTitle,
                 draftToolsConfig: widget.controller.pendingDraftToolsConfig,
                 executors: widget.controller.executors,
+                threadsList: ThreadsList(
+                  controller: widget.controller,
+                  minTouchTarget: AppDensity.minTouchTarget(context),
+                  // The title bar has the picker in the normal window; the
+                  // small chat-only window has none, so the panel carries it.
+                  showWorkspacePicker: !titleBarShowsWorkspacePicker(
+                    widget.controller,
+                  ),
+                ),
+                threadsListVisible: widget.controller.threadsListVisible,
+                onToggleThreadsList: () => widget.controller
+                    .setThreadsListVisible(
+                      !widget.controller.threadsListVisible,
+                    ),
               );
             }
           },
@@ -358,7 +354,7 @@ final class _DesktopWebDashboardViewState
         accountController: widget.accountController,
       ),
       DashboardPanel.context => ContextPanel(
-        screen: widget.controller.selectedSection,
+        screen: widget.controller.contextSection,
         controller: widget.controller,
         minTouchTarget: AppDensity.minTouchTarget(context),
       ),
@@ -481,6 +477,23 @@ final class _Sidebar extends StatelessWidget {
 
   static const EdgeInsets _buttonPadding = EdgeInsets.fromLTRB(4, 4, 4, 0);
 
+  Widget _button({
+    required IconData icon,
+    required IconData selectedIcon,
+    required String tooltip,
+    required bool selected,
+    required VoidCallback onPressed,
+  }) => Padding(
+    padding: _buttonPadding,
+    child: AppIconButton(
+      icon: icon,
+      selectedIcon: selectedIcon,
+      tooltip: tooltip,
+      selected: selected,
+      onPressed: onPressed,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: Theme.of(context).colorScheme.surface,
@@ -488,37 +501,33 @@ final class _Sidebar extends StatelessWidget {
       width: 40,
       child: Column(
         children: <Widget>[
-          SidebarButton(
+          _button(
             icon: FluentIcons.apps_24_regular,
             selectedIcon: FluentIcons.apps_24_filled,
             tooltip: 'Workspaces',
-            outerPadding: _buttonPadding,
             selected: selectedPanel == DashboardSection.workspaces,
             onPressed: () => onPanelSelected(DashboardSection.workspaces),
           ),
-          SidebarButton(
-            icon: FluentIcons.chat_24_regular,
-            selectedIcon: FluentIcons.chat_24_filled,
-            tooltip: 'Threads',
-            outerPadding: _buttonPadding,
-            selected: selectedPanel == DashboardSection.threads,
-            onPressed: () => onPanelSelected(DashboardSection.threads),
+          _button(
+            icon: FluentIcons.bot_24_regular,
+            selectedIcon: FluentIcons.bot_24_filled,
+            tooltip: 'Agents',
+            selected: selectedPanel == DashboardSection.agents,
+            onPressed: () => onPanelSelected(DashboardSection.agents),
           ),
-          SidebarButton(
+          _button(
             icon: FluentIcons.document_copy_24_regular,
             selectedIcon: FluentIcons.document_copy_24_filled,
             tooltip: 'Files',
-            outerPadding: _buttonPadding,
             selected: selectedPanel == DashboardSection.files,
             onPressed: () => onPanelSelected(DashboardSection.files),
           ),
           const Spacer(),
           const AppSidebarDivider(),
-          SidebarButton(
+          _button(
             icon: FluentIcons.settings_24_regular,
             selectedIcon: FluentIcons.settings_24_filled,
             tooltip: 'Settings',
-            outerPadding: _buttonPadding,
             selected:
                 selectedPanel == DashboardSection.settings &&
                 !accountShortcutSelected,
@@ -528,11 +537,10 @@ final class _Sidebar extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 4),
             child: AnimatedBuilder(
               animation: accountController,
-              builder: (BuildContext context, Widget? child) => SidebarButton(
+              builder: (BuildContext context, Widget? child) => _button(
                 icon: FluentIcons.person_24_regular,
                 selectedIcon: FluentIcons.person_24_filled,
                 tooltip: accountController.sidebarTooltip,
-                outerPadding: _buttonPadding,
                 selected:
                     selectedPanel == DashboardSection.settings &&
                     accountShortcutSelected,
@@ -544,99 +552,4 @@ final class _Sidebar extends StatelessWidget {
       ),
     ),
   );
-}
-
-/// The threads flyout of the chat-only window: pick a workspace and a thread
-/// without leaving the small chat window.
-final class _ChatOnlyFlyout extends StatelessWidget {
-  const _ChatOnlyFlyout({required this.controller});
-
-  final DashboardController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    // Elsewhere the threads list carries its own workspace picker; on Windows
-    // that picker lives in the title bar, which the chat-only window has no
-    // room for.
-    final bool needsPicker =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-    return AppFormTheme(
-      child: ColoredBox(
-        color: colors.surface,
-        child: SafeArea(
-          child: ListenableBuilder(
-            listenable: controller,
-            builder: (BuildContext context, Widget? child) => Column(
-              children: <Widget>[
-                AppFlyoutHeader(
-                  title: 'Threads',
-                  logo: SvgPicture.asset(
-                    'windows/runner/resources/icon_title.svg',
-                    colorFilter: ColorFilter.mode(
-                      colors.onSurface,
-                      BlendMode.srcIn,
-                    ),
-                    semanticsLabel: 'Subconscious logo',
-                  ),
-                ),
-                if (needsPicker)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                    // Same picker as the composer's model menu.
-                    child: SizedBox(
-                      height: 32,
-                      child: Material(
-                        color: Colors.transparent,
-                        borderRadius: AppRadii.sm,
-                        clipBehavior: Clip.antiAlias,
-                        child: AppCompactDropdown<String>(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          value: controller.threadsWorkspace?.uuid ?? '',
-                          items: <DropdownMenuItem<String>>[
-                            const DropdownMenuItem<String>(
-                              value: '',
-                              child: Text(
-                                'All workspaces',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            for (final Workspace workspace
-                                in controller.workspaces)
-                              DropdownMenuItem<String>(
-                                value: workspace.uuid,
-                                child: Text(
-                                  workspace.name,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                          ],
-                          onChanged: (String? uuid) {
-                            Workspace? chosen;
-                            for (final Workspace candidate
-                                in controller.workspaces) {
-                              if (candidate.uuid == uuid) chosen = candidate;
-                            }
-                            unawaited(controller.selectThreadWorkspace(chosen));
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                Divider(height: 1, thickness: 1, color: colors.outlineVariant),
-                Expanded(
-                  child: ContextPanel(
-                    screen: DashboardSection.threads,
-                    controller: controller,
-                    minTouchTarget: AppDensity.minTouchTarget(context),
-                    onSelection: () => Navigator.of(context).pop(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

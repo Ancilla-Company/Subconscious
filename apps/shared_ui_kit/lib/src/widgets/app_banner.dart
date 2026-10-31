@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../tokens/app_radii.dart';
 
 import '../forms/app_form_widgets.dart';
 import '../tokens/app_colors.dart';
@@ -65,7 +66,7 @@ final class AppBanner extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: background,
-          borderRadius: const BorderRadius.all(Radius.circular(3)),
+          borderRadius: AppRadii.standard,
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),

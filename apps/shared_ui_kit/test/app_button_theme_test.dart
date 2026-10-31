@@ -39,7 +39,7 @@ void main() {
           final OutlinedBorder? shape = style.shape?.resolve(<WidgetState>{});
           expect(
             (shape! as RoundedRectangleBorder).borderRadius,
-            AppRadii.xs,
+            AppRadii.standard,
             reason: '${finder.description} must have the kit corner',
           );
         }

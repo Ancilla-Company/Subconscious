@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../tokens/app_radii.dart';
 
 /// Who a chat bubble belongs to.
 enum AppMessageRole { user, assistant, system }
@@ -73,7 +74,7 @@ final class AppMessageBubble extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: background,
-                borderRadius: const BorderRadius.all(Radius.circular(3)),
+                borderRadius: AppRadii.standard,
                 border: role == AppMessageRole.assistant
                     ? Border.all(color: colors.outlineVariant)
                     : null,

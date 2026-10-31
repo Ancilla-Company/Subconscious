@@ -1020,6 +1020,8 @@ final class _ToolsSettingsPageState extends State<_ToolsSettingsPage> {
   }
 }
 
+/// The settings pages' expansion panel: the kit's [AppExpansionCard] with the
+/// editor as its body.
 final class _SettingsExpansionCard extends StatelessWidget {
   const _SettingsExpansionCard({
     required this.title,
@@ -1038,27 +1040,15 @@ final class _SettingsExpansionCard extends StatelessWidget {
   final Widget? editor;
 
   @override
-  Widget build(BuildContext context) => AppSectionCard(
+  Widget build(BuildContext context) => AppExpansionCard(
     title: title,
     subtitle: subtitle,
-    margin: const EdgeInsets.only(top: 10),
-    expanded: expanded && editor != null,
+    trailingLabel: trailing,
+    expanded: expanded,
     onToggle: onToggle,
-    trailing: trailing == null
-        ? null
-        : ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 220),
-            child: Text(
-              trailing!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          ),
-    child: editor ?? const SizedBox.shrink(),
+    child: editor,
   );
 }
-
 const String _mcpToolLabel = 'MCP server';
 const String _cliToolLabel = 'Command line tool';
 const String _acpToolLabel = 'ACP agent';

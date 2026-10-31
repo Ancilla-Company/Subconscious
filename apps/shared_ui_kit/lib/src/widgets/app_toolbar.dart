@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../tokens/app_radii.dart';
 
 /// A compact horizontal toolbar surface (editor ribbons, find bars): a
-/// `surfaceContainerLow` strip with 6px corners that wraps its [children] onto
+/// `surfaceContainerLow` strip with 3px corners that wraps its [children] onto
 /// more lines when narrow. Use `AppIconButton` for the buttons and
 /// [AppToolbarDivider] between groups.
 final class AppToolbar extends StatelessWidget {
@@ -15,7 +15,7 @@ final class AppToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     return ClipRRect(
-      borderRadius: const BorderRadius.all(Radius.circular(6)),
+      borderRadius: AppRadii.standard,
       child: ColoredBox(
         color: colors.surfaceContainerLow,
         child: Padding(
@@ -77,9 +77,9 @@ final class AppTextToggle extends StatelessWidget {
           dimension: 28,
           child: Material(
             color: selected ? colors.secondaryContainer : Colors.transparent,
-            borderRadius: AppRadii.sm,
+            borderRadius: AppRadii.standard,
             child: InkWell(
-              borderRadius: AppRadii.sm,
+              borderRadius: AppRadii.standard,
               canRequestFocus: false,
               onTap: onPressed,
               child: Center(

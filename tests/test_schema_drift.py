@@ -43,7 +43,8 @@ def _drift(path: Path) -> list[str]:
 def test_legacy_database_is_upgraded_on_startup(tmp_path: Path) -> None:
     path = tmp_path / "subconscious.db"
     _legacy_db(path)
-    assert sorted(_drift(path)) == ["app_state.client", "skills (table missing)", "tool_registry.config_json"]
+    assert sorted(_drift(path)) == [
+        "agents (table missing)", "app_state.client", "skills (table missing)", "tool_registry.config_json"]
 
     async def run() -> tuple[Path | None, list]:
         database = Database(path)
@@ -74,7 +75,7 @@ def test_migrate_twice_is_noop(tmp_path: Path) -> None:
     _legacy_db(path)
     engine = create_engine(f"sqlite:///{path}")
     with engine.begin() as connection:
-        assert migrations.migrate(connection) == [3, 4]
+        assert migrations.migrate(connection) == [3, 4, 5]
     with engine.begin() as connection:
         assert migrations.migrate(connection) == []
     engine.dispose()
@@ -96,10 +97,11 @@ def test_migration_four_adds_tool_registry_config_json_to_a_version_three_databa
         connection.close()
     engine = create_engine(f"sqlite:///{path}")
     with engine.begin() as connection:
-        assert migrations.migrate(connection) == [4]
+        assert migrations.migrate(connection) == [4, 5]
         assert "config_json" in migrations._columns(connection, "tool_registry")
         assert connection.execute(text("SELECT name, config_json FROM tool_registry")).all() == [("legacy", None)]
-        assert migrations.LATEST_VERSION == 4
+        assert migrations.LATEST_VERSION == 5
+        assert "agents" in migrations.inspect(connection).get_table_names()
         assert "skills" in migrations.inspect(connection).get_table_names()
     engine.dispose()
 
@@ -121,7 +123,7 @@ def test_drift_is_logged_not_raised(tmp_path: Path, caplog) -> None:
     engine = create_engine(f"sqlite:///{path}")
     with caplog.at_level(logging.ERROR, logger="uvicorn.error"), engine.connect() as connection:
         assert sorted(migrations.log_schema_drift(connection)) == [
-            "app_state.client", "skills (table missing)", "tool_registry.config_json"]
+            "agents (table missing)", "app_state.client", "skills (table missing)", "tool_registry.config_json"]
     engine.dispose()
     assert "app_state.client" in caplog.text
 

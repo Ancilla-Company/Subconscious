@@ -81,7 +81,7 @@ void main() {
           );
         }
         expect(
-          tester.getSize(find.byType(SidebarButton)).height,
+          tester.getSize(find.ancestor(of: find.byTooltip('Settings'), matching: find.byType(AppIconButton))).height,
           greaterThanOrEqualTo(48),
         );
       });

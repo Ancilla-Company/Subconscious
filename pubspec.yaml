@@ -9,6 +9,7 @@ environment:
 workspace:
   - apps/core_business_logic
   - apps/shared_ui_kit
+  - apps/ui_gallery
   - apps/unified_app
   - apps/tui_app
 
