@@ -64,32 +64,37 @@ final class ExecutorPicker extends StatelessWidget {
         final String name = selected == null
             ? options.first.name
             : (directory.nameOf(selected) ?? selected);
-        return AppPopupMenu<String>(
-          key: const ValueKey<String>('executor-picker'),
-          tooltip: 'Run on: $name',
-          sheetTitle: 'Run on',
-          sheetBreakpoint: 600,
-          enabled: enabled && (options.length > 1 || selected != null),
-          size: size,
-          minTouchTarget: minTouchTarget,
-          iconSize: 19,
-          icon: selected == null
-              ? FluentIcons.laptop_20_regular
-              : FluentIcons.phone_laptop_20_regular,
-          onSelected: (String value) =>
-              onSelected(value == _homeValue ? null : value),
-          items: <AppMenuItem<String>>[
-            for (final ExecutorOption option in options)
-              _item(option, option.nodeId == selected),
-            if (!known)
-              _item(
-                ExecutorOption(
-                  nodeId: selected,
-                  name: '${directory.nameOf(selected) ?? selected} (offline)',
+        // The picker carries its own trailing gap, so the composer row has no
+        // extra gap when the picker is hidden (SizedBox.shrink above).
+        return Padding(
+          padding: const EdgeInsets.only(right: AppSpacing.control),
+          child: AppPopupMenu<String>(
+            key: const ValueKey<String>('executor-picker'),
+            tooltip: 'Run on: $name',
+            sheetTitle: 'Run on',
+            sheetBreakpoint: 600,
+            enabled: enabled && (options.length > 1 || selected != null),
+            size: size,
+            minTouchTarget: minTouchTarget,
+            iconSize: 19,
+            icon: selected == null
+                ? FluentIcons.laptop_20_regular
+                : FluentIcons.phone_laptop_20_regular,
+            onSelected: (String value) =>
+                onSelected(value == _homeValue ? null : value),
+            items: <AppMenuItem<String>>[
+              for (final ExecutorOption option in options)
+                _item(option, option.nodeId == selected),
+              if (!known)
+                _item(
+                  ExecutorOption(
+                    nodeId: selected,
+                    name: '${directory.nameOf(selected) ?? selected} (offline)',
+                  ),
+                  true,
                 ),
-                true,
-              ),
-          ],
+            ],
+          ),
         );
       },
     );

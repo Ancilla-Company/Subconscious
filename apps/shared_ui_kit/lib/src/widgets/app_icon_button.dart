@@ -147,6 +147,11 @@ final class AppIconButton extends StatelessWidget {
                   : null),
           side: outlined ? BorderSide(color: colors.outlineVariant) : null,
           minimumSize: Size.square(dimension),
+          // The form theme sets VisualDensity.compact, which shrinks a Material
+          // button by 8 dp. Centred in its box, that left 4 dp of dead space
+          // on every side. Pin the size so the fill is the full box.
+          fixedSize: Size.square(dimension),
+          visualDensity: VisualDensity.standard,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           shape: const RoundedRectangleBorder(borderRadius: AppRadii.standard),
         ),

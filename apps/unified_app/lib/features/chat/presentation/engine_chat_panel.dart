@@ -1587,7 +1587,7 @@ final class _Composer extends StatelessWidget {
             ),
           if (activeFile != null || attachments.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+              padding: AppSpacing.standard,
               child: Wrap(
                 spacing: 4,
                 runSpacing: 4,
@@ -1632,11 +1632,11 @@ final class _Composer extends StatelessWidget {
               hintStyle: TextStyle(
                 color: colors.onSurfaceVariant.withValues(alpha: 0.33),
               ),
-              contentPadding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+              contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
+            padding: AppSpacing.standard,
             child: Row(
               children: <Widget>[
                 AppIconButton(
@@ -1673,6 +1673,10 @@ final class _Composer extends StatelessWidget {
                 AppSpacing.controlGap,
                 Expanded(
                   child: AppCompactDropdown<String>(
+                    // The arrow glyph carries ~7 dp of blank space on its
+                    // right, so no right padding keeps the visible gap to
+                    // the neighbouring button near the 4 dp standard.
+                    padding: const EdgeInsets.only(left: 8),
                     height: minTouchTarget == null || minTouchTarget! < 32
                         ? 32
                         : minTouchTarget!,
@@ -1720,10 +1724,8 @@ final class _Composer extends StatelessWidget {
                   ),
                 ),
                 AppSpacing.controlGap,
-                if (executorPicker case final Widget picker) ...<Widget>[
-                  picker,
-                  AppSpacing.controlGap,
-                ],
+                // Carries its own trailing gap, so a hidden picker adds none.
+                ?executorPicker,
                 AppIconButton(
                   tooltip: !enabled
                       ? 'Engine unavailable'
