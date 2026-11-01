@@ -611,43 +611,35 @@ final class _WorkspaceDetailsPanelState extends State<_WorkspaceDetailsPanel> {
     );
   }
 
-  Widget _buildHeader(BuildContext context, ColorScheme colors) => SizedBox(
-    height: 56,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Align(
-        alignment: Alignment.center,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 750),
-          child: Row(
-            children: <Widget>[
-              Text(
-                'Edit workspace',
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              AppIconButton(
-                outlined: true,
-                tooltip: 'Delete workspace',
-                onPressed: _isBusy || !widget.controller.isConnected
-                    ? null
-                    : _confirmDelete,
-                destructive: true,
-                busy: _isDeleting,
-                icon: FluentIcons.delete_20_regular,
-              ),
-              AppSpacing.controlGap,
-              AppIconButton(
-                outlined: true,
-                tooltip: 'Save workspace',
-                onPressed: _canSave ? _save : null,
-                busy: _isSaving,
-                icon: FluentIcons.save_20_regular,
-              ),
-            ],
+  Widget _buildHeader(BuildContext context, ColorScheme colors) => Align(
+    alignment: Alignment.center,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 750),
+      // The workspace main panel header intentionally has no extra horizontal
+      // inset: its title and right-aligned actions should meet the same content
+      // edges as the widgets below it.
+      child: AppPanelHeader(
+        title: 'Edit workspace',
+        horizontalPadding: 0,
+        actions: <Widget>[
+          AppIconButton(
+            outlined: true,
+            tooltip: 'Delete workspace',
+            onPressed: _isBusy || !widget.controller.isConnected
+                ? null
+                : _confirmDelete,
+            destructive: true,
+            busy: _isDeleting,
+            icon: FluentIcons.delete_20_regular,
           ),
-        ),
+          AppIconButton(
+            outlined: true,
+            tooltip: 'Save workspace',
+            onPressed: _canSave ? _save : null,
+            busy: _isSaving,
+            icon: FluentIcons.save_20_regular,
+          ),
+        ],
       ),
     ),
   );
@@ -1025,44 +1017,33 @@ final class _WorkspaceCreatePanelState extends State<_WorkspaceCreatePanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          SizedBox(
-            height: 56,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Align(
-                alignment: Alignment.center,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 750),
-                  child: Row(
-                    children: <Widget>[
-                      Text(
-                        'New workspace',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                      const Spacer(),
-                      AppIconButton(
-                        outlined: true,
-                        tooltip: 'Cancel workspace creation',
-                        onPressed: _isCreating
-                            ? null
-                            : widget.controller.cancelWorkspaceCreation,
-                        icon: FluentIcons.dismiss_20_regular,
-                      ),
-                      AppSpacing.controlGap,
-                      AppIconButton(
-                        outlined: true,
-                        tooltip: 'Create workspace',
-                        onPressed: _canCreate ? _create : null,
-                        busy: _isCreating,
-                        icon: FluentIcons.add_20_regular,
-                      ),
-                    ],
+          Align(
+            alignment: Alignment.center,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 750),
+              // The workspace main panel header intentionally has no extra horizontal
+              // inset: its title and right-aligned actions should meet the same content
+              // edges as the widgets below it.
+              child: AppPanelHeader(
+                title: 'New workspace',
+                horizontalPadding: 0,
+                actions: <Widget>[
+                  AppIconButton(
+                    outlined: true,
+                    tooltip: 'Cancel workspace creation',
+                    onPressed: _isCreating
+                        ? null
+                        : widget.controller.cancelWorkspaceCreation,
+                    icon: FluentIcons.dismiss_20_regular,
                   ),
-                ),
+                  AppIconButton(
+                    outlined: true,
+                    tooltip: 'Create workspace',
+                    onPressed: _canCreate ? _create : null,
+                    busy: _isCreating,
+                    icon: FluentIcons.add_20_regular,
+                  ),
+                ],
               ),
             ),
           ),

@@ -206,18 +206,13 @@ final class _WorkspaceFileEditorState extends State<WorkspaceFileEditor> {
             ),
             const SizedBox(width: 8),
             if (text != null)
-              Tooltip(
-                message: connected ? 'Save (${shortcutPrefix}S)' : 'Not connected to the engine. Your changes are kept as a draft.',
-                child: FilledButton.icon(
-                  onPressed: canSave ? () => unawaited(_save(text)) : null,
-                  icon: text.isSaving
-                      ? const SizedBox.square(
-                          dimension: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(FluentIcons.save_20_regular, size: 16),
-                  label: const Text('Save'),
-                ),
+              AppIconButton(
+                tooltip: connected
+                    ? 'Save (${shortcutPrefix}S)'
+                    : 'Not connected to the engine. Your changes are kept as a draft.',
+                icon: FluentIcons.save_20_regular,
+                busy: text.isSaving,
+                onPressed: canSave ? () => unawaited(_save(text)) : null,
               ),
           ],
         ),

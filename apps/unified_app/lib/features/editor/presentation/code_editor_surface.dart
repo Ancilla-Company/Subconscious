@@ -103,21 +103,21 @@ final class _CodeEditorSurfaceState extends State<CodeEditorSurface> {
             filled: false,
           ),
         ),
-        // The panel around the editor already has a scrollbar.
-        child: ScrollConfiguration(
-          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-          child: CodeField(
-            controller: _controller,
-            focusNode: _focus,
-            expands: true,
-            decoration: const BoxDecoration(color: Colors.transparent),
-            padding: EdgeInsets.zero,
-            textStyle: TextStyle(
-              fontFamily: editorMonospaceFamily,
-              fontFamilyFallback: editorMonospaceFallback,
-              fontSize: 13,
-              height: 1.45,
-            ),
+        // CodeField owns its linked vertical scroll controllers. Leave the
+        // platform scrollbar enabled so code files get the same single bar as
+        // SourceEditor; wrapping CodeField externally cannot work because its
+        // controller is intentionally private to the package.
+        child: CodeField(
+          controller: _controller,
+          focusNode: _focus,
+          expands: true,
+          decoration: const BoxDecoration(color: Colors.transparent),
+          padding: EdgeInsets.zero,
+          textStyle: TextStyle(
+            fontFamily: editorMonospaceFamily,
+            fontFamilyFallback: editorMonospaceFallback,
+            fontSize: 13,
+            height: 1.45,
           ),
         ),
       ),

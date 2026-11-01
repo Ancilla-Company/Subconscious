@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 final class WorkspaceDocumentPreview extends StatefulWidget {
   const WorkspaceDocumentPreview({
@@ -151,6 +152,11 @@ final class _WorkspaceDocumentPreviewState
   void _showError(Object error) {
     if (!mounted) return;
     setState(() => _viewerError = error);
+  }
+
+  void _dismissError() {
+    if (!mounted) return;
+    setState(() => _viewerError = null);
   }
 
   void _setLibrariesReady(InAppWebViewController controller, int generation) {
@@ -714,19 +720,39 @@ final class _WorkspaceDocumentPreviewState
               ColoredBox(
                 color: Theme.of(context).colorScheme.surface,
                 child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
+                  child: Material(
+                    color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                    borderRadius: AppRadii.standard,
+                    clipBehavior: Clip.antiAlias,
+                    child: Stack(
                       children: <Widget>[
-                        Text(
-                          'Unable to display this document.\n$error',
-                          textAlign: TextAlign.center,
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Text(
+                                'Unable to display this document.\n$error',
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 12),
+                              OutlinedButton(
+                                onPressed: _retry,
+                                child: const Text('Retry'),
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 12),
-                        OutlinedButton(
-                          onPressed: _retry,
-                          child: const Text('Retry'),
+                        Positioned(
+                          top: AppSpacing.row,
+                          right: AppSpacing.row,
+                          child: AppIconButton(
+                            tooltip: 'Dismiss',
+                            icon: Icons.close,
+                            iconSize: 14,
+                            size: AppIconButtonSize.small,
+                            onPressed: _dismissError,
+                          ),
                         ),
                       ],
                     ),

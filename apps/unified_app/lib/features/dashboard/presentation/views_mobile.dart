@@ -89,10 +89,12 @@ final class MobileDashboardView extends StatelessWidget {
   }
 
   Widget _body(double target) {
-    // The chat only has room on its own page on mobile, so show it while a
-    // tool approval or tool sign-in is waiting, without changing the selected
-    // section.
+    // The chat panel is shown for both the chat and threads sections. Threads
+    // is only a flyout list; when the flyout closes without a selection the
+    // chat panel is still visible underneath. All other sections show the
+    // main panel.
     if (controller.selectedSection != DashboardSection.chat &&
+        controller.selectedSection != DashboardSection.threads &&
         controller.pendingToolApproval == null &&
         controller.pendingOAuth == null) {
       return DashboardMainPanel(
@@ -172,9 +174,10 @@ final class MobileDashboardView extends StatelessWidget {
         title: controller.selectedThread?.title ?? controller.pendingDraftTitle,
         draftToolsConfig: controller.pendingDraftToolsConfig,
         executors: controller.executors,
-        threadsList: ThreadsList(
+        threadsListBuilder: (double edgePadding) => ThreadsList(
           controller: controller,
           minTouchTarget: target,
+          edgePadding: edgePadding,
         ),
         threadsListVisible: controller.threadsListVisible,
         onToggleThreadsList: () =>
@@ -260,10 +263,10 @@ final class _MobileFlyout extends StatelessWidget {
                 ),
                 _menuButton(
                   context,
-                  icon: FluentIcons.chat_24_regular,
-                  selectedIcon: FluentIcons.chat_24_filled,
-                  label: 'Chat',
-                  section: DashboardSection.chat,
+                  icon: FluentIcons.chat_multiple_24_regular,
+                  selectedIcon: FluentIcons.chat_multiple_24_filled,
+                  label: 'Threads',
+                  section: DashboardSection.threads,
                 ),
                 _menuButton(
                   context,
@@ -284,12 +287,21 @@ final class _MobileFlyout extends StatelessWidget {
           ),
           divider,
           Expanded(
-            child: ContextPanel(
-              screen: controller.selectedSection,
-              controller: controller,
-              minTouchTarget: target,
-              onSelection: () => Navigator.of(context).pop(),
-            ),
+            child: controller.selectedSection == DashboardSection.threads
+                ? ThreadsList(
+                    controller: controller,
+                    minTouchTarget: target,
+                    onThreadSelected: () async {
+                      await controller.activateSection(DashboardSection.chat);
+                      if (context.mounted) Navigator.of(context).pop();
+                    },
+                  )
+                : ContextPanel(
+                    screen: controller.selectedSection,
+                    controller: controller,
+                    minTouchTarget: target,
+                    onSelection: () => Navigator.of(context).pop(),
+                  ),
           ),
           divider,
           Padding(

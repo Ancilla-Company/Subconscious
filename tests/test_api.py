@@ -325,6 +325,60 @@ def test_settings_and_workspace_file_routes_through_asgi(tmp_path):
             )
             assert missing.status_code == 404
 
+            # Delete: a file, then a folder with contents; the root is refused.
+            (root / "src" / "inner.txt").write_text("inner", encoding="utf-8")
+            deleted = await client.delete(
+                base, headers=auth(), params={"rootIndex": 0, "path": "note.txt"}
+            )
+            assert deleted.status_code == 204
+            assert not root.joinpath("note.txt").exists()
+            assert (await client.delete(
+                base, headers=auth(), params={"rootIndex": 0, "path": "note.txt"}
+            )).status_code == 404
+            assert (await client.delete(
+                base, headers=auth(), params={"rootIndex": 0, "path": "src"}
+            )).status_code == 204
+            assert not root.joinpath("src").exists()
+            assert (await client.delete(
+                base, headers=auth(), params={"rootIndex": 0}
+            )).status_code == 400
+            assert (await client.delete(
+                base, headers=auth(), params={"rootIndex": 0, "path": "../x.txt"}
+            )).status_code == 400
+            assert root.exists()
+
+            # Copy returns the copied entry, keeps the source, and resolves a
+            # same-name collision in the destination with a " Copy" suffix.
+            (root / "copies").mkdir()
+            (root / "preview.png").write_bytes(b"\x89PNG\r\n\x1a\npreview")
+            copied = await client.post(
+                f"{base}/copy", headers=auth(), json={
+                    "sourceRootIndex": 0,
+                    "sourcePath": "preview.png",
+                    "destinationRootIndex": 0,
+                    "destinationPath": "copies",
+                },
+            )
+            assert copied.status_code == 200
+            assert copied.json() == {
+                "name": "preview.png", "relativePath": "copies/preview.png", "isDirectory": False,
+            }
+            assert root.joinpath("preview.png").exists()
+            assert root.joinpath("copies/preview.png").exists()
+            recopied = await client.post(
+                f"{base}/copy", headers=auth(), json={
+                    "sourceRootIndex": 0,
+                    "sourcePath": "preview.png",
+                    "destinationRootIndex": 0,
+                    "destinationPath": "copies",
+                },
+            )
+            assert recopied.status_code == 200
+            assert recopied.json() == {
+                "name": "preview Copy.png", "relativePath": "copies/preview Copy.png", "isDirectory": False,
+            }
+            assert root.joinpath("copies/preview Copy.png").exists()
+
             png = b"\x89PNG\r\n\x1a\npreview"
             pdf = b"%PDF-1.7\n%%EOF"
             docx_buffer = BytesIO()

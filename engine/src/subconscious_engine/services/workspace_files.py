@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+from collections.abc import Callable
+import contextlib
 from dataclasses import dataclass
 import hashlib
 from io import BytesIO
@@ -11,6 +13,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
+import sys
 import tempfile
 import threading
 import time
@@ -72,10 +76,6 @@ class WorkspaceFileService:
         ".git", ".hg", ".svn", ".subconscious", ".dart_tool", "node_modules",
         "build", "dist", "bin", "obj", "__pycache__", ".venv", "venv",
     }
-    EXTENSIONS = {".c", ".cc", ".cpp", ".cs", ".csx", ".css", ".fs", ".fsx", ".go",
-                  ".h", ".hpp", ".html", ".htm", ".java", ".js", ".jsx", ".json",
-                  ".md", ".markdown", ".php", ".ps1", ".py", ".rb", ".rs", ".sh",
-                  ".sql", ".toml", ".ts", ".tsx", ".txt", ".xml", ".xaml", ".yml", ".yaml"}
     IMAGE_MEDIA_TYPES = {
         ".bmp": "image/bmp",
         ".gif": "image/gif",
@@ -210,6 +210,24 @@ class WorkspaceFileService:
         return await asyncio.to_thread(
             self._move_sync, root, source_path, destination_path, new_name
         )
+
+    async def copy(
+        self,
+        workspace_uuid: str,
+        source_root_index: int,
+        source_path: str,
+        destination_root_index: int,
+        destination_path: str,
+    ) -> WorkspaceFileEntryDto:
+        source_root = await self.root(workspace_uuid, source_root_index)
+        destination_root = await self.root(workspace_uuid, destination_root_index)
+        return await asyncio.to_thread(
+            self._copy_sync, source_root, source_path, destination_root, destination_path
+        )
+
+    async def delete(self, workspace_uuid: str, root_index: int, relative_path: str) -> None:
+        root = await self.root(workspace_uuid, root_index)
+        await asyncio.to_thread(self._delete_sync, root, relative_path)
 
     def _list_sync(self, root: Path, relative_path: str | None) -> builtins.list[WorkspaceFileEntryDto]:
         directory = self._existing(root, relative_path, allow_root=True)
@@ -508,10 +526,145 @@ class WorkspaceFileService:
             is_directory=target.is_dir(),
         )
 
+    def _copy_sync(
+        self,
+        source_root: Path,
+        source_path: str,
+        destination_root: Path,
+        destination_path: str,
+    ) -> WorkspaceFileEntryDto:
+        """Copy a regular file or reparse-free directory between two workspace roots.
+
+        Copy never follows or preserves symlinks/junctions: a directory with one
+        is rejected before bytes are copied. This prevents a workspace copy from
+        reading or creating a route outside its configured root. A name already
+        taken at the destination does not block the copy: it gets a " Copy"
+        (then " Copy 2", " Copy 3", ...) suffix instead, the way desktop file
+        managers resolve a paste conflict.
+        """
+        source = self._existing(source_root, source_path, allow_root=False)
+        destination = self._existing(destination_root, destination_path or None, allow_root=True)
+        self._ensure_existing_directory(destination)
+        self._reject_managed_path(source_root, source)
+        self._reject_managed_path(destination_root, destination)
+        probe = destination / source.name
+        self._ensure_within(destination_root, probe)
+        if source.is_dir():
+            try:
+                probe.relative_to(source)
+            except ValueError:
+                _LOG.warning("services.workspace_files.WorkspaceFileService._copy_sync: handled ValueError; continuing with copy", exc_info=True)
+            else:
+                raise WorkspaceFileError(
+                    400, "A directory cannot be copied into itself or one of its children."
+                )
+            self._reject_reparse_entries(source_root, source)
+        target = self._resolve_copy_target(destination, source.name, source.is_dir())
+        self._ensure_within(destination_root, target)
+        if source.is_dir():
+            try:
+                shutil.copytree(source, target, symlinks=False, copy_function=shutil.copy2)
+            except Exception:
+                # A failed recursive copy can leave a partial tree. It is our
+                # just-created target and still inside the checked root.
+                if target.exists() and not self._is_reparse(target):
+                    with contextlib.suppress(OSError):
+                        shutil.rmtree(target)
+                raise
+        else:
+            if self._is_reparse(source):
+                raise WorkspaceFileError(403, "The requested path contains a reparse point.")
+            shutil.copy2(source, target, follow_symlinks=False)
+        return WorkspaceFileEntryDto(
+            name=target.name,
+            relative_path=target.relative_to(destination_root).as_posix(),
+            is_directory=source.is_dir(),
+        )
+
+    @staticmethod
+    def _resolve_copy_target(destination: Path, name: str, is_directory: bool) -> Path:
+        """The destination path for a copy, suffixed to dodge an existing name.
+
+        A plain name clash becomes "name Copy", then "name Copy 2", "name Copy
+        3", and so on. Files keep their extension on the suffixed name
+        ("report Copy.txt"); directories and extension-less files do not split
+        on a dot.
+        """
+        candidate = destination / name
+        if not candidate.exists() and not candidate.is_symlink():
+            return candidate
+        if is_directory:
+            stem, extension = name, ""
+        else:
+            as_path = Path(name)
+            stem, extension = as_path.stem, as_path.suffix
+        attempt = 1
+        while True:
+            suffix = " Copy" if attempt == 1 else f" Copy {attempt}"
+            candidate = destination / f"{stem}{suffix}{extension}"
+            if not candidate.exists() and not candidate.is_symlink():
+                return candidate
+            attempt += 1
+
+    def _reject_reparse_entries(self, root: Path, source: Path) -> None:
+        """Reject all links below a recursive-copy source before copying."""
+        for directory, dirnames, filenames in os.walk(source, followlinks=False):
+            current = Path(directory)
+            self._ensure_within(root, current)
+            for name in [*dirnames, *filenames]:
+                entry = current / name
+                self._ensure_within(root, entry)
+                if self._is_reparse(entry):
+                    raise WorkspaceFileError(
+                        403, "The requested path contains a reparse point."
+                    )
+
+    @staticmethod
+    def _reject_managed_path(root: Path, target: Path) -> None:
+        if target.relative_to(root).parts and target.relative_to(root).parts[0].casefold() == ".subconscious":
+            raise WorkspaceFileError(403, "The .subconscious folder is managed by Subconscious.")
+
+    def _delete_sync(self, root: Path, relative_path: str) -> None:
+        """Delete a file, or a directory with everything in it.
+
+        The root itself, traversal, reparse points and missing paths are refused
+        by ``_existing``. The ``.subconscious`` folder holds the engine's own
+        index and is refused too. ``rmtree`` removes links found inside the
+        directory without following them, so nothing outside the root is touched.
+        """
+        target = self._existing(root, relative_path, allow_root=False)
+        if target.relative_to(root).parts[0].casefold() == ".subconscious":
+            raise WorkspaceFileError(403, "The .subconscious folder is managed by Subconscious.")
+        if not target.is_dir():
+            self._clear_read_only(target)
+            target.unlink()
+            return
+
+        def retry_read_only(function: Callable[..., object], path: str, _error: object) -> None:
+            # Windows refuses to delete read-only files; clear the flag once and retry.
+            self._clear_read_only(Path(path))
+            function(path)
+
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(target, onexc=retry_read_only)
+        else:  # pragma: no cover - the engine runs on 3.12 today
+            shutil.rmtree(target, onerror=retry_read_only)
+
+    @staticmethod
+    def _clear_read_only(path: Path) -> None:
+        try:
+            mode = path.stat(follow_symlinks=False).st_mode
+            if not mode & stat.S_IWRITE:
+                os.chmod(path, mode | stat.S_IWRITE)
+        except OSError:
+            _LOG.warning("services.workspace_files._clear_read_only: could not clear %s", path, exc_info=True)
+
     def _existing_file(self, root: Path, relative_path: str) -> Path:
-        file = self._existing_regular_file(root, relative_path)
-        self._ensure_extension(file)
-        return file
+        # No extension allowlist: any regular file can be opened as text. The
+        # UTF-8 decode in _read_sync/_write_sync/_version_sync is what tells a
+        # plain-text file (even an unusual one, like ".kiroignore", which has
+        # no extension at all) apart from one that genuinely is not text.
+        return self._existing_regular_file(root, relative_path)
 
     def _existing_regular_file(self, root: Path, relative_path: str) -> Path:
         file = self._existing(root, relative_path, allow_root=False)
@@ -539,8 +692,6 @@ class WorkspaceFileService:
         self._ensure_existing_directory(parent)
         if target.exists() or target.is_symlink():
             raise WorkspaceFileError(409, "A file or directory already exists at the requested path.")
-        if file_target:
-            self._ensure_extension(target)
         return target
 
     @staticmethod
@@ -566,11 +717,6 @@ class WorkspaceFileService:
         if len(encoded) > cls.MAX_BYTES:
             raise WorkspaceFileError(400, "Content exceeds the 1 MB limit.")
         return encoded
-
-    @classmethod
-    def _ensure_extension(cls, path: Path) -> None:
-        if path.suffix.casefold() not in cls.EXTENSIONS:
-            raise WorkspaceFileError(400, "The requested file is not a supported text or source file.")
 
     @staticmethod
     def _ensure_within(root: Path, target: Path) -> None:

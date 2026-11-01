@@ -192,7 +192,8 @@ void main() {
             provider: EngineLlmProvider(),
             isComposerEnabled: false,
             title: 'Trip plans',
-            threadsList: const Text('THREAD LIST'),
+            threadsListBuilder: (double edgePadding) =>
+                const Text('THREAD LIST'),
             threadsListVisible: listVisible,
             onToggleThreadsList: onToggle,
           ),

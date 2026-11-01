@@ -13,7 +13,12 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(const UiGalleryApp());
     await tester.pump();
+    await tester.pump();
     expect(tester.takeException(), isNull);
+    expect(
+      find.text('Notification toast preview. Use the buttons below to compare variants.'),
+      findsOneWidget,
+    );
 
     // Samples are labelled with the component's name.
     expect(find.text('AppTextField: label and hint'), findsOneWidget);

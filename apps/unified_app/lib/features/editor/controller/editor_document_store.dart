@@ -543,6 +543,35 @@ final class EditorDocumentStore extends ChangeNotifier {
     if (activeMoved) onActiveChanged?.call(active);
   }
 
+  /// The open tabs showing [path] or, for a directory, anything inside it.
+  List<EditorTab> tabsAtOrUnder(
+    int rootIndex,
+    String path, {
+    required bool isDirectory,
+  }) => <EditorTab>[
+    for (final EditorTab tab in _session?.tabs ?? const <EditorTab>[])
+      if (isWorkspacePathAtOrUnder(
+        rootIndex: tab.rootIndex,
+        path: tab.path,
+        targetRootIndex: rootIndex,
+        targetPath: path,
+        targetIsDirectory: isDirectory,
+      ))
+        tab,
+  ];
+
+  /// Closes the tabs of a file or folder that was deleted, discarding their
+  /// drafts. Callers warn the user first when one has unsaved changes.
+  void closeAtOrUnder(int rootIndex, String path, {required bool isDirectory}) {
+    for (final EditorTab tab in tabsAtOrUnder(
+      rootIndex,
+      path,
+      isDirectory: isDirectory,
+    )) {
+      close(tab);
+    }
+  }
+
   /// Drops everything held for a workspace that no longer exists.
   Future<void> forgetWorkspace(String uuid) async {
     final _Session? session = _sessions.remove(uuid);

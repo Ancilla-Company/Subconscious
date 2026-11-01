@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../tokens/app_radii.dart';
+import '../tokens/app_spacing.dart';
 
 /// A selectable navigation row: optional [leading], a [title] with an
 /// optional [subtitle], and an optional [trailing]. It has the same visuals as
@@ -159,6 +161,11 @@ final class AppListRow extends StatelessWidget {
 /// [highlighted] paints the selected fill without selecting, for a drop
 /// target. Wrap the row in a `Draggable` / `DragTarget` for drag and drop.
 /// [minHeight] raises the tappable height on touch layouts.
+///
+/// Every row carries [AppSpacing.header] (4 dp) of its own bottom margin, so
+/// stacking rows directly in a `Column` — the normal way to build a tree —
+/// already gives them the standard gap. Feature code must not add its own
+/// spacing between rows.
 final class AppTreeRow extends StatelessWidget {
   const AppTreeRow({
     required this.label,
@@ -211,7 +218,7 @@ final class AppTreeRow extends StatelessWidget {
       label: label,
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, AppSpacing.header),
         child: Material(
           color: emphasized ? colors.secondaryContainer : Colors.transparent,
           borderRadius: radius,

@@ -68,15 +68,19 @@ final class EngineChatPanel extends StatefulWidget {
     this.draftToolsConfig,
     this.executors,
     this.greetingName,
-    this.threadsList,
+    this.threadsListBuilder,
     this.threadsListVisible = false,
     this.onToggleThreadsList,
     super.key,
   });
 
-  /// The thread list. While [threadsListVisible] it takes the place of the
-  /// conversation; null hides the header's threads button.
-  final Widget? threadsList;
+  /// Builds the thread list given the edge inset to line its header, search
+  /// field and list up with this panel's own header, rather than this panel
+  /// wrapping a pre-built widget in its own padding (which would also inset
+  /// the list's scrollbar away from the panel's true edge). While
+  /// [threadsListVisible] it takes the place of the conversation; null hides
+  /// the header's threads button.
+  final Widget Function(double edgePadding)? threadsListBuilder;
   final bool threadsListVisible;
   final VoidCallback? onToggleThreadsList;
 
@@ -698,7 +702,7 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
             child: child,
           );
           final bool showThreads =
-              widget.threadsListVisible && widget.threadsList != null;
+              widget.threadsListVisible && widget.threadsListBuilder != null;
           final bool showSettings = _showThreadSettings && !showThreads;
           // Either one replaces the conversation and its composer.
           final bool overlay = showThreads || showSettings;
@@ -724,30 +728,34 @@ final class _EngineChatPanelState extends State<EngineChatPanel> {
                   onCreateThread: _createThread,
                   onEditThread: _toggleThreadSettings,
                   threadsVisible: showThreads,
-                  onToggleThreads: widget.threadsList == null
+                  onToggleThreads: widget.threadsListBuilder == null
                       ? null
                       : _toggleThreadsList,
                 ),
               ),
               Expanded(
+                // Unlike gutter(), these two sub-panels are not wrapped in an
+                // outer Padding: each applies horizontalPadding + 8 (the chat
+                // header's own inset) to its own header/fields, so its list's
+                // scrollbar stays flush with the panel's true edge instead of
+                // being inset along with everything else.
                 child: showThreads
-                    ? gutter(widget.threadsList!)
+                    ? widget.threadsListBuilder!(horizontalPadding + 8)
                     : showSettings &&
-                        widget.workspace != null &&
-                        widget.provider.repository != null
-                    ? gutter(
-                        _ThreadSettingsPanel(
-                          repository: widget.provider.repository!,
-                          workspace: widget.workspace!,
-                          initialTitle: widget.title,
-                          initialToolsConfig:
-                              widget.thread?.toolsConfig ??
-                              widget.draftToolsConfig,
-                          threadUuid: widget.thread?.uuid,
-                          isDraft: widget.thread == null,
-                          onCancel: _toggleThreadSettings,
-                          onSave: _saveThreadSettings,
-                        ),
+                          widget.workspace != null &&
+                          widget.provider.repository != null
+                    ? _ThreadSettingsPanel(
+                        repository: widget.provider.repository!,
+                        workspace: widget.workspace!,
+                        initialTitle: widget.title,
+                        initialToolsConfig:
+                            widget.thread?.toolsConfig ??
+                            widget.draftToolsConfig,
+                        threadUuid: widget.thread?.uuid,
+                        isDraft: widget.thread == null,
+                        onCancel: _toggleThreadSettings,
+                        onSave: _saveThreadSettings,
+                        edgePadding: horizontalPadding + 8,
                       )
                     : messages.isEmpty
                     ? _EmptyChat(name: widget.greetingName)
@@ -931,50 +939,37 @@ final class _ChatHeader extends StatelessWidget {
   final double? minTouchTarget;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 48,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-      child: Row(
-        children: <Widget>[
-          // The thread's name is a long button that opens its settings.
-          Expanded(
-            child: Tooltip(
-              message: settingsVisible
-                  ? 'Close thread settings'
-                  : 'Thread settings',
-              child: AppListRow(
-                title: title,
-                titleBold: true,
-                dense: true,
-                minHeight: minTouchTarget,
-                selected: settingsVisible,
-                semanticLabel: 'Thread settings: $title',
-                trailing: const Icon(FluentIcons.settings_16_regular, size: 16),
-                onTap: canEditThread ? onEditThread : null,
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          AppIconButton(
-            tooltip: 'New thread',
-            icon: FluentIcons.add_20_regular,
-            minTouchTarget: minTouchTarget,
-            onPressed: canCreateThread ? onCreateThread : null,
-          ),
-          if (onToggleThreads != null) ...<Widget>[
-            const SizedBox(width: 4),
-            AppIconButton(
-              tooltip: threadsVisible ? 'Close threads' : 'Threads',
-              icon: FluentIcons.chat_multiple_20_regular,
-              selected: threadsVisible,
-              minTouchTarget: minTouchTarget,
-              onPressed: onToggleThreads,
-            ),
-          ],
-        ],
+  Widget build(BuildContext context) => AppPanelHeader(
+    title: title,
+    titleWidget: Tooltip(
+      message: settingsVisible ? 'Close thread settings' : 'Thread settings',
+      child: AppListRow(
+        title: title,
+        titleBold: true,
+        dense: true,
+        minHeight: minTouchTarget,
+        selected: settingsVisible,
+        semanticLabel: 'Thread settings: $title',
+        trailing: const Icon(FluentIcons.settings_16_regular, size: 16),
+        onTap: canEditThread ? onEditThread : null,
       ),
     ),
+    actions: <Widget>[
+      AppIconButton(
+        tooltip: 'New thread',
+        icon: FluentIcons.add_20_regular,
+        minTouchTarget: minTouchTarget,
+        onPressed: canCreateThread ? onCreateThread : null,
+      ),
+      if (onToggleThreads != null)
+        AppIconButton(
+          tooltip: threadsVisible ? 'Close threads' : 'Threads',
+          icon: FluentIcons.chat_multiple_20_regular,
+          selected: threadsVisible,
+          minTouchTarget: minTouchTarget,
+          onPressed: onToggleThreads,
+        ),
+    ],
   );
 }
 
@@ -1683,9 +1678,7 @@ final class _Composer extends StatelessWidget {
                         : minTouchTarget!,
                     value: effectiveModelId,
                     hint: Text(
-                      models.isEmpty
-                          ? 'No models available'
-                          : 'Select a model',
+                      models.isEmpty ? 'No models available' : 'Select a model',
                       overflow: TextOverflow.ellipsis,
                     ),
                     items: <DropdownMenuItem<String>>[
@@ -2120,6 +2113,7 @@ final class _ThreadSettingsPanel extends StatefulWidget {
     required this.isDraft,
     required this.onCancel,
     required this.onSave,
+    this.edgePadding = 12,
   });
 
   final EngineRepository repository;
@@ -2130,6 +2124,11 @@ final class _ThreadSettingsPanel extends StatefulWidget {
   final bool isDraft;
   final VoidCallback onCancel;
   final _SaveThreadSettingsCallback onSave;
+
+  /// Left/right inset of the header row and every field, matching the chat
+  /// header's own inset so the Cancel/Save buttons line up with it and the
+  /// list's scrollbar sits flush with the panel's true edge.
+  final double edgePadding;
 
   @override
   State<_ThreadSettingsPanel> createState() => _ThreadSettingsPanelState();
@@ -2266,27 +2265,36 @@ final class _ThreadSettingsPanelState extends State<_ThreadSettingsPanel> {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      padding: EdgeInsets.fromLTRB(
+        widget.edgePadding,
+        8,
+        widget.edgePadding,
+        12,
+      ),
       children: <Widget>[
         LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             final Widget title = Text(
               'Edit Thread',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
+              style: AppPanelHeader.titleStyle(context),
             );
-            final Widget actions = AppButtonRow(
+            // AppIconButtons already carry their own margin; the gap here is
+            // the standard icon-row spacing, not AppButtonRow's wider gap for
+            // bigger Cancel/Delete/Save-style buttons.
+            final Widget actions = Row(
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                AppIconButton(
-                  tooltip: 'Cancel thread settings',
-                  icon: FluentIcons.dismiss_20_regular,
-                  onPressed: _saving ? null : widget.onCancel,
-                ),
                 AppIconButton(
                   tooltip: 'Save thread settings',
                   icon: FluentIcons.save_20_regular,
                   busy: _saving,
                   onPressed: _loading || _saving ? null : _submit,
+                ),
+                AppSpacing.iconRowGap,
+                AppIconButton(
+                  tooltip: 'Cancel thread settings',
+                  icon: FluentIcons.dismiss_20_regular,
+                  onPressed: _saving ? null : widget.onCancel,
                 ),
               ],
             );

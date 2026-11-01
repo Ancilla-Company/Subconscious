@@ -43,7 +43,7 @@ final class FileTabButton extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: SizedBox(
-              height: 34,
+              height: 32,
               child: Padding(
                 padding: const EdgeInsets.only(left: 10, right: 5),
                 child: Row(
@@ -87,8 +87,8 @@ final class FileTabButton extends StatelessWidget {
                       tooltip: 'Close $label',
                       onPressed: onClose,
                       icon: FluentIcons.dismiss_20_regular,
-                      iconSize: 14,
-                      size: AppIconButtonSize.small,
+                      iconSize: 13,
+                      size: AppIconButtonSize.tiny,
                     ),
                   ],
                 ),

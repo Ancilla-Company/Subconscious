@@ -49,3 +49,76 @@ Future<T?> showAppDialog<T>({
   builder: (BuildContext context) =>
       AppFormTheme(child: Builder(builder: builder)),
 );
+
+/// A yes/no question in the app's style: a [title], a [message], a Cancel
+/// button and a [confirmLabel] button that pops `true`. With [destructive]
+/// the confirm button takes the error colours, for deletes and other actions
+/// that cannot be undone.
+///
+/// Open it with [showAppConfirmDialog].
+final class AppConfirmDialog extends StatelessWidget {
+  const AppConfirmDialog({
+    required this.title,
+    required this.message,
+    this.confirmLabel = 'OK',
+    this.cancelLabel = 'Cancel',
+    this.destructive = false,
+    this.width = 380,
+    super.key,
+  });
+
+  final String title;
+  final String message;
+  final String confirmLabel;
+  final String cancelLabel;
+  final bool destructive;
+  final double? width;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return AppDialog(
+      title: title,
+      width: width,
+      content: Text(message),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(cancelLabel),
+        ),
+        FilledButton(
+          style: destructive
+              ? FilledButton.styleFrom(
+                  backgroundColor: colors.error,
+                  foregroundColor: colors.onError,
+                )
+              : null,
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(confirmLabel),
+        ),
+      ],
+    );
+  }
+}
+
+/// Asks [title] / [message] in an [AppConfirmDialog]. Returns true only when
+/// the user confirms; Cancel, Escape and a tap outside return false.
+Future<bool> showAppConfirmDialog({
+  required BuildContext context,
+  required String title,
+  required String message,
+  String confirmLabel = 'OK',
+  String cancelLabel = 'Cancel',
+  bool destructive = false,
+}) async =>
+    await showAppDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AppConfirmDialog(
+        title: title,
+        message: message,
+        confirmLabel: confirmLabel,
+        cancelLabel: cancelLabel,
+        destructive: destructive,
+      ),
+    ) ??
+    false;

@@ -330,7 +330,7 @@ final class _DesktopWebDashboardViewState
                     widget.controller.pendingDraftTitle,
                 draftToolsConfig: widget.controller.pendingDraftToolsConfig,
                 executors: widget.controller.executors,
-                threadsList: ThreadsList(
+                threadsListBuilder: (double edgePadding) => ThreadsList(
                   controller: widget.controller,
                   minTouchTarget: AppDensity.minTouchTarget(context),
                   // The title bar has the picker in the normal window; the
@@ -338,6 +338,7 @@ final class _DesktopWebDashboardViewState
                   showWorkspacePicker: !titleBarShowsWorkspacePicker(
                     widget.controller,
                   ),
+                  edgePadding: edgePadding,
                 ),
                 threadsListVisible: widget.controller.threadsListVisible,
                 onToggleThreadsList: () => widget.controller

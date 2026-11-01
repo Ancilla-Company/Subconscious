@@ -11,7 +11,6 @@ import 'package:unified_app/features/dashboard/controller/dashboard_controller.d
 import 'package:unified_app/features/dashboard/presentation/dashboard_page.dart';
 import 'package:unified_app/features/dashboard/presentation/views_desktop_web.dart';
 import 'package:unified_app/features/dashboard/presentation/window_composition_bar.dart';
-import 'package:unified_app/features/dashboard/presentation/views_mobile.dart';
 import 'package:unified_app/features/hive/hive_runtime.dart';
 
 Future<EngineRepository?> _noEngine({

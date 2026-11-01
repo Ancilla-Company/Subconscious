@@ -65,3 +65,19 @@ String? rebaseWorkspacePath({
   }
   return null;
 }
+
+/// Whether [path] in [rootIndex] is [targetPath] itself or, when the target is
+/// a directory, anything inside it. Used to find what a delete takes with it.
+bool isWorkspacePathAtOrUnder({
+  required int rootIndex,
+  required String path,
+  required int targetRootIndex,
+  required String targetPath,
+  required bool targetIsDirectory,
+}) {
+  if (rootIndex != targetRootIndex) return false;
+  final String normalized = normalizeWorkspacePath(path);
+  final String target = normalizeWorkspacePath(targetPath);
+  if (normalized == target) return true;
+  return targetIsDirectory && normalized.startsWith('$target/');
+}

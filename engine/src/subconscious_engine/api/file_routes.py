@@ -8,6 +8,7 @@ from starlette.routing import Route
 
 from subconscious_engine.api.common import json_response, parse_request
 from subconscious_engine.api.extra_schemas import (
+    CopyWorkspaceFileRequest,
     MoveWorkspaceFileRequest,
     WriteWorkspaceFileRequest,
 )
@@ -172,14 +173,47 @@ async def move_path(request: Request) -> Response:
         return _failure(error)
 
 
+async def copy_path(request: Request) -> Response:
+    body = await parse_request(request, CopyWorkspaceFileRequest)
+    if isinstance(body, Response):
+        return body
+    try:
+        async with request.app.state.database.session() as session:
+            result = await WorkspaceFileService(session).copy(
+                request.path_params["uuid"],
+                body.source_root_index,
+                body.source_path,
+                body.destination_root_index,
+                body.destination_path,
+            )
+        return json_response(result)
+    except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.copy_path: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
+        return _failure(error)
+
+
+async def delete_path(request: Request) -> Response:
+    """Delete the file or directory (with its contents) at ``rootIndex``/``path``."""
+    try:
+        async with request.app.state.database.session() as session:
+            await WorkspaceFileService(session).delete(
+                request.path_params["uuid"], _root_index(request), _path(request) or "")
+        return Response(status_code=204)
+    except (WorkspaceFileError, OSError) as error:
+        _LOG.warning("api.file_routes.delete_path: handled (WorkspaceFileError, OSError); continuing with fallback", exc_info=True)
+        return _failure(error)
+
+
 def file_routes() -> list[Route]:
     return [
         Route("/api/v1/workspaces/{uuid}/files/search", search_files, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files", list_files, methods=["GET"]),
+        Route("/api/v1/workspaces/{uuid}/files", delete_path, methods=["DELETE"]),
         Route("/api/v1/workspaces/{uuid}/files/content", read_file, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/version", file_version, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/preview", preview_file, methods=["GET"]),
         Route("/api/v1/workspaces/{uuid}/files/content", mutate_file, methods=["POST", "PUT"]),
         Route("/api/v1/workspaces/{uuid}/files/directory", create_directory, methods=["POST"]),
         Route("/api/v1/workspaces/{uuid}/files/move", move_path, methods=["POST"]),
+        Route("/api/v1/workspaces/{uuid}/files/copy", copy_path, methods=["POST"]),
     ]

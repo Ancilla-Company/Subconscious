@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_ui_kit/shared_ui_kit.dart';
 
 import '../controller/editor_document_store.dart';
 import '../controller/editor_tab.dart';
@@ -366,44 +367,38 @@ final class _SourceEditorState extends State<SourceEditor> {
       canRequestFocus: false,
       skipTraversal: true,
       onKeyEvent: _onKey,
-      // One explicit scrollbar wraps the field (the platform's automatic one is
-      // switched off so there are not two). Because it wraps the field's own
-      // scrollable rather than sitting beside it, the wheel, touchpad and
-      // thumb drag all scroll the text, including with the cursor over the bar.
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-        child: Scrollbar(
-          controller: _scroll,
-          child: TextField(
-            key: _fieldKey,
-            controller: _controller,
-            focusNode: _focus,
-            scrollController: _scroll,
-            autofocus: widget.autofocus,
-            maxLines: null,
-            expands: true,
-            textAlignVertical: TextAlignVertical.top,
-            keyboardType: TextInputType.multiline,
-            style: _textStyle(theme),
-            cursorColor: theme.colorScheme.primary,
-            inputFormatters: _formatters,
-            autocorrect: false,
-            enableSuggestions: false,
-            smartDashesType: SmartDashesType.disabled,
-            smartQuotesType: SmartQuotesType.disabled,
-            decoration: const InputDecoration(
-              isCollapsed: true,
-              filled: false,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              disabledBorder: InputBorder.none,
-              errorBorder: InputBorder.none,
-              focusedErrorBorder: InputBorder.none,
-              // No padding on the right, so the field runs to the panel edge.
-              contentPadding: EdgeInsets.fromLTRB(20, 16, 0, 16),
-            ),
-          ),
+      // TextField's multiline EditableText owns this scrollable and provides
+      // the platform scrollbar. Do not wrap it in another Scrollbar: the
+      // framework intentionally enables its own bar for multiline fields.
+      child: TextField(
+        key: _fieldKey,
+        controller: _controller,
+        focusNode: _focus,
+        scrollController: _scroll,
+        autofocus: widget.autofocus,
+        contextMenuBuilder: appTextSelectionContextMenuBuilder,
+        maxLines: null,
+        expands: true,
+        textAlignVertical: TextAlignVertical.top,
+        keyboardType: TextInputType.multiline,
+        style: _textStyle(theme),
+        cursorColor: theme.colorScheme.primary,
+        inputFormatters: _formatters,
+        autocorrect: false,
+        enableSuggestions: false,
+        smartDashesType: SmartDashesType.disabled,
+        smartQuotesType: SmartQuotesType.disabled,
+        decoration: const InputDecoration(
+          isCollapsed: true,
+          filled: false,
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          disabledBorder: InputBorder.none,
+          errorBorder: InputBorder.none,
+          focusedErrorBorder: InputBorder.none,
+          // No padding on the right, so the field runs to the panel edge.
+          contentPadding: EdgeInsets.fromLTRB(20, 16, 0, 16),
         ),
       ),
     );

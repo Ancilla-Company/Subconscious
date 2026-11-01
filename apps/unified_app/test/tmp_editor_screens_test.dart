@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:unified_app/features/editor/controller/editor_document_store.dart';
@@ -195,10 +196,15 @@ Future<void> ctrl(WidgetTester tester, LogicalKeyboardKey key) async {
 TextTab tab(Setup s, String path) =>
     s.store.tabs.firstWhere((EditorTab t) => t.path == path) as TextTab;
 
-Finder saveButton() => find.widgetWithText(FilledButton, 'Save');
+// The save button is a shared-kit AppIconButton (built on IconButton) with a
+// tooltip, not a text label, so it is found by its icon rather than by text.
+Finder saveButton() => find.ancestor(
+  of: find.byIcon(FluentIcons.save_20_regular),
+  matching: find.byType(IconButton),
+);
 
 bool saveEnabled(WidgetTester tester) =>
-    tester.widget<FilledButton>(saveButton()).onPressed != null;
+    tester.widget<IconButton>(saveButton()).onPressed != null;
 
 void main() {
   setUpAll(() async {
@@ -319,7 +325,9 @@ void main() {
     expect(tab(s, 'app.py').isDirty, isTrue);
     await tester.tap(find.byTooltip('Close app.py'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
+    // The close-confirmation dialog's own "Save" action, not the icon-only
+    // toolbar save button behind it.
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.pumpAndSettle();

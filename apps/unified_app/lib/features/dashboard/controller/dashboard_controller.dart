@@ -22,7 +22,7 @@ enum EngineConnectionStatus { disconnected, connecting, connected }
 /// The sections of the sidebar. [chat] is only the phone layout's chat page: the
 /// wide layouts always show the chat panel beside the sections, never select
 /// it, and keep showing [DashboardController.contextSection] when it is.
-enum DashboardSection { chat, workspaces, agents, files, settings }
+enum DashboardSection { chat, threads, workspaces, agents, files, settings }
 
 final class WorkspaceDirectoryRoot {
   const WorkspaceDirectoryRoot({required this.index, required this.path});
@@ -267,16 +267,22 @@ final class DashboardController extends ChangeNotifier {
 
   set selectedSection(DashboardSection section) {
     _selectedSection = section;
-    if (section != DashboardSection.chat) _contextSection = section;
+    // Neither chat nor threads represent a real "context" section for the
+    // desktop panel; keep the last real section so the sidebar restores it.
+    if (section != DashboardSection.chat &&
+        section != DashboardSection.threads) {
+      _contextSection = section;
+    }
   }
 
   /// The section the sidebar and context panel of the wide layouts show: the
   /// selected one, or the last one that was open while the phone layout's chat
-  /// page is selected.
+  /// or threads page is selected.
   DashboardSection get contextSection =>
-      _selectedSection == DashboardSection.chat
-      ? _contextSection
-      : _selectedSection;
+      _selectedSection == DashboardSection.chat ||
+              _selectedSection == DashboardSection.threads
+          ? _contextSection
+          : _selectedSection;
 
   bool accountShortcutSelected = false;
 
@@ -330,6 +336,15 @@ final class DashboardController extends ChangeNotifier {
   bool hasLoadedNavigationState = false;
   String? selectedFileTreeNodeKey;
   WorkspaceFileTreeNode? selectedFileTreeNode;
+
+  /// The workspace tree entry copied or cut with Ctrl/Cmd+C, Ctrl/Cmd+X, or the
+  /// Copy/Cut menu item. It is an app-local reference, never an absolute
+  /// operating-system path.
+  WorkspaceFileTreeNode? copiedWorkspaceNode;
+  /// Whether [copiedWorkspaceNode] came from Cut rather than Copy. A cut
+  /// source moves (or, across roots, copies then removes the original) on
+  /// paste and is cleared afterward; a copy source can be pasted repeatedly.
+  bool copiedWorkspaceNodeIsCut = false;
   bool isMovingWorkspaceNode = false;
 
   bool chatPanelVisible = true;
@@ -647,7 +662,8 @@ final class DashboardController extends ChangeNotifier {
           settings.showWorkspace();
         }
       case DashboardSection.chat:
-        // The chat page has no main panel of its own.
+      case DashboardSection.threads:
+        // Chat has no main panel. Threads is a mobile flyout-only list.
         settings.showUtility();
       case DashboardSection.agents:
         settings.showAgent();
@@ -2833,6 +2849,177 @@ final class DashboardController extends ChangeNotifier {
     ]);
   }
 
+  ({int rootIndex, String path})? get selectedPasteDirectory =>
+      _pasteDirectoryFor(selectedFileTreeNode);
+
+  ({int rootIndex, String path})? _pasteDirectoryFor(
+    WorkspaceFileTreeNode? node,
+  ) {
+    if (node == null ||
+        !fileRoots.any((WorkspaceDirectoryRoot root) => root.index == node.rootIndex)) {
+      return null;
+    }
+    return (
+      rootIndex: node.rootIndex,
+      path: node.isDirectory ? node.path : _parentDirectory(node.path),
+    );
+  }
+
+  bool get canCopySelectedWorkspaceNode {
+    final WorkspaceFileTreeNode? node = selectedFileTreeNode;
+    return !isMovingWorkspaceNode && node != null && node.path.isNotEmpty;
+  }
+
+  /// Cut has the same preconditions as Copy: a selected, non-root node.
+  bool get canCutSelectedWorkspaceNode => canCopySelectedWorkspaceNode;
+
+  /// The folder that Paste targets when no specific row is named: the active
+  /// folder, or the first root when nothing is selected.
+  ({int rootIndex, String path})? get activePasteDirectory {
+    final ({int rootIndex, String path})? selected = selectedPasteDirectory;
+    if (selected != null) return selected;
+    if (fileRoots.isEmpty) return null;
+    return (rootIndex: fileRoots.first.index, path: '');
+  }
+
+  /// Paste is allowed into any directory except the copied directory itself
+  /// or a folder inside it (same root). Same-folder pastes reach the engine and
+  /// come back as a conflict, which the UI reports.
+  bool canPasteIntoWorkspaceDirectory(int rootIndex, String directoryPath) {
+    final WorkspaceFileTreeNode? source = copiedWorkspaceNode;
+    if (isMovingWorkspaceNode || source == null ||
+        !fileRoots.any((WorkspaceDirectoryRoot root) => root.index == rootIndex)) {
+      return false;
+    }
+    if (!source.isDirectory || source.rootIndex != rootIndex) return true;
+    final String sourcePath = source.path.replaceAll('\\', '/');
+    final String destinationPath = directoryPath.replaceAll('\\', '/');
+    if (sourcePath.isEmpty) return false;
+    return destinationPath != sourcePath && !destinationPath.startsWith('$sourcePath/');
+  }
+
+  bool get canPasteWorkspaceNode {
+    final ({int rootIndex, String path})? destination = selectedPasteDirectory;
+    return destination != null &&
+        canPasteIntoWorkspaceDirectory(destination.rootIndex, destination.path);
+  }
+
+  /// Remembers the selected non-root file or folder as the source for paste.
+  /// No operating-system clipboard data or engine request is involved.
+  bool copySelectedWorkspaceNode() => _rememberSelectedWorkspaceNode(cut: false);
+
+  /// Remembers the selected non-root file or folder as a Cut source: the
+  /// next paste moves it instead of duplicating it.
+  bool cutSelectedWorkspaceNode() => _rememberSelectedWorkspaceNode(cut: true);
+
+  bool _rememberSelectedWorkspaceNode({required bool cut}) {
+    if (!canCopySelectedWorkspaceNode) return false;
+    final WorkspaceFileTreeNode source = selectedFileTreeNode!;
+    copiedWorkspaceNode = WorkspaceFileTreeNode(
+      rootIndex: source.rootIndex,
+      path: source.path,
+      isDirectory: source.isDirectory,
+    );
+    copiedWorkspaceNodeIsCut = cut;
+    filesError = null;
+    notifyListeners();
+    return true;
+  }
+
+  /// Copies (or, after Cut, moves) the remembered source into the selected
+  /// folder, or beside the selected file. A name clash gets a " Copy" suffix
+  /// from the engine rather than failing; a cut source is cleared once the
+  /// paste succeeds.
+  Future<Object?> pasteWorkspaceNode({
+    ({int rootIndex, String path})? to,
+  }) async {
+    final ({int rootIndex, String path})? destination = to ?? selectedPasteDirectory;
+    if (destination == null ||
+        !canPasteIntoWorkspaceDirectory(destination.rootIndex, destination.path)) {
+      return null;
+    }
+    final Workspace? workspace = _filesWorkspace;
+    final RestEngineClient? client = repository?.rest;
+    final WorkspaceFileTreeNode? source = copiedWorkspaceNode;
+    if (workspace == null || client == null || source == null) {
+      return null;
+    }
+    final bool cut = copiedWorkspaceNodeIsCut;
+    isMovingWorkspaceNode = true;
+    filesError = null;
+    notifyListeners();
+    try {
+      final WorkspaceFileEntry result;
+      if (cut && source.rootIndex == destination.rootIndex) {
+        result = await client
+            .moveWorkspacePath(
+              workspaceUuid: workspace.uuid,
+              sourceRootIndex: source.rootIndex,
+              sourcePath: source.path,
+              destinationRootIndex: destination.rootIndex,
+              destinationPath: destination.path,
+            )
+            .timeout(requestTimeout);
+        final WorkspaceFileMove move = WorkspaceFileMove(
+          sourceRootIndex: source.rootIndex,
+          sourcePath: source.path,
+          destinationRootIndex: destination.rootIndex,
+          destinationPath: result.relativePath,
+          isDirectory: source.isDirectory,
+        );
+        _applyWorkspaceFileMove(move);
+        await _reloadMoveParents(move);
+      } else {
+        result = await client
+            .copyWorkspacePath(
+              workspaceUuid: workspace.uuid,
+              sourceRootIndex: source.rootIndex,
+              sourcePath: source.path,
+              destinationRootIndex: destination.rootIndex,
+              destinationPath: destination.path,
+            )
+            .timeout(requestTimeout);
+        if (cut) {
+          // A cut across roots has no engine move; copy, then remove the
+          // original. The copy already landed, so a failed delete here is
+          // reported without undoing it rather than leaving the tree
+          // inconsistent.
+          await client
+              .deleteWorkspacePath(
+                workspaceUuid: workspace.uuid,
+                rootIndex: source.rootIndex,
+                path: source.path,
+              )
+              .timeout(requestTimeout);
+          _forgetDeletedWorkspacePath(
+            source.rootIndex,
+            source.path,
+            isDirectory: source.isDirectory,
+          );
+          await _reloadParent(source.rootIndex, source.path);
+        }
+        await _reloadParent(destination.rootIndex, result.relativePath);
+      }
+      selectFileTreeNode(
+        destination.rootIndex,
+        result.relativePath,
+        isDirectory: result.isDirectory,
+      );
+      if (cut) {
+        copiedWorkspaceNode = null;
+        copiedWorkspaceNodeIsCut = false;
+      }
+      _markNavigationChanged();
+      return null;
+    } on Object catch (caughtError) {
+      filesError = caughtError;
+      return caughtError;
+    } finally {
+      isMovingWorkspaceNode = false;
+      notifyListeners();
+    }
+  }
+
   /// The file shown in the main panel, for features that need to know what the
   /// user is looking at, such as the chat's active-file context.
   WorkspaceFileReference? get activeFileReference => documents.activeReference;
@@ -3062,6 +3249,116 @@ final class DashboardController extends ChangeNotifier {
       isMovingWorkspaceNode = false;
       notifyListeners();
     }
+  }
+
+  /// Whether an open tab at or under [path] has unsaved changes, so a delete
+  /// can warn that they will be lost.
+  bool hasUnsavedChangesAtOrUnder(
+    int rootIndex,
+    String path, {
+    required bool isDirectory,
+  }) => documents
+      .tabsAtOrUnder(rootIndex, path, isDirectory: isDirectory)
+      .any((EditorTab tab) => tab is TextTab && tab.isDirty);
+
+  /// Deletes a file, or a folder with everything in it. Closes the tabs it
+  /// had open and forgets it everywhere the app remembered it. Returns the
+  /// failure, if any, so the caller can tell the user why.
+  Future<Object?> deleteWorkspaceNode({
+    required int rootIndex,
+    required String path,
+    required bool isDirectory,
+  }) async {
+    if (isMovingWorkspaceNode) return null;
+    final Workspace? workspace = _filesWorkspace;
+    final RestEngineClient? client = repository?.rest;
+    if (workspace == null || client == null) return null;
+    isMovingWorkspaceNode = true;
+    filesError = null;
+    notifyListeners();
+    try {
+      await client
+          .deleteWorkspacePath(
+            workspaceUuid: workspace.uuid,
+            rootIndex: rootIndex,
+            path: path,
+          )
+          .timeout(requestTimeout);
+      _forgetDeletedWorkspacePath(rootIndex, path, isDirectory: isDirectory);
+      await _reloadParent(rootIndex, path.replaceAll('\\', '/'));
+      _markNavigationChanged();
+      return null;
+    } on Object catch (caughtError) {
+      return caughtError;
+    } finally {
+      isMovingWorkspaceNode = false;
+      notifyListeners();
+    }
+  }
+
+  void _forgetDeletedWorkspacePath(
+    int rootIndex,
+    String path, {
+    required bool isDirectory,
+  }) {
+    bool gone(int candidateRoot, String candidatePath) =>
+        isWorkspacePathAtOrUnder(
+          rootIndex: candidateRoot,
+          path: candidatePath,
+          targetRootIndex: rootIndex,
+          targetPath: path,
+          targetIsDirectory: isDirectory,
+        );
+
+    // Closing the tabs moves the editor to a remaining tab, which also moves
+    // the tree selection and the remembered file to it.
+    documents.closeAtOrUnder(rootIndex, path, isDirectory: isDirectory);
+
+    final WorkspaceFileTreeNode? selectedNode = selectedFileTreeNode;
+    if (selectedNode != null && gone(selectedNode.rootIndex, selectedNode.path)) {
+      selectedFileTreeNode = null;
+      selectedFileTreeNodeKey = null;
+    }
+    if (_filesRootIndex != null &&
+        _filesPath != null &&
+        gone(_filesRootIndex!, _filesPath!)) {
+      _filesRootIndex = null;
+      _filesPath = null;
+    }
+    for (final _WorkspaceViewerState state in _workspaceViewerStates.values) {
+      state.openFiles = <WorkspaceFileReference>[
+        for (final WorkspaceFileReference reference in state.openFiles)
+          if (!gone(reference.rootIndex, reference.path)) reference,
+      ];
+      if (state.activeFileKey != null &&
+          !state.openFiles.any(
+            (WorkspaceFileReference reference) =>
+                reference.key == state.activeFileKey,
+          )) {
+        state.activeFileKey = null;
+      }
+      state.expandedDirectoryKeys.removeWhere((String key) {
+        final int separator = key.indexOf(':');
+        final int? keyRoot = separator < 1
+            ? null
+            : int.tryParse(key.substring(0, separator));
+        return keyRoot != null && gone(keyRoot, key.substring(separator + 1));
+      });
+    }
+    final WorkspaceFileTreeNode? copiedNode = copiedWorkspaceNode;
+    if (copiedNode != null && gone(copiedNode.rootIndex, copiedNode.path)) {
+      copiedWorkspaceNode = null;
+      copiedWorkspaceNodeIsCut = false;
+    }
+    // Cached listings of the deleted folder and everything below it.
+    _directoryEntries.removeWhere((String key, _) {
+      final int separator = key.indexOf(':');
+      final int? keyRoot = separator < 1
+          ? null
+          : int.tryParse(key.substring(0, separator));
+      final String keyPath = key.substring(separator + 1);
+      return keyRoot != null && keyPath.isNotEmpty && gone(keyRoot, keyPath);
+    });
   }
 
   void _applyWorkspaceFileMove(WorkspaceFileMove move) {
@@ -3310,6 +3607,8 @@ final class DashboardController extends ChangeNotifier {
     _loadingDirectories.clear();
     selectedFileTreeNodeKey = null;
     selectedFileTreeNode = null;
+    copiedWorkspaceNode = null;
+    copiedWorkspaceNodeIsCut = false;
     filesError = null;
   }
 

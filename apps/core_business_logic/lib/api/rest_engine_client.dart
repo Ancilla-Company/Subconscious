@@ -497,6 +497,41 @@ final class RestEngineClient {
     ),
   );
 
+  /// Copies a file or directory into an existing directory in the same
+  /// workspace root. Existing destinations are never overwritten.
+  Future<WorkspaceFileEntry> copyWorkspacePath({
+    required String workspaceUuid,
+    required int sourceRootIndex,
+    required String sourcePath,
+    required int destinationRootIndex,
+    required String destinationPath,
+  }) async => WorkspaceFileEntry.fromJson(
+    await _sendMap(
+      'POST',
+      'workspaces/${_segment(workspaceUuid)}/files/copy',
+      <String, dynamic>{
+        'sourceRootIndex': sourceRootIndex,
+        'sourcePath': sourcePath,
+        'destinationRootIndex': destinationRootIndex,
+        'destinationPath': destinationPath,
+      },
+    ),
+  );
+
+  /// Deletes a file, or a directory with everything in it. The root of a
+  /// workspace folder cannot be deleted.
+  Future<void> deleteWorkspacePath({
+    required String workspaceUuid,
+    required int rootIndex,
+    required String path,
+  }) async {
+    await _request(
+      'DELETE',
+      'workspaces/${_segment(workspaceUuid)}/files',
+      query: <String, String>{'rootIndex': '$rootIndex', 'path': path},
+    );
+  }
+
   Future<Map<String, dynamic>> indexWorkspaceRag({
     required String workspaceUuid,
   }) => _requestMap('POST', 'workspaces/${_segment(workspaceUuid)}/rag/index');

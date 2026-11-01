@@ -77,6 +77,19 @@ final class _GalleryPageState extends State<_GalleryPage> {
   final ScrollController _scroll = ScrollController();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showAppSnack(
+        context,
+        'Notification toast preview. Use the buttons below to compare variants.',
+        duration: const Duration(days: 1),
+      );
+    });
+  }
+
+  @override
   void dispose() {
     _search.dispose();
     _scroll.dispose();
@@ -172,7 +185,11 @@ final class _GalleryPageState extends State<_GalleryPage> {
       ),
       const _Sample(
         'AppTextField: obscureText (password)',
-        AppTextField(label: 'Password', initialValue: 'secret', obscureText: true),
+        AppTextField(
+          label: 'Password',
+          initialValue: 'secret',
+          obscureText: true,
+        ),
       ),
       const _Sample(
         'AppTextField: multi-line (minLines 3, maxLines 6)',
@@ -234,7 +251,11 @@ final class _GalleryPageState extends State<_GalleryPage> {
           children: <Widget>[
             const SizedBox(
               width: 150,
-              child: AppTextField(hintText: 'Find', height: 32, initialValue: 'model'),
+              child: AppTextField(
+                hintText: 'Find',
+                height: 32,
+                initialValue: 'model',
+              ),
             ),
             AppIconButton(
               tooltip: 'Previous',
@@ -341,7 +362,10 @@ final class _GalleryPageState extends State<_GalleryPage> {
           child: AppCompactDropdown<String>(
             value: '',
             items: const <DropdownMenuItem<String>>[
-              DropdownMenuItem<String>(value: '', child: Text('All workspaces')),
+              DropdownMenuItem<String>(
+                value: '',
+                child: Text('All workspaces'),
+              ),
               DropdownMenuItem<String>(value: 'a', child: Text('Alpha')),
             ],
             onChanged: (_) {},
@@ -430,7 +454,10 @@ final class _GalleryPageState extends State<_GalleryPage> {
           ],
         ),
       ),
-      const _Sample('AppSectionHeading', AppSectionHeading(title: 'Section heading')),
+      const _Sample(
+        'AppSectionHeading',
+        AppSectionHeading(title: 'Section heading'),
+      ),
       const _Sample(
         'AppFormError',
         AppFormError(error: 'Operation failed: the engine is not connected.'),
@@ -740,7 +767,10 @@ final class _GalleryPageState extends State<_GalleryPage> {
               label: 'lib',
               depth: 0,
               leading: const Icon(FluentIcons.folder_16_regular, size: 16),
-              trailing: const Icon(FluentIcons.chevron_down_12_regular, size: 12),
+              trailing: const Icon(
+                FluentIcons.chevron_down_12_regular,
+                size: 12,
+              ),
               onTap: _noop,
             ),
             AppTreeRow(
@@ -1054,7 +1084,10 @@ final class _GalleryPageState extends State<_GalleryPage> {
             title: 'LAPTOP',
             subtitle: 'Online, Full node, macos, pending',
             actions: <Widget>[
-              FilledButton.tonal(onPressed: _noop, child: const Text('Approve')),
+              FilledButton.tonal(
+                onPressed: _noop,
+                child: const Text('Approve'),
+              ),
               TextButton(onPressed: _noop, child: const Text('Remove')),
             ],
           ),
@@ -1145,17 +1178,38 @@ final class _GalleryPageState extends State<_GalleryPage> {
   // --- Dialogs, sheets, snack bars --------------------------------------------------------
 
   Widget _overlays(BuildContext context) => _Section(
-    title: 'Dialogs, sheets and snack bars',
+    title: 'Dialogs, sheets and notification toasts',
     children: <Widget>[
       _Sample(
         'AppDialog (shown inline)',
         AppDialog(
           title: 'Delete workspace?',
-          content: const Text('This also deletes its threads and cannot be undone.'),
+          content: const Text(
+            'This also deletes its threads and cannot be undone.',
+          ),
           actions: <Widget>[
             TextButton(onPressed: _noop, child: const Text('Cancel')),
             FilledButton(onPressed: _noop, child: const Text('Delete')),
           ],
+        ),
+        width: 420,
+      ),
+      const _Sample(
+        'AppConfirmDialog: destructive (shown inline)',
+        AppConfirmDialog(
+          title: 'Delete folder?',
+          message: 'Delete the folder “notes” and everything in it? This cannot be undone.',
+          confirmLabel: 'Delete',
+          destructive: true,
+        ),
+        width: 420,
+      ),
+      const _Sample(
+        'AppConfirmDialog: plain (shown inline)',
+        AppConfirmDialog(
+          title: 'Reset the layout?',
+          message: 'The panels go back to their default sizes.',
+          confirmLabel: 'Reset',
         ),
         width: 420,
       ),
@@ -1175,7 +1229,7 @@ final class _GalleryPageState extends State<_GalleryPage> {
         width: 420,
       ),
       _Sample(
-        'showAppDialog, showAppBottomSheet, showAppSnack (open them)',
+        'Dialogs, sheet and notification toast examples',
         AppButtonRow(
           children: <Widget>[
             OutlinedButton(
@@ -1196,6 +1250,16 @@ final class _GalleryPageState extends State<_GalleryPage> {
               child: const Text('Dialog'),
             ),
             OutlinedButton(
+              onPressed: () => showAppConfirmDialog(
+                context: context,
+                title: 'Delete file?',
+                message: 'Delete “notes.md”? This cannot be undone.',
+                confirmLabel: 'Delete',
+                destructive: true,
+              ),
+              child: const Text('Confirm'),
+            ),
+            OutlinedButton(
               onPressed: () => showAppBottomSheet<void>(
                 context: context,
                 title: 'A sheet',
@@ -1209,7 +1273,7 @@ final class _GalleryPageState extends State<_GalleryPage> {
             ),
             OutlinedButton(
               onPressed: () => showAppSnack(context, 'Agent UUID copied'),
-              child: const Text('Snack'),
+              child: const Text('Info toast'),
             ),
             OutlinedButton(
               onPressed: () => showAppSnack(
@@ -1217,7 +1281,34 @@ final class _GalleryPageState extends State<_GalleryPage> {
                 "Couldn't save the agent.",
                 isError: true,
               ),
-              child: const Text('Error snack'),
+              child: const Text('Error toast'),
+            ),
+            OutlinedButton(
+              onPressed: () => showAppSnack(
+                context,
+                'Changes saved. You can undo this action.',
+                action: SnackBarAction(label: 'Undo', onPressed: _noop),
+              ),
+              child: const Text('Toast with action'),
+            ),
+            OutlinedButton(
+              onPressed: () => showAppSnack(
+                context,
+                'This notification has a longer message to review truncation.',
+                duration: const Duration(seconds: 8),
+              ),
+              child: const Text('Long toast'),
+            ),
+            OutlinedButton(
+              onPressed: () => showAppSnack(
+                context,
+                'Could not save the agent.\n'
+                'The engine is not reachable.\n'
+                'Check the connection and try again.',
+                isError: true,
+                duration: const Duration(seconds: 8),
+              ),
+              child: const Text('Multiline toast'),
             ),
           ],
         ),

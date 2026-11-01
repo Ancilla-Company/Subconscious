@@ -4,8 +4,11 @@ import '../tokens/app_radii.dart';
 
 /// Visual size of an [AppIconButton].
 enum AppIconButtonSize {
-  /// 24 dp, for a control inside another control, such as the close button of
-  /// a tab. Leaves room above and below it in a 34 dp tab.
+  /// 22 dp, for a control nested inside a 32 dp control, such as the close
+  /// button of a file tab sized to match the app's regular 32 dp buttons.
+  tiny(22),
+
+  /// 24 dp, for a control inside another, slightly larger control.
   small(24),
 
   /// 32 dp, for dense desktop toolbars and panel headers.
@@ -68,6 +71,7 @@ final class AppIconButton extends StatelessWidget {
     this.busy = false,
     this.destructive = false,
     this.outlined = false,
+    this.foregroundColor,
     super.key,
   });
 
@@ -100,6 +104,11 @@ final class AppIconButton extends StatelessWidget {
   /// Tints the icon with the error colour (delete, remove).
   final bool destructive;
 
+  /// Overrides the icon colour for a button on a tinted surface, such as a
+  /// toast's close button, which uses the toast's text colour. Null keeps the
+  /// kit colour.
+  final Color? foregroundColor;
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
@@ -129,11 +138,13 @@ final class AppIconButton extends StatelessWidget {
               : outlined
               ? colors.surfaceContainerLowest
               : null,
-          foregroundColor: destructive
-              ? colors.error
-              : selected
-              ? colors.onSecondaryContainer
-              : null,
+          foregroundColor:
+              foregroundColor ??
+              (destructive
+                  ? colors.error
+                  : selected
+                  ? colors.onSecondaryContainer
+                  : null),
           side: outlined ? BorderSide(color: colors.outlineVariant) : null,
           minimumSize: Size.square(dimension),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,

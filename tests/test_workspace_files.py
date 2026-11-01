@@ -89,7 +89,12 @@ def test_sync_security_and_content_validation(tmp_path):
     assert service._read_sync(root, "bom.txt").content == "hello"
     assert_error(400, lambda: service._read_sync(root, "binary.txt"), "UTF-8")
     assert_error(400, lambda: service._read_sync(root, "folder"), "file")
-    assert_error(400, lambda: service._create_sync(root, "bad.exe", "", b""), "supported")
+    # No extension allowlist: an unusual or absent extension is still plain
+    # text as long as it decodes as UTF-8. ".kiroignore" has no name before
+    # its dot at all, and a made-up extension is just as readable.
+    assert service._create_sync(root, "bad.madeupext", "hi", b"hi").content == "hi"
+    (root / ".kiroignore").write_text("node_modules/", encoding="utf-8")
+    assert service._read_sync(root, ".kiroignore").content == "node_modules/"
     assert_error(404, lambda: service._create_sync(root, "missing/a.txt", "", b""), "does not exist")
     assert_error(409, lambda: service._create_sync(root, "bom.txt", "", b""), "already exists")
     assert_error(400, lambda: service._encode(None), "required")
@@ -202,3 +207,169 @@ def test_rename_rejects_bad_names_and_clashes(tmp_path):
     assert_error(409, lambda: service._move_sync(root, "a.txt", "", "b.txt"))
     # A plain move into the folder it is already in is still refused.
     assert_error(400, lambda: service._move_sync(root, "a.txt", ""), "already")
+
+
+def test_delete_removes_files_and_whole_directories(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    (root / "dir" / "nested").mkdir(parents=True)
+    (root / "dir" / "nested" / "deep.txt").write_text("deep")
+    (root / "dir" / "top.md").write_text("top")
+    (root / "keep.txt").write_text("keep")
+    (root / "locked.txt").write_text("locked")
+    os.chmod(root / "locked.txt", 0o444)
+
+    service._delete_sync(root, "keep.txt")
+    assert not (root / "keep.txt").exists()
+
+    # A read-only file is still deleted (Windows refuses unless the flag is cleared).
+    service._delete_sync(root, "locked.txt")
+    assert not (root / "locked.txt").exists()
+
+    os.chmod(root / "dir" / "top.md", 0o444)
+    service._delete_sync(root, "dir")
+    assert not (root / "dir").exists()
+    assert root.exists() and list(root.iterdir()) == []
+
+
+def test_delete_refuses_root_traversal_missing_and_engine_folder(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / ".subconscious").mkdir()
+    (root / ".subconscious" / "sidecar.db").write_bytes(b"x")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+
+    assert_error(400, lambda: service._delete_sync(root, ""), "required")
+    assert_error(400, lambda: service._delete_sync(root, "../outside.txt"), "traversal")
+    assert_error(404, lambda: service._delete_sync(root, "missing.txt"), "does not exist")
+    assert_error(403, lambda: service._delete_sync(root, ".subconscious"), "managed")
+    assert_error(403, lambda: service._delete_sync(root, ".subconscious/sidecar.db"), "managed")
+    assert outside.exists()
+    assert (root / ".subconscious" / "sidecar.db").exists()
+
+
+def test_delete_never_follows_links_out_of_the_root(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    (root / "dir").mkdir(parents=True)
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret", encoding="utf-8")
+    try:
+        (root / "link").symlink_to(outside, target_is_directory=True)
+        (root / "dir" / "inner").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
+
+    # The link itself is a reparse point and is refused.
+    assert_error(403, lambda: service._delete_sync(root, "link"), "reparse point")
+    # A link inside a deleted directory is removed, not followed.
+    service._delete_sync(root, "dir")
+    assert not (root / "dir").exists()
+    assert (outside / "secret.txt").read_text(encoding="utf-8") == "secret"
+
+
+def test_copy_copies_files_and_directories_without_changing_the_source(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    (root / "source" / "nested").mkdir(parents=True)
+    (root / "destination").mkdir()
+    (root / "note.md").write_text("note", encoding="utf-8")
+    (root / "source" / "nested" / "deep.txt").write_text("deep", encoding="utf-8")
+
+    copied_file = service._copy_sync(root, "note.md", root, "destination")
+    assert (copied_file.name, copied_file.relative_path, copied_file.is_directory) == (
+        "note.md", "destination/note.md", False
+    )
+    assert (root / "note.md").read_text(encoding="utf-8") == "note"
+    assert (root / "destination" / "note.md").read_text(encoding="utf-8") == "note"
+
+    copied_directory = service._copy_sync(root, "source", root, "destination")
+    assert (copied_directory.name, copied_directory.relative_path, copied_directory.is_directory) == (
+        "source", "destination/source", True
+    )
+    assert (root / "source" / "nested" / "deep.txt").read_text(encoding="utf-8") == "deep"
+    assert (root / "destination" / "source" / "nested" / "deep.txt").read_text(encoding="utf-8") == "deep"
+
+
+def test_copy_names_a_conflicting_dotfile_without_an_extension_split(tmp_path):
+    """A leading-dot name with nothing before the dot, like ".kiroignore", has
+    no extension to protect: the whole name is the stem, so a conflict is
+    named ".kiroignore Copy", not "Copy.kiroignore" (which would turn a
+    dotfile into a visible file with a ".kiroignore" extension)."""
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / ".kiroignore").write_text("node_modules/", encoding="utf-8")
+
+    copied = service._copy_sync(root, ".kiroignore", root, "")
+    assert copied.relative_path == ".kiroignore Copy"
+    assert (root / ".kiroignore Copy").read_text(encoding="utf-8") == "node_modules/"
+
+    copied_again = service._copy_sync(root, ".kiroignore", root, "")
+    assert copied_again.relative_path == ".kiroignore Copy 2"
+
+
+def test_copy_refuses_collisions_managed_paths_and_self_descendants(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    (root / "source" / "child").mkdir(parents=True)
+    (root / "destination").mkdir()
+    (root / "source" / "a.txt").write_text("a")
+    (root / "destination" / "source").mkdir()
+    (root / ".subconscious").mkdir()
+
+    # A name clash at the destination gets a " Copy" suffix instead of failing.
+    conflicted = service._copy_sync(root, "source", root, "destination")
+    assert conflicted.relative_path == "destination/source Copy"
+    assert (root / "destination" / "source Copy" / "a.txt").read_text() == "a"
+
+    assert_error(400, lambda: service._copy_sync(root, "source", root, "source/child"), "itself")
+    assert_error(403, lambda: service._copy_sync(root, ".subconscious", root, "destination"), "managed")
+    assert_error(403, lambda: service._copy_sync(root, "source", root, ".subconscious"), "managed")
+    assert_error(404, lambda: service._copy_sync(root, "missing", root, "destination"), "does not exist")
+    assert_error(400, lambda: service._copy_sync(root, "", root, "destination"), "required")
+
+
+def test_copy_rejects_reparse_entries_inside_a_directory(tmp_path):
+    service = WorkspaceFileService(None)
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    (root / "source").mkdir(parents=True)
+    (root / "destination").mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret", encoding="utf-8")
+    try:
+        (root / "source" / "link").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
+
+    assert_error(403, lambda: service._copy_sync(root, "source", root, "destination"), "reparse point")
+    assert not (root / "destination" / "source").exists()
+    assert (outside / "secret.txt").read_text(encoding="utf-8") == "secret"
+
+
+def test_copy_works_between_two_roots_of_one_workspace(tmp_path):
+    service = WorkspaceFileService(None)
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    (first / "notes").mkdir(parents=True)
+    second.mkdir()
+    (first / "notes" / "a.md").write_text("alpha", encoding="utf-8")
+
+    copied = service._copy_sync(first, "notes/a.md", second, "")
+    assert copied.relative_path == "a.md"
+    assert (second / "a.md").read_text(encoding="utf-8") == "alpha"
+    assert (first / "notes" / "a.md").read_text(encoding="utf-8") == "alpha"
+
+    copied_folder = service._copy_sync(first, "notes", second, "")
+    assert copied_folder.relative_path == "notes"
+    assert (second / "notes" / "a.md").read_text(encoding="utf-8") == "alpha"
+
+    # A repeated copy of the same file gets "a Copy.md", then "a Copy 2.md".
+    again = service._copy_sync(first, "notes/a.md", second, "")
+    assert again.relative_path == "a Copy.md"
+    again2 = service._copy_sync(first, "notes/a.md", second, "")
+    assert again2.relative_path == "a Copy 2.md"

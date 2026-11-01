@@ -15,10 +15,19 @@ final class ThreadsList extends StatefulWidget {
     required this.controller,
     this.minTouchTarget,
     this.showWorkspacePicker = true,
+    this.onThreadSelected,
+    this.edgePadding = 8,
     super.key,
   });
 
   final DashboardController controller;
+
+  /// Left/right inset of the header row, search field and list, matching
+  /// the host panel's own header so its buttons, the search field and the
+  /// list's scrollbar all line up at the same edge. The chat panel passes
+  /// its own computed gutter; a standalone page keeps the 8 dp default that
+  /// the chat header itself uses.
+  final double edgePadding;
 
   /// Minimum height of every row (the touch layouts pass 48); null keeps the
   /// compact desktop size.
@@ -28,6 +37,10 @@ final class ThreadsList extends StatefulWidget {
   /// off while the title bar has one (the normal window); the chat-only window
   /// and the phone layout have none, so they keep it.
   final bool showWorkspacePicker;
+
+  /// Runs after a thread is chosen. The mobile flyout uses this to return to
+  /// the chat page and close itself; the inline chat list leaves it null.
+  final Future<void> Function()? onThreadSelected;
 
   @override
   State<ThreadsList> createState() => _ThreadsListState();
@@ -52,7 +65,12 @@ final class _ThreadsListState extends State<ThreadsList> {
       children: <Widget>[
         _header(context),
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          padding: EdgeInsets.fromLTRB(
+            widget.edgePadding,
+            0,
+            widget.edgePadding,
+            8,
+          ),
           // Outside the form theme the field would lose its border.
           child: AppFormTheme(
             child: AppSearchField(
@@ -67,46 +85,31 @@ final class _ThreadsListState extends State<ThreadsList> {
     ),
   );
 
-  Widget _header(BuildContext context) => SizedBox(
-    height: 48,
-    child: LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        // A fixed width: a loose Flexible would leave its unused share of the
-        // row to the right of the close button. The picker takes at most 142
-        // and leaves the title room in a narrow panel.
-        final double pickerWidth = (constraints.maxWidth * 0.42).clamp(
-          80.0,
-          142.0,
-        );
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  'Threads',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              if (widget.showWorkspacePicker) ...<Widget>[
-                SizedBox(width: pickerWidth, child: _workspacePicker()),
-                const SizedBox(width: 4),
-              ],
-              AppIconButton(
-                tooltip: 'Close threads',
-                icon: FluentIcons.dismiss_20_regular,
-                minTouchTarget: minTouchTarget,
-                onPressed: () => controller.setThreadsListVisible(false),
-              ),
-            ],
+  Widget _header(BuildContext context) => LayoutBuilder(
+    builder: (BuildContext context, BoxConstraints constraints) {
+      // A fixed width: a loose Flexible would leave its unused share of the
+      // row to the right of the close button. The picker takes at most 142
+      // and leaves the title room in a narrow panel.
+      final double pickerWidth = (constraints.maxWidth * 0.42).clamp(
+        80.0,
+        142.0,
+      );
+      return AppPanelHeader(
+        title: 'Threads',
+        horizontalPadding: widget.edgePadding,
+        actions: <Widget>[
+          if (widget.showWorkspacePicker) ...<Widget>[
+            SizedBox(width: pickerWidth, child: _workspacePicker()),
+          ],
+          AppIconButton(
+            tooltip: 'Close threads',
+            icon: FluentIcons.dismiss_20_regular,
+            minTouchTarget: minTouchTarget,
+            onPressed: () => controller.setThreadsListVisible(false),
           ),
-        );
-      },
-    ),
+        ],
+      );
+    },
   );
   Widget _workspacePicker() {
     final String activeUuid = controller.threadsWorkspace?.uuid ?? '';
@@ -146,6 +149,7 @@ final class _ThreadsListState extends State<ThreadsList> {
       },
     );
   }
+
   List<ThreadInfo> _matches() {
     final String query = _search.text.trim().toLowerCase();
     if (query.isEmpty) return controller.threads;
@@ -162,7 +166,9 @@ final class _ThreadsListState extends State<ThreadsList> {
 
   Widget _body(BuildContext context) {
     if (!controller.isConnected && controller.threads.isEmpty) {
-      return const _Message('Threads are available when the engine is connected.');
+      return const _Message(
+        'Threads are available when the engine is connected.',
+      );
     }
     if (controller.isLoadingThreads) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
@@ -187,7 +193,12 @@ final class _ThreadsListState extends State<ThreadsList> {
       return _Message('No threads match “${_search.text.trim()}”.');
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: EdgeInsets.fromLTRB(
+        widget.edgePadding,
+        0,
+        widget.edgePadding,
+        12,
+      ),
       itemCount: matches.length,
       separatorBuilder: (BuildContext context, int index) =>
           const SizedBox(height: 4),
@@ -206,7 +217,10 @@ final class _ThreadsListState extends State<ThreadsList> {
           // keep their larger tap target.
           dense: minTouchTarget == null,
           minHeight: minTouchTarget,
-          onTap: () => controller.selectThread(thread),
+          onTap: () async {
+            await controller.selectThread(thread);
+            await widget.onThreadSelected?.call();
+          },
         );
       },
     );

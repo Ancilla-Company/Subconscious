@@ -132,6 +132,9 @@ final class _ContextPanelState extends State<ContextPanel> {
               DashboardSection.chat => const _PanelMessage(
                 'Open the thread list from the chat header.',
               ),
+              DashboardSection.threads => const _PanelMessage(
+                'Open Threads from the mobile navigation menu.',
+              ),
               DashboardSection.files => _FilesSection(
                 controller: widget.controller,
                 onSelection: widget.onSelection,
@@ -165,33 +168,6 @@ final class _TouchTarget extends InheritedWidget {
       oldWidget.minTouchTarget != minTouchTarget;
 }
 
-final class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, this.actions = const <Widget>[]});
-
-  final String title;
-  final List<Widget> actions;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 48,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: Text(
-              title,
-              style: Theme.of(context).textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          ...actions,
-        ],
-      ),
-    ),
-  );
-}
-
 final class _HeaderButton extends StatelessWidget {
   const _HeaderButton({
     required this.icon,
@@ -208,19 +184,16 @@ final class _HeaderButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double? touch = _TouchTarget.of(context);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(2, touch == null ? 4 : 0, 2, 0),
-      child: AppIconButton(
-        icon: icon,
-        tooltip: tooltip,
-        minTouchTarget: touch,
-        onPressed: onPressed == null
-            ? null
-            : () {
-                onPressed!();
-                onSelection?.call();
-              },
-      ),
+    return AppIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      minTouchTarget: touch,
+      onPressed: onPressed == null
+          ? null
+          : () {
+              onPressed!();
+              onSelection?.call();
+            },
     );
   }
 }
@@ -265,8 +238,9 @@ final class _AgentsSectionState extends State<_AgentsSection> {
   @override
   Widget build(BuildContext context) => Column(
     children: <Widget>[
-      _SectionHeader(
+      AppPanelHeader(
         title: 'Agents',
+        horizontalPadding: 12,
         actions: <Widget>[
           _HeaderButton(
             tooltip: 'New agent',
@@ -339,7 +313,7 @@ final class _AgentsSectionState extends State<_AgentsSection> {
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       itemCount: matches.length,
       separatorBuilder: (BuildContext context, int index) =>
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
       itemBuilder: (BuildContext context, int index) {
         final AgentInfo agent = matches[index];
         return _AgentRow(
@@ -406,6 +380,7 @@ final class _AgentRow extends StatelessWidget {
     );
   }
 }
+
 final class _NavigationRow extends StatelessWidget {
   const _NavigationRow({
     required this.selected,
@@ -452,8 +427,9 @@ final class _WorkspacesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: <Widget>[
-      _SectionHeader(
+      AppPanelHeader(
         title: 'Workspaces',
+        horizontalPadding: 12,
         actions: <Widget>[
           _HeaderButton(
             tooltip: 'New workspace',
@@ -497,7 +473,7 @@ final class _WorkspacesSection extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       itemCount: controller.workspaces.length,
       separatorBuilder: (BuildContext context, int index) =>
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
       itemBuilder: (BuildContext context, int index) {
         final Workspace workspace = controller.workspaces[index];
         return _NavigationRow(
@@ -532,8 +508,9 @@ final class _FilesSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        _SectionHeader(
+        AppPanelHeader(
           title: 'Files',
+          horizontalPadding: 12,
           actions: <Widget>[
             _HeaderButton(
               tooltip: 'Refresh files',
@@ -573,28 +550,31 @@ final class _FilesSection extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: controller.activeWorkspace == null
-              ? const _PanelMessage('No workspace selected.')
-              : roots.isEmpty
-              ? const _PanelMessage('Add a folder in Workspace settings.')
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
-                  children: <Widget>[
-                    for (final WorkspaceDirectoryRoot root in roots)
-                      _DirectoryNode(
-                        key: ValueKey<String>(
-                          '${controller.activeWorkspace?.uuid}:${root.index}',
+          child: _FileTreeKeyboardScope(
+            controller: controller,
+            child: controller.activeWorkspace == null
+                ? const _PanelMessage('No workspace selected.')
+                : roots.isEmpty
+                ? const _PanelMessage('Add a folder in Workspace settings.')
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                    children: <Widget>[
+                      for (final WorkspaceDirectoryRoot root in roots)
+                        _DirectoryNode(
+                          key: ValueKey<String>(
+                            '${controller.activeWorkspace?.uuid}:${root.index}',
+                          ),
+                          controller: controller,
+                          rootIndex: root.index,
+                          path: '',
+                          label: root.name,
+                          subtitle: root.path,
+                          isRoot: true,
+                          onSelection: onSelection,
                         ),
-                        controller: controller,
-                        rootIndex: root.index,
-                        path: '',
-                        label: root.name,
-                        subtitle: root.path,
-                        isRoot: true,
-                        onSelection: onSelection,
-                      ),
-                  ],
-                ),
+                    ],
+                  ),
+          ),
         ),
       ],
     );
@@ -952,6 +932,7 @@ final class _FileTreeRow extends StatelessWidget {
               child: result,
             );
     }
+    // AppTreeRow carries its own standard bottom gap; no extra spacing here.
     return result;
   }
 }
@@ -1151,7 +1132,15 @@ String? _workspaceRelativeFolderPath(String value) {
   return normalized;
 }
 
-enum _FileTreeAction { openInExplorer, rename, copyPath }
+enum _FileTreeAction {
+  openInExplorer,
+  copy,
+  cut,
+  paste,
+  rename,
+  copyPath,
+  delete,
+}
 
 /// Whether a file manager can show the engine's folders: only on a desktop
 /// app, where the engine runs on the same machine.
@@ -1172,18 +1161,35 @@ Future<void> _showFileTreeMenu(
   required bool isRoot,
   required String name,
 }) async {
+  // Make context-menu commands and shortcuts use the same selection.
+  controller.selectFileTreeNode(rootIndex, path, isDirectory: isDirectory);
   final _FileTreeAction? action = await showAppContextMenu<_FileTreeAction>(
     context: context,
     position: position,
     items: <AppMenuItem<_FileTreeAction>>[
-      if (_canOpenInFileExplorer)
-        AppMenuItem<_FileTreeAction>(
-          value: _FileTreeAction.openInExplorer,
-          label: isDirectory
-              ? 'Open in file explorer'
-              : 'Show in file explorer',
-          icon: FluentIcons.folder_open_20_regular,
+      if (!isRoot)
+        const AppMenuItem<_FileTreeAction>(
+          value: _FileTreeAction.copy,
+          label: 'Copy',
+          icon: FluentIcons.copy_20_regular,
         ),
+      if (!isRoot)
+        const AppMenuItem<_FileTreeAction>(
+          value: _FileTreeAction.cut,
+          label: 'Cut',
+          icon: FluentIcons.cut_20_regular,
+        ),
+      if (_canPasteIntoNode(controller, rootIndex, path, isDirectory))
+        const AppMenuItem<_FileTreeAction>(
+          value: _FileTreeAction.paste,
+          label: 'Paste',
+          icon: FluentIcons.clipboard_paste_20_regular,
+        ),
+      AppMenuItem<_FileTreeAction>(
+        value: _FileTreeAction.openInExplorer,
+        label: isDirectory ? 'Open in file explorer' : 'Show in file explorer',
+        icon: FluentIcons.folder_open_20_regular,
+      ),
       if (!isRoot)
         const AppMenuItem<_FileTreeAction>(
           value: _FileTreeAction.rename,
@@ -1195,10 +1201,34 @@ Future<void> _showFileTreeMenu(
         label: 'Copy path',
         icon: FluentIcons.copy_20_regular,
       ),
+      // A workspace folder itself is removed in Workspace settings, not here.
+      if (!isRoot)
+        const AppMenuItem<_FileTreeAction>(
+          value: _FileTreeAction.delete,
+          label: 'Delete…',
+          icon: FluentIcons.delete_20_regular,
+        ),
     ],
   );
   if (action == null || !context.mounted) return;
   switch (action) {
+    case _FileTreeAction.copy:
+      if (controller.copySelectedWorkspaceNode() && context.mounted) {
+        _showFileActionInfo(context, 'Copied $name');
+      }
+    case _FileTreeAction.cut:
+      if (controller.cutSelectedWorkspaceNode() && context.mounted) {
+        _showFileActionInfo(context, 'Cut $name');
+      }
+    case _FileTreeAction.paste:
+      await _pasteWorkspaceNode(
+        context,
+        controller,
+        to: (
+          rootIndex: rootIndex,
+          path: isDirectory ? path : _workspaceRelativeParent(path),
+        ),
+      );
     case _FileTreeAction.openInExplorer:
       await _openInFileExplorer(
         context,
@@ -1223,7 +1253,84 @@ Future<void> _showFileTreeMenu(
       );
       if (absolute == null) return;
       await Clipboard.setData(ClipboardData(text: absolute));
-      if (context.mounted) _showFileActionMessage(context, 'Path copied');
+      if (context.mounted) _showFileActionInfo(context, 'Path copied');
+    case _FileTreeAction.delete:
+      await _deleteWorkspaceNode(
+        context,
+        controller,
+        rootIndex: rootIndex,
+        path: path,
+        isDirectory: isDirectory,
+        name: name,
+      );
+  }
+}
+
+bool _canPasteIntoNode(
+  DashboardController controller,
+  int rootIndex,
+  String path,
+  bool isDirectory,
+) => controller.canPasteIntoWorkspaceDirectory(
+  rootIndex,
+  isDirectory ? path : _workspaceRelativeParent(path),
+);
+
+String _workspaceRelativeParent(String path) {
+  final String normalized = path.replaceAll('\\', '/');
+  final int separator = normalized.lastIndexOf('/');
+  return separator < 0 ? '' : normalized.substring(0, separator);
+}
+
+Future<void> _pasteWorkspaceNode(
+  BuildContext context,
+  DashboardController controller, {
+  ({int rootIndex, String path})? to,
+}) async {
+  final Object? failure = await controller.pasteWorkspaceNode(to: to);
+  if (!context.mounted) return;
+  if (failure != null) {
+    _showFileActionMessage(context, "Couldn't paste: $failure");
+  } else if (controller.copiedWorkspaceNode != null) {
+    _showFileActionInfo(context, 'Pasted');
+  }
+}
+
+Future<void> _deleteWorkspaceNode(
+  BuildContext context,
+  DashboardController controller, {
+  required int rootIndex,
+  required String path,
+  required bool isDirectory,
+  required String name,
+}) async {
+  final bool unsaved = controller.hasUnsavedChangesAtOrUnder(
+    rootIndex,
+    path,
+    isDirectory: isDirectory,
+  );
+  final String message = <String>[
+    isDirectory
+        ? 'Delete the folder “$name” and everything in it?'
+        : 'Delete “$name”?',
+    if (unsaved) 'Its unsaved changes will be lost.',
+    'This cannot be undone.',
+  ].join(' ');
+  final bool confirmed = await showAppConfirmDialog(
+    context: context,
+    title: isDirectory ? 'Delete folder?' : 'Delete file?',
+    message: message,
+    confirmLabel: 'Delete',
+    destructive: true,
+  );
+  if (!confirmed || !context.mounted) return;
+  final Object? failure = await controller.deleteWorkspaceNode(
+    rootIndex: rootIndex,
+    path: path,
+    isDirectory: isDirectory,
+  );
+  if (failure != null && context.mounted) {
+    _showFileActionMessage(context, "Couldn't delete: $failure");
   }
 }
 
@@ -1412,6 +1519,10 @@ void _showFileActionMessage(BuildContext context, String message) {
   _showPanelToast(context, message, isError: true);
 }
 
+void _showFileActionInfo(BuildContext context, String message) {
+  _showPanelToast(context, message);
+}
+
 void _showPanelToast(
   BuildContext context,
   String message, {
@@ -1452,13 +1563,13 @@ final class _SettingsSection extends StatelessWidget {
     animation: controller.settings,
     builder: (BuildContext context, Widget? child) => Column(
       children: <Widget>[
-        const _SectionHeader(title: 'Settings'),
+        const AppPanelHeader(title: 'Settings', horizontalPadding: 12),
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             itemCount: _pages.length,
             separatorBuilder: (BuildContext context, int index) =>
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
             itemBuilder: (BuildContext context, int index) {
               final (String, IconData, SettingsPage) page = _pages[index];
               return _NavigationRow(
@@ -1476,4 +1587,146 @@ final class _SettingsSection extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// Focus-bound file-tree shortcuts. A pointer press on the tree focuses this
+/// scope. The bindings are deliberately not installed outside it, so Ctrl/Cmd
+/// C/V and Delete keep their usual meaning in editor and dialog text fields.
+final class _FileTreeKeyboardScope extends StatefulWidget {
+  const _FileTreeKeyboardScope({required this.controller, required this.child});
+
+  final DashboardController controller;
+  final Widget child;
+
+  @override
+  State<_FileTreeKeyboardScope> createState() => _FileTreeKeyboardScopeState();
+}
+
+final class _FileTreeKeyboardScopeState extends State<_FileTreeKeyboardScope> {
+  final FocusNode _focus = FocusNode(debugLabel: 'Workspace file tree');
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _copy() {
+    final WorkspaceFileTreeNode? selected =
+        widget.controller.selectedFileTreeNode;
+    if (selected == null || selected.path.isEmpty) return;
+    if (widget.controller.copySelectedWorkspaceNode()) {
+      _showFileActionInfo(
+        context,
+        'Copied ${_fileTreeNodeName(selected.path)}',
+      );
+    }
+  }
+
+  void _cut() {
+    final WorkspaceFileTreeNode? selected =
+        widget.controller.selectedFileTreeNode;
+    if (selected == null || selected.path.isEmpty) return;
+    if (widget.controller.cutSelectedWorkspaceNode()) {
+      _showFileActionInfo(context, 'Cut ${_fileTreeNodeName(selected.path)}');
+    }
+  }
+
+  Future<void> _paste() async {
+    final Object? failure = await widget.controller.pasteWorkspaceNode(
+      to: widget.controller.activePasteDirectory,
+    );
+    if (!mounted || widget.controller.copiedWorkspaceNode == null) return;
+    if (failure != null) {
+      _showFileActionMessage(context, "Couldn't paste: $failure");
+    } else {
+      _showFileActionInfo(context, 'Pasted');
+    }
+  }
+
+  Future<void> _showWhitespaceMenu(
+    BuildContext context,
+    Offset position,
+  ) async {
+    final DashboardController controller = widget.controller;
+    final ({int rootIndex, String path})? target =
+        controller.activePasteDirectory;
+    if (target == null ||
+        controller.copiedWorkspaceNode == null ||
+        !controller.canPasteIntoWorkspaceDirectory(
+          target.rootIndex,
+          target.path,
+        )) {
+      return;
+    }
+    final bool? paste = await showAppContextMenu<bool>(
+      context: context,
+      position: position,
+      items: <AppMenuItem<bool>>[
+        AppMenuItem<bool>(
+          value: true,
+          label: 'Paste',
+          icon: FluentIcons.clipboard_paste_20_regular,
+        ),
+      ],
+    );
+    if (paste != true || !context.mounted) return;
+    await _pasteWorkspaceNode(context, controller, to: target);
+  }
+
+  Future<void> _delete() async {
+    final WorkspaceFileTreeNode? selected =
+        widget.controller.selectedFileTreeNode;
+    if (selected == null || selected.path.isEmpty) return;
+    await _deleteWorkspaceNode(
+      context,
+      widget.controller,
+      rootIndex: selected.rootIndex,
+      path: selected.path,
+      isDirectory: selected.isDirectory,
+      name: _fileTreeNodeName(selected.path),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+    // CallbackShortcuts only sees key events that start at a focus node in
+    // its *subtree* and bubble up to it. The explicit Focus node below is
+    // therefore nested inside this, not wrapped around it — an outer Focus
+    // would shadow CallbackShortcuts entirely once it held primary focus.
+    bindings: <ShortcutActivator, VoidCallback>{
+      const SingleActivator(LogicalKeyboardKey.keyC, control: true): _copy,
+      const SingleActivator(LogicalKeyboardKey.keyC, meta: true): _copy,
+      const SingleActivator(LogicalKeyboardKey.keyX, control: true): _cut,
+      const SingleActivator(LogicalKeyboardKey.keyX, meta: true): _cut,
+      const SingleActivator(LogicalKeyboardKey.keyV, control: true): () =>
+          unawaited(_paste()),
+      const SingleActivator(LogicalKeyboardKey.keyV, meta: true): () =>
+          unawaited(_paste()),
+      const SingleActivator(LogicalKeyboardKey.delete): () =>
+          unawaited(_delete()),
+      const SingleActivator(LogicalKeyboardKey.backspace): () =>
+          unawaited(_delete()),
+    },
+    child: Focus(
+      focusNode: _focus,
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _focus.requestFocus(),
+        // Rows handle their own secondary tap; this only sees empty space.
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onSecondaryTapDown: (TapDownDetails details) =>
+              unawaited(_showWhitespaceMenu(context, details.globalPosition)),
+          child: widget.child,
+        ),
+      ),
+    ),
+  );
+}
+
+String _fileTreeNodeName(String path) {
+  final String normalized = path.replaceAll('\\', '/');
+  final int separator = normalized.lastIndexOf('/');
+  return separator < 0 ? normalized : normalized.substring(separator + 1);
 }

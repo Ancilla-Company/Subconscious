@@ -487,6 +487,63 @@ void main() {
     },
   );
 
+  test('a delete closes the tabs at or under the path and drops drafts', () async {
+    final g = FakeGateway();
+    final d = FakeDrafts();
+    g.put('w', 0, 'dir/a.md', 'a');
+    g.put('w', 0, 'dir/sub/b.md', 'b');
+    g.put('w', 0, 'dirty.md', 'x');
+    g.put('w', 0, 'keep.md', 'k');
+    final s = makeStore(g, d);
+    await s.switchWorkspace(
+      'w',
+      remembered: refs(<String>['dir/a.md', 'dir/sub/b.md', 'dirty.md', 'keep.md']),
+      activeKey: '0:dir/a.md',
+    );
+    final TextTab b = text(s, 'dir/sub/b.md');
+    s.edited(b, 'b!', const TextSelection.collapsed(offset: 2));
+    await settle();
+    expect(d.of('w').keys, <String>['0:dir/sub/b.md']);
+
+    // A file path does not match a sibling that only shares its prefix.
+    expect(s.tabsAtOrUnder(0, 'dir', isDirectory: false), isEmpty);
+    expect(
+      s.tabsAtOrUnder(0, 'dir', isDirectory: true).map((EditorTab t) => t.path),
+      <String>['dir/a.md', 'dir/sub/b.md'],
+    );
+    expect(s.tabsAtOrUnder(1, 'dir', isDirectory: true), isEmpty);
+
+    s.closeAtOrUnder(0, 'dir', isDirectory: true);
+    expect(s.tabs.map((EditorTab t) => t.path).toList(), <String>[
+      'dirty.md',
+      'keep.md',
+    ]);
+    expect(s.activeKey, isNot('0:dir/a.md'));
+    await settle();
+    expect(d.of('w'), isEmpty);
+
+    s.closeAtOrUnder(0, 'dirty.md', isDirectory: false);
+    expect(s.tabs.map((EditorTab t) => t.path).toList(), <String>['keep.md']);
+    s.dispose();
+  });
+
+  test('isWorkspacePathAtOrUnder matches the target and, for folders, its contents', () {
+    bool under(String path, String target, {bool dir = true, int root = 0}) =>
+        isWorkspacePathAtOrUnder(
+          rootIndex: root,
+          path: path,
+          targetRootIndex: 0,
+          targetPath: target,
+          targetIsDirectory: dir,
+        );
+    expect(under('dir', 'dir'), isTrue);
+    expect(under('dir/a.md', 'dir'), isTrue);
+    expect(under(r'dir\sub\b.md', 'dir'), isTrue);
+    expect(under('dir/a.md', 'dir', dir: false), isFalse);
+    expect(under('directory/a.md', 'dir'), isFalse);
+    expect(under('dir/a.md', 'dir', root: 1), isFalse);
+  });
+
   test('open during restore does not duplicate; latest open wins focus; offline restore is deferred', () async {
     final g = FakeGateway();
     final d = FakeDrafts();

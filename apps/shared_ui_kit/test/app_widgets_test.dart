@@ -249,21 +249,27 @@ void main() {
   });
 
   group('AppTreeRow', () {
-    testWidgets('is 30 high and indents by depth', (tester) async {
-      await _pump(
-        tester,
-        Column(
-          children: <Widget>[
-            AppTreeRow(label: 'root', onTap: () {}),
-            AppTreeRow(label: 'child', depth: 2, onTap: () {}),
-          ],
-        ),
-      );
-      expect(tester.getSize(find.byType(AppTreeRow).first).height, 30);
-      final double rootX = tester.getTopLeft(find.text('root')).dx;
-      final double childX = tester.getTopLeft(find.text('child')).dx;
-      expect(childX - rootX, 28);
-    });
+    testWidgets(
+      'is 30 high plus the standard bottom gap, and indents by depth',
+      (tester) async {
+        await _pump(
+          tester,
+          Column(
+            children: <Widget>[
+              AppTreeRow(label: 'root', onTap: () {}),
+              AppTreeRow(label: 'child', depth: 2, onTap: () {}),
+            ],
+          ),
+        );
+        expect(
+          tester.getSize(find.byType(AppTreeRow).first).height,
+          30 + AppSpacing.header,
+        );
+        final double rootX = tester.getTopLeft(find.text('root')).dx;
+        final double childX = tester.getTopLeft(find.text('child')).dx;
+        expect(childX - rootX, 28);
+      },
+    );
 
     testWidgets('selected and highlighted fill, inert without onTap', (
       tester,
@@ -287,7 +293,10 @@ void main() {
 
     testWidgets('minHeight raises the touch target', (tester) async {
       await _pump(tester, AppTreeRow(label: 'a', minHeight: 44, onTap: () {}));
-      expect(tester.getSize(find.byType(AppTreeRow)).height, 44);
+      expect(
+        tester.getSize(find.byType(AppTreeRow)).height,
+        44 + AppSpacing.header,
+      );
     });
   });
 
@@ -365,6 +374,27 @@ void main() {
       expect(
         button.style!.backgroundColor!.resolve(<WidgetState>{}),
         colors.secondaryContainer,
+      );
+    });
+
+    testWidgets('foregroundColor overrides the kit icon colour', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        AppIconButton(
+          icon: Icons.add,
+          tooltip: 'Add',
+          foregroundColor: Colors.purple,
+          onPressed: () {},
+        ),
+      );
+      final IconButton button = tester.widget<IconButton>(
+        find.byType(IconButton),
+      );
+      expect(
+        button.style!.foregroundColor!.resolve(<WidgetState>{}),
+        Colors.purple,
       );
     });
   });
@@ -610,6 +640,32 @@ void main() {
       expect(snack.backgroundColor, colors.errorContainer);
       expect(snack.behavior, SnackBarBehavior.floating);
       expect(snack.elevation, 0);
+      expect(snack.padding, AppSpacing.standard);
+      expect(snack.margin, const EdgeInsets.all(4));
+      expect(snack.showCloseIcon, isNull);
+      expect(find.byType(AppIconButton), findsOneWidget);
+      expect(find.byTooltip('Close notification'), findsOneWidget);
+      expect(tester.getSize(find.byType(AppIconButton)), const Size(24, 24));
+      expect(tester.getSize(find.byType(IconButton)), const Size(24, 24));
+      // The close button sits 4 dp in from the toast's top and right edges,
+      // and the message stops before it.
+      final Rect toast = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(SnackBar),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      final Rect close = tester.getRect(find.byType(AppIconButton));
+      expect(close.top - toast.top, closeTo(4, 0.01));
+      expect(toast.right - close.right, closeTo(4, 0.01));
+      final Rect text = tester.getRect(find.text('second'));
+      expect(text.right, lessThanOrEqualTo(close.left));
+      // A one-line message is centred: equal space above and below it, and
+      // level with the close button.
+      expect(text.top - toast.top, closeTo(toast.bottom - text.bottom, 0.01));
+      expect(text.center.dy, closeTo(close.center.dy, 0.01));
     });
   });
 

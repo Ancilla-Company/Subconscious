@@ -40,6 +40,13 @@ class WriteWorkspaceFileRequest(WireModel):
     expected_version: str | None = None
 
 
+class CopyWorkspaceFileRequest(WireModel):
+    source_root_index: int
+    source_path: str
+    destination_root_index: int
+    destination_path: str
+
+
 class MoveWorkspaceFileRequest(WireModel):
     source_root_index: int
     source_path: str
